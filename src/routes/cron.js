@@ -32,6 +32,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         ce.salesperson_id,
         ce.current_step,
         ce.enrolled_at,
+        ce.client_id,
         l.email            AS lead_email,
         l.first_name,
         l.last_name,
@@ -39,10 +40,12 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         l.product_interest,
         l.audience_type,
         s.name             AS salesperson_name,
-        s.email            AS salesperson_email
+        s.email            AS salesperson_email,
+        c.brand_config
       FROM contact_enrollments ce
       JOIN leads l       ON l.id  = ce.lead_id
       JOIN salespeople s ON s.id  = ce.salesperson_id
+      LEFT JOIN clients c ON c.id = ce.client_id
       WHERE ce.status = 'active'
         AND ce.next_send_at <= $1
       ORDER BY ce.next_send_at
@@ -114,6 +117,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         salesperson_email: row.salesperson_email,
       };
 
+      const brandConfig = row.brand_config || {};
       const result = await sendSequenceEmail({
         salespersonId: row.salesperson_id,
         to:            row.lead_email,
@@ -123,7 +127,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         enrollmentId:  row.enrollment_id,
         stepId:        step.id,
         leadId:        row.lead_id,
-      });
+      }, brandConfig);
 
       if (result.ok) {
         // Check if this was the last step
