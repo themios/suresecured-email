@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 
 ## Current Position
 
-Phase: 3 of 5 (Email Deliverability) — Complete
-Plan: 4/4 complete
-Status: Phase complete — ready for Phase 5 (Phase 4 blocked on Twilio)
-Last activity: 2026-06-30 — Completed 03-04-PLAN.md — per-sequence deliverability report API + UI
+Phase: 5 of 5 (AI Intelligence)
+Plan: 1/2 complete (05-01 done — AI digest engine)
+Status: In progress — ready for 05-02 (engagement scoring)
+Last activity: 2026-06-30 — Completed 05-01-PLAN.md — AI digest engine (OpenRouter + /cron/daily-digest)
 
-Progress: [████████████████░░░░] 75% (phases 1–2 + all of phase 3)
+Progress: [█████████████████░░░] 85% (phases 1–3 complete + 05-01 done)
 
 ## Performance Metrics
 
@@ -30,6 +30,7 @@ Progress: [████████████████░░░░] 75% (ph
 | 01-foundation | 5/5 | 47 min | 9 min |
 | 02-commission-engine | 4/4 | ~20 min | ~5 min |
 | 03-email-deliverability | 4/4 | ~32 min | ~8 min |
+| 05-ai-intelligence | 1/2 | ~12 min | ~12 min |
 
 **Recent Trend:**
 - Last 5 plans: 01-05 (8 min), 02-01 (12 min), 02-04 (8 min)
@@ -90,6 +91,12 @@ Recent decisions affecting current work:
 - 03-04: NULLIF(COUNT(es.id), 0) in SQL rather than COALESCE in JS — null semantics clean; JS handles null->0.0% display
 - 03-04: COUNT FILTER pattern over correlated subqueries — single-pass aggregation per sequence
 - 03-04: Bounce rate >5% threshold for red highlight — pragmatic industry benchmark; no config needed
+- 05-01: Native https for OpenRouter — no axios/node-fetch, zero new dependencies, consistent with codebase style
+- 05-01: Digest sent FROM and TO operator's own connected Gmail — no OPENROUTER_DIGEST_EMAIL env var needed
+- 05-01: Migration 003 (email deliverability) was missing from initDb(); wired in 05-01 alongside 005
+- 05-01: reply_rate_pct null-defaulted to '0.0' in JS before AI prompt to avoid "null%" in LLM input
+- 05-01: Idempotency via INSERT ... ON CONFLICT DO NOTHING RETURNING id — empty rows = already sent, no extra SELECT
+- 05-01: OpenRouter 30s timeout; on timeout req.destroy() + reject; route falls back to plain-text summary
 
 ### Pending Todos
 
@@ -105,5 +112,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-06-30
-Stopped at: Phase 3 complete — 13/13 must-haves verified. Planning files updated. Ready for Phase 5 (AI Intelligence).
+Stopped at: Completed 05-01-PLAN.md — AI digest engine (OpenRouter + /cron/daily-digest + migration 005)
 Resume file: None
