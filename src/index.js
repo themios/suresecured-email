@@ -10,6 +10,7 @@ const authRouter = require('./routes/auth');
 const dashboardRouter = require('./routes/dashboard');
 const phonecallRouter = require('./routes/phonecall');
 const { router: analyticsRouter } = require('./routes/analytics');
+const adminRouter = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -39,6 +40,9 @@ app.use('/api/phone-call', phonecallRouter);
 
 // Analytics
 app.use('/analytics', analyticsRouter);
+
+// Admin
+app.use('/admin', adminRouter);
 
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

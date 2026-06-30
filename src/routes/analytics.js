@@ -22,6 +22,7 @@ function navHtml(activePage) {
         <div class="flex gap-1">
           ${tab('Overview', '/dashboard', 'dashboard')}
           ${tab('Analytics', '/analytics', 'analytics')}
+          ${tab('Admin', '/admin', 'admin')}
         </div>
       </div>
       <a href="/logout" class="text-sm text-gray-500 hover:text-red-600 transition">Sign out</a>
