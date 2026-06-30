@@ -1,4 +1,6 @@
 const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -6,6 +8,14 @@ const pool = new Pool({
 });
 
 async function initDb() {
+  // Run tenancy migration first (idempotent)
+  const migrationSql = fs.readFileSync(
+    path.join(__dirname, '../migrations/001_add_tenancy.sql'),
+    'utf8'
+  );
+  await pool.query(migrationSql);
+
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,
