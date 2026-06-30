@@ -21,8 +21,8 @@
 
 ### Email Deliverability
 
-- [ ] **EMAI-01**: Every email sent records an open tracking pixel and rewrites body links as tracked redirects, storing open_count and click_count per send record
-- [ ] **EMAI-02**: When a Gmail send returns a permanent bounce, the contact is auto-added to the suppression list and enrollment is paused
+- [x] **EMAI-01**: Every email sent records an open tracking pixel and rewrites body links as tracked redirects, storing open_count and click_count per send record
+- [x] **EMAI-02**: When a Gmail send returns a permanent bounce, the contact is auto-added to the suppression list and enrollment is paused
 - [ ] **EMAI-03**: Enrollment cron uses FOR UPDATE SKIP LOCKED batching and partial indexes so queries stay sub-second at 500k+ active contacts
 
 ### Voice
@@ -76,8 +76,8 @@
 | COMM-02 | Phase 2 | Complete ✓ |
 | COMM-03 | Phase 2 | Complete ✓ |
 | COMM-04 | Phase 2 | Complete ✓ |
-| EMAI-01 | Phase 3 | Pending |
-| EMAI-02 | Phase 3 | Pending |
+| EMAI-01 | Phase 3 | Complete ✓ |
+| EMAI-02 | Phase 3 | Complete ✓ |
 | EMAI-03 | Phase 1 | Complete ✓ |
 | VOIC-01 | Phase 4 | Pending |
 | AIML-01 | Phase 5 | Pending |
@@ -90,4 +90,4 @@
 
 ---
 *Requirements defined: 2026-06-30*
-*Last updated: 2026-06-30 — roadmap finalized, all 14 v1 requirements mapped to phases 1-5*
+*Last updated: 2026-06-30 — Phase 3 complete, EMAI-01 and EMAI-02 marked Complete ✓*

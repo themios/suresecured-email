@@ -12,7 +12,7 @@ SalesPilot AI evolves an existing single-tenant CommissionTracker into a multi-t
 
 - [x] **Phase 1: Foundation** - Multi-tenancy DB, user auth, client config, dynamic branding, scale-ready cron ✓ 2026-06-30
 - [x] **Phase 2: Commission Engine** - Tiered commission calculation, salesperson + agency dashboards, Shopify webhook ✓ 2026-06-30
-- [ ] **Phase 3: Email Deliverability** - Open/click tracking pixels, bounce suppression
+- [x] **Phase 3: Email Deliverability** - Open/click tracking pixels, bounce suppression ✓ 2026-06-30
 - [ ] **Phase 4: Voice** - Retell AI via single Twilio number with client extensions (deferrable until Twilio number acquired)
 - [ ] **Phase 5: AI Intelligence** - Daily digest emails, lead engagement scoring
 
@@ -65,10 +65,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Schema migration (003) + open pixel route + buildHtml pixelUrl injection
-- [ ] 03-02-PLAN.md — Link rewriting (rewriteLinks helper, /e/:token route, INSERT-before-send refactor)
-- [ ] 03-03-PLAN.md — Bounce suppression (isPermanentBounce, catch block, cron auto-suppress + pause)
-- [ ] 03-04-PLAN.md — Deliverability report (per-sequence open/click/bounce rates, sequences page table)
+- [x] 03-01-PLAN.md — Schema migration (003) + open pixel route + buildHtml pixelUrl injection ✓
+- [x] 03-02-PLAN.md — Link rewriting (rewriteLinks helper, /e/:token route, INSERT-before-send refactor) ✓
+- [x] 03-03-PLAN.md — Bounce suppression (isPermanentBounce, catch block, cron auto-suppress + pause) ✓
+- [x] 03-04-PLAN.md — Deliverability report (per-sequence open/click/bounce rates, sequences page table) ✓
 
 ### Phase 4: Voice
 **Goal**: Inbound calls to a single Twilio number route to the correct client's Retell AI agent and post-call lead data lands in the platform automatically
@@ -108,6 +108,6 @@ Phase 4 (Voice) can be deferred without blocking Phase 5.
 |-------|----------------|--------|-----------|
 | 1. Foundation | 5/5 | ✓ Complete | 2026-06-30 |
 | 2. Commission Engine | 4/4 | ✓ Complete | 2026-06-30 |
-| 3. Email Deliverability | 0/4 | Not started | - |
+| 3. Email Deliverability | 4/4 | ✓ Complete | 2026-06-30 |
 | 4. Voice | 0/2 | Not started | - |
 | 5. AI Intelligence | 0/2 | Not started | - |
