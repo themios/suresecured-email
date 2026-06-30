@@ -4,6 +4,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../db');
 
+// ─── Login page ────────────────────────────────────────────────────────────
+
 router.get('/login', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html>
@@ -19,7 +21,7 @@ router.get('/login', (req, res) => {
       <p class="text-gray-500 text-sm mt-1">Commission Tracker</p>
     </div>
     ${req.query.error ? `<div class="bg-red-50 text-red-600 text-sm rounded p-3 mb-4">Invalid email or password.</div>` : ''}
-    <form method="POST" action="/login" class="space-y-4">
+    <form method="POST" action="/auth/login" class="space-y-4">
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
         <input type="email" name="email" required
@@ -40,43 +42,93 @@ router.get('/login', (req, res) => {
 </html>`);
 });
 
-router.post('/login', express.urlencoded({ extended: false }), async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const result = await pool.query(
-      'SELECT * FROM admin_users WHERE email = $1',
-      [email]
-    );
+// ─── Unified login — form-encoded or JSON ─────────────────────────────────
 
-    if (result.rows.length === 0) {
+router.post(
+  '/auth/login',
+  express.urlencoded({ extended: false }),
+  express.json(),
+  async (req, res) => {
+    const { email, password } = req.body;
+    const isJson = req.headers['content-type']?.includes('application/json');
+
+    if (!email || !password) {
+      if (isJson) return res.status(400).json({ error: 'Email and password required' });
       return res.redirect('/login?error=1');
     }
 
-    const user = result.rows[0];
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.redirect('/login?error=1');
+    try {
+      const result = await pool.query(
+        `SELECT id, email, password_hash, role, client_id, organization_id
+         FROM users
+         WHERE email = $1 AND active = TRUE`,
+        [email]
+      );
 
-    const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, {
-      expiresIn: '7d',
-    });
+      if (result.rows.length === 0) {
+        if (isJson) return res.status(401).json({ error: 'Invalid credentials' });
+        return res.redirect('/login?error=1');
+      }
 
-    res.cookie('auth_token', token, {
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-    });
+      const user = result.rows[0];
+      const valid = await bcrypt.compare(password, user.password_hash);
+      if (!valid) {
+        if (isJson) return res.status(401).json({ error: 'Invalid credentials' });
+        return res.redirect('/login?error=1');
+      }
 
-    res.redirect('/dashboard');
-  } catch (err) {
-    console.error('Login error:', err);
-    res.redirect('/login?error=1');
+      const token = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          client_id: user.client_id,
+          organization_id: user.organization_id,
+        },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+
+      res.cookie('auth_token', token, {
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+      });
+
+      if (isJson) return res.status(200).json({ role: user.role });
+      return res.redirect('/dashboard');
+    } catch (err) {
+      console.error('Login error:', err);
+      if (isJson) return res.status(500).json({ error: 'Internal server error' });
+      return res.redirect('/login?error=1');
+    }
   }
+);
+
+// ─── Logout ────────────────────────────────────────────────────────────────
+
+router.get('/auth/logout', (req, res) => {
+  res.clearCookie('auth_token');
+  res.redirect('/login');
 });
 
+// Keep legacy /logout route for backward compatibility
 router.get('/logout', (req, res) => {
   res.clearCookie('auth_token');
   res.redirect('/login');
 });
+
+// ─── Operator seed (dev only) ──────────────────────────────────────────────
+
+if (process.env.SEED_OPERATOR === '1') {
+  const { pool: seedPool } = require('../db');
+  bcrypt.hash('operator123', 10).then(hash => {
+    seedPool.query(
+      `INSERT INTO users (email, password_hash, role) VALUES ($1, $2, 'operator') ON CONFLICT (email) DO NOTHING`,
+      ['operator@suresecured.com', hash]
+    ).catch(() => {});
+  });
+}
 
 module.exports = router;

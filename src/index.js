@@ -3,6 +3,8 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const { initDb } = require('./db');
 
+const { requireAuth, requireRole } = require('./middleware/auth');
+
 const redirectRouter = require('./routes/redirect');
 const webhookRouter = require('./routes/webhook');
 const apiRouter = require('./routes/api');
