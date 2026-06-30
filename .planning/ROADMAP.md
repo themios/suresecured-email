@@ -62,12 +62,13 @@ Plans:
   1. After an email is sent, the send record shows open_count incrementing when the recipient opens the email and click_count incrementing when they click any body link
   2. When a Gmail send returns a permanent failure code, the contact address appears in the suppression list and that contact's enrollment is paused — no manual action required
   3. Operator can view a per-sequence report showing open rate, click rate, and bounce rate across all sends
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 03-01: Open tracking pixel — inject 1x1 pixel per send, /pixel/:token route, increment open_count
-- [ ] 03-02: Link rewriting — rewrite body links as tracked redirects at send time, increment click_count on redirect
-- [ ] 03-03: Bounce suppression — catch Gmail permanent failure on send, auto-add to suppression_list, pause enrollment
+- [ ] 03-01-PLAN.md — Schema migration (003) + open pixel route + buildHtml pixelUrl injection
+- [ ] 03-02-PLAN.md — Link rewriting (rewriteLinks helper, /e/:token route, INSERT-before-send refactor)
+- [ ] 03-03-PLAN.md — Bounce suppression (isPermanentBounce, catch block, cron auto-suppress + pause)
+- [ ] 03-04-PLAN.md — Deliverability report (per-sequence open/click/bounce rates, sequences page table)
 
 ### Phase 4: Voice
 **Goal**: Inbound calls to a single Twilio number route to the correct client's Retell AI agent and post-call lead data lands in the platform automatically
@@ -107,6 +108,6 @@ Phase 4 (Voice) can be deferred without blocking Phase 5.
 |-------|----------------|--------|-----------|
 | 1. Foundation | 5/5 | ✓ Complete | 2026-06-30 |
 | 2. Commission Engine | 4/4 | ✓ Complete | 2026-06-30 |
-| 3. Email Deliverability | 0/3 | Not started | - |
+| 3. Email Deliverability | 0/4 | Not started | - |
 | 4. Voice | 0/2 | Not started | - |
 | 5. AI Intelligence | 0/2 | Not started | - |
