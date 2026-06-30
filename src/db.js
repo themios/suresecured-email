@@ -18,6 +18,12 @@ async function initDb() {
   );
   await pool.query(migrationSql);
 
+  // Run commission engine migration (idempotent)
+  const migration002Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/002_commission_engine.sql'),
+    'utf8'
+  );
+  await pool.query(migration002Sql);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
