@@ -22,9 +22,14 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
   const now = new Date().toISOString();
   let sent = 0, skipped = 0, errors = 0;
 
+  const client = await pool.connect();
+  let rows = [];
   try {
-    // Find active enrollments that are due
-    const { rows: due } = await pool.query(`
+    await client.query('BEGIN');
+
+    // Find active enrollments that are due — FOR UPDATE OF ce SKIP LOCKED prevents
+    // concurrent cron runs from double-processing the same enrollment rows
+    const result = await client.query(`
       SELECT
         ce.id              AS enrollment_id,
         ce.lead_id,
@@ -50,13 +55,16 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         AND ce.next_send_at <= $1
       ORDER BY ce.next_send_at
       LIMIT 100
+      FOR UPDATE OF ce SKIP LOCKED
     `, [now]);
 
-    for (const row of due) {
+    rows = result.rows;
+
+    for (const row of rows) {
       const nextStepNum = row.current_step + 1;
 
       // Get next step in the sequence
-      const { rows: steps } = await pool.query(
+      const { rows: steps } = await client.query(
         `SELECT * FROM sequence_steps
          WHERE sequence_id = $1 AND step_number = $2`,
         [row.sequence_id, nextStepNum]
@@ -64,7 +72,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
 
       if (!steps[0]) {
         // No more steps — enrollment complete
-        await pool.query(
+        await client.query(
           `UPDATE contact_enrollments SET status = 'completed', completed_at = $1 WHERE id = $2`,
           [now, row.enrollment_id]
         );
@@ -75,7 +83,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
       const step = steps[0];
 
       // Check for replies on any prior sends in this enrollment
-      const { rows: priorSends } = await pool.query(
+      const { rows: priorSends } = await client.query(
         `SELECT gmail_thread_id FROM email_sends
          WHERE enrollment_id = $1 AND gmail_thread_id IS NOT NULL
          LIMIT 1`,
@@ -85,7 +93,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
       if (priorSends[0]?.gmail_thread_id) {
         const replied = await checkForReplies(row.salesperson_id, priorSends[0].gmail_thread_id);
         if (replied) {
-          await pool.query(
+          await client.query(
             `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'replied' WHERE id = $1`,
             [row.enrollment_id]
           );
@@ -95,12 +103,12 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
       }
 
       // Check suppression list
-      const { rows: suppressed } = await pool.query(
+      const { rows: suppressed } = await client.query(
         'SELECT 1 FROM suppression_list WHERE LOWER(email) = LOWER($1)',
         [row.lead_email]
       );
       if (suppressed.length) {
-        await pool.query(
+        await client.query(
           `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'suppressed' WHERE id = $1`,
           [row.enrollment_id]
         );
@@ -118,7 +126,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
       };
 
       const brandConfig = row.brand_config || {};
-      const result = await sendSequenceEmail({
+      const sendResult = await sendSequenceEmail({
         salespersonId: row.salesperson_id,
         to:            row.lead_email,
         subject:       step.subject,
@@ -129,16 +137,16 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         leadId:        row.lead_id,
       }, brandConfig);
 
-      if (result.ok) {
+      if (sendResult.ok) {
         // Check if this was the last step
-        const { rows: nextSteps } = await pool.query(
+        const { rows: nextSteps } = await client.query(
           `SELECT id FROM sequence_steps WHERE sequence_id = $1 AND step_number > $2 LIMIT 1`,
           [row.sequence_id, nextStepNum]
         );
 
         if (nextSteps.length === 0) {
           // Last step sent — mark complete
-          await pool.query(
+          await client.query(
             `UPDATE contact_enrollments
              SET current_step = $1, status = 'completed', completed_at = $2
              WHERE id = $3`,
@@ -146,14 +154,14 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
           );
         } else {
           // Get next step delay
-          const { rows: futureStep } = await pool.query(
+          const { rows: futureStep } = await client.query(
             `SELECT delay_days FROM sequence_steps WHERE sequence_id = $1 AND step_number = $2`,
             [row.sequence_id, nextStepNum + 1]
           );
           const delayDays = futureStep[0]?.delay_days ?? 1;
           const nextSendAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
 
-          await pool.query(
+          await client.query(
             `UPDATE contact_enrollments
              SET current_step = $1, next_send_at = $2
              WHERE id = $3`,
@@ -162,7 +170,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         }
 
         // Log click/lead attribution
-        await pool.query(
+        await client.query(
           `UPDATE leads SET salesperson_id = $1 WHERE id = $2 AND salesperson_id IS NULL`,
           [row.salesperson_id, row.lead_id]
         );
@@ -170,12 +178,17 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         sent++;
       } else {
         errors++;
-        console.error(`[cron] send failed for enrollment ${row.enrollment_id}:`, result.error);
+        console.error(`[cron] send failed for enrollment ${row.enrollment_id}:`, sendResult.error);
       }
     }
+
+    await client.query('COMMIT');
   } catch (err) {
+    await client.query('ROLLBACK');
     console.error('[cron] unexpected error:', err);
     return res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 
   res.json({ ok: true, sent, skipped, errors, timestamp: now });
