@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 5 of 5 (AI Intelligence)
-Plan: 1/2 complete (05-01 done — AI digest engine)
-Status: In progress — ready for 05-02 (engagement scoring)
-Last activity: 2026-06-30 — Completed 05-01-PLAN.md — AI digest engine (OpenRouter + /cron/daily-digest)
+Plan: 2/2 complete (05-02 done — lead engagement scoring)
+Status: COMPLETE — all phases done
+Last activity: 2026-06-30 — Completed 05-02-PLAN.md — engagement scoring (computeScore + /cron/score-leads + portal badge)
 
-Progress: [█████████████████░░░] 85% (phases 1–3 complete + 05-01 done)
+Progress: [████████████████████] 100% (all phases complete)
 
 ## Performance Metrics
 
@@ -97,6 +97,10 @@ Recent decisions affecting current work:
 - 05-01: reply_rate_pct null-defaulted to '0.0' in JS before AI prompt to avoid "null%" in LLM input
 - 05-01: Idempotency via INSERT ... ON CONFLICT DO NOTHING RETURNING id — empty rows = already sent, no extra SELECT
 - 05-01: OpenRouter 30s timeout; on timeout req.destroy() + reject; route falls back to plain-text summary
+- 05-02: computeScore() is a pure function in src/lib/ with no DB dependency — fully unit-testable
+- 05-02: Portal top-5 leads query scopes via contact_enrollments.salesperson_id (not leads.salesperson_id which doesn't exist)
+- 05-02: score-leads UPDATE is idempotent — always sets current computed value, safe to run repeatedly
+- 05-02: engagement_score and scored_at columns already in migration 005 from 05-01 — no new migration needed
 
 ### Pending Todos
 
@@ -112,5 +116,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-06-30
-Stopped at: Completed 05-01-PLAN.md — AI digest engine (OpenRouter + /cron/daily-digest + migration 005)
-Resume file: None
+Stopped at: Completed 05-02-PLAN.md — lead engagement scoring (computeScore + /cron/score-leads + portal badge)
+Resume file: None — project complete
