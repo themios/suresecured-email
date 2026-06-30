@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const crypto = require('crypto');
 const { pool } = require('../db');
+const { calculateCommission } = require('../lib/commissions');
 
 // Verify the request actually came from Shopify
 function verifyShopifyWebhook(req) {
@@ -35,6 +36,23 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
     const customerEmail = order.email;
     const orderAmount = parseFloat(order.total_price);
     const shopifyOrderId = String(order.id);
+
+    // Resolve client from Shopify shop domain header
+    const shopDomain = req.headers['x-shopify-shop-domain'] || null;
+    let clientId = null;
+    if (shopDomain) {
+      const clientResult = await pool.query(
+        `SELECT id FROM clients WHERE integration_settings->>'shopify_domain' = $1 LIMIT 1`,
+        [shopDomain]
+      );
+      if (clientResult.rows.length > 0) {
+        clientId = clientResult.rows[0].id;
+      } else {
+        console.warn(`Webhook: no client matched shop domain "${shopDomain}" — order will be recorded without client_id, commission skipped.`);
+      }
+    } else {
+      console.warn('Webhook: no x-shopify-shop-domain header present — order will be recorded without client_id, commission skipped.');
+    }
 
     // Look for attribution token in order note attributes
     const attrs = order.note_attributes || [];
@@ -76,32 +94,59 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
       }
     }
 
-    // Record the order
+    // Record the order (with client_id for dashboard scoping)
     const orderResult = await pool.query(
-      `INSERT INTO orders (shopify_order_id, token, lead_id, salesperson_id, customer_email, amount, order_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO orders (shopify_order_id, token, lead_id, salesperson_id, customer_email, amount, order_data, client_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (shopify_order_id) DO NOTHING
        RETURNING id`,
-      [shopifyOrderId, token, leadId, resolvedSalespersonId, customerEmail, orderAmount, order]
+      [shopifyOrderId, token, leadId, resolvedSalespersonId, customerEmail, orderAmount, order, clientId]
     );
 
-    // Record commission if we have a salesperson
-    if (orderResult.rows.length > 0 && resolvedSalespersonId) {
+    // Calculate and record tiered commission if we have both salesperson and client
+    if (orderResult.rows.length > 0 && resolvedSalespersonId && clientId) {
       const orderId = orderResult.rows[0].id;
 
-      const spResult = await pool.query(
-        'SELECT commission_rate FROM salespeople WHERE id = $1',
-        [resolvedSalespersonId]
-      );
+      const [spResult, unitsResult] = await Promise.all([
+        pool.query(
+          `SELECT s.commission_rate, c.commission_rules
+           FROM salespeople s JOIN clients c ON c.id = s.client_id
+           WHERE s.id = $1`,
+          [resolvedSalespersonId]
+        ),
+        pool.query(
+          `SELECT COUNT(*) AS units
+           FROM orders
+           WHERE salesperson_id = $1 AND client_id = $2
+             AND DATE_TRUNC('month', ordered_at) = DATE_TRUNC('month', NOW())
+             AND id != $3`,
+          [resolvedSalespersonId, clientId, orderId]
+        )
+      ]);
 
-      const rate = spResult.rows[0]?.commission_rate || 100;
-      const earned = (orderAmount * rate) / 100;
+      const rules = spResult.rows[0]?.commission_rules || {};
+      const flatRate = spResult.rows[0]?.commission_rate || 100;
+      const unitsBefore = parseInt(unitsResult.rows[0]?.units || 0);
+
+      const { rate, earned, bonusesTriggered } = calculateCommission(orderAmount, unitsBefore, rules, flatRate);
 
       await pool.query(
-        `INSERT INTO commissions (salesperson_id, source_type, source_id, sale_amount, commission_rate, commission_earned)
-         VALUES ($1, 'shopify_order', $2, $3, $4, $5)`,
-        [resolvedSalespersonId, orderId, orderAmount, rate, earned]
+        `INSERT INTO commissions
+           (salesperson_id, client_id, source_type, source_id, sale_amount, commission_rate, commission_earned)
+         VALUES ($1, $2, 'shopify_order', $3, $4, $5, $6)`,
+        [resolvedSalespersonId, clientId, orderId, orderAmount, rate, earned]
       );
+
+      for (const bonus of bonusesTriggered) {
+        await pool.query(
+          `INSERT INTO commissions
+             (salesperson_id, client_id, source_type, source_id, sale_amount, commission_rate, commission_earned)
+           VALUES ($1, $2, 'bonus', $3, 0, 0, $4)`,
+          [resolvedSalespersonId, clientId, orderId, bonus.amount]
+        );
+      }
+    } else if (orderResult.rows.length > 0 && resolvedSalespersonId && !clientId) {
+      console.warn(`Webhook: order ${orderResult.rows[0].id} recorded but commission skipped — no client_id resolved.`);
     }
 
     res.status(200).send('OK');
