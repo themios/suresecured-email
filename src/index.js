@@ -9,6 +9,7 @@ const apiRouter = require('./routes/api');
 const authRouter = require('./routes/auth');
 const dashboardRouter = require('./routes/dashboard');
 const phonecallRouter = require('./routes/phonecall');
+const { router: analyticsRouter } = require('./routes/analytics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,6 +36,9 @@ app.use('/api', apiRouter);
 
 // CallRail phone call webhook
 app.use('/api/phone-call', phonecallRouter);
+
+// Analytics
+app.use('/analytics', analyticsRouter);
 
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

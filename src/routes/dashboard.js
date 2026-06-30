@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { navHtml } = require('./analytics');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -109,13 +110,7 @@ router.get('/', requireAuth, async (req, res) => {
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 min-h-screen">
-  <nav class="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm">
-    <div>
-      <span class="font-bold text-gray-800 text-lg">SureSecured</span>
-      <span class="text-gray-400 text-sm ml-2">Commission Tracker</span>
-    </div>
-    <a href="/logout" class="text-sm text-gray-500 hover:text-red-600 transition">Sign out</a>
-  </nav>
+  ${navHtml('dashboard')}
 
   <div class="max-w-7xl mx-auto px-6 py-8">
 
