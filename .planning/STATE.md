@@ -64,6 +64,9 @@ Recent decisions affecting current work:
 - 02-01: No test framework introduced — plain node:assert script keeps zero-devDependencies style
 - 02-01: tier.to is exclusive upper bound — thisUnit <= t.to means boundary unit stays in current tier
 - 02-01: Bonus filter unitsBefore < b.units && thisUnit >= b.units — triggers exactly once at crossing sale
+- 02-03: requireRole imported alongside requireAuth — co-located imports, consistent with middleware/auth.js exports
+- 02-03: calculateCommission(0, units, rules, 100) with passAmount=0 in drilldown — gets rate only, avoids double-counting stored commission amounts
+- 02-03: Cross-org guard uses !== strict comparison on organization_id — pg driver and JWT both produce number type; safe and explicit
 - 02-04: clientId null path records order but skips commission — avoids Shopify retry storm on unknown shop domain
 - 02-04: spResult joins on salesperson's own client_id (not webhook-resolved) to fetch commission_rules — multi-client edge case deferred v2
 - 02-04: unitsBefore query excludes current orderId to get correct pre-sale unit count for tier lookup
@@ -81,6 +84,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T20:43:00Z
-Stopped at: Completed 02-04-PLAN.md — Shopify webhook tiered commission engine with client_id resolution
+Last session: 2026-06-30T20:48:00Z
+Stopped at: Completed 02-03-PLAN.md — agency dashboard and per-client drilldown routes (backfilled after 02-04)
 Resume file: None
