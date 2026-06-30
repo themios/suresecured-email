@@ -14,7 +14,8 @@ const adminRouter     = require('./routes/admin');
 const portalRouter    = require('./routes/portal');
 const sequencesRouter = require('./routes/sequences');
 const gmailOAuthRouter = require('./routes/gmail-oauth');
-const cronRouter      = require('./routes/cron');
+const cronRouter        = require('./routes/cron');
+const unsubscribeRouter = require('./routes/unsubscribe');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -59,6 +60,9 @@ app.use('/gmail', gmailOAuthRouter);
 
 // Cron — send due emails
 app.use('/cron', cronRouter);
+
+// Unsubscribe (no auth — must be publicly accessible)
+app.use('/unsubscribe', unsubscribeRouter);
 
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
