@@ -5,14 +5,15 @@ const { requireAuth } = require('../middleware/auth');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const [spStats, recentOrders, recentForms, totalStats] = await Promise.all([
+    const [spStats, recentOrders, recentForms, recentCalls, totalStats] = await Promise.all([
       pool.query(`
         SELECT
-          s.id, s.name, s.email, s.commission_rate,
+          s.id, s.name, s.email, s.commission_rate, s.tracking_phone_number,
           COUNT(DISTINCT l.id) AS total_leads,
           COUNT(DISTINCT c.id) AS total_clicks,
           COUNT(DISTINCT fs.id) AS form_submissions,
           COUNT(DISTINCT o.id) AS orders,
+          COUNT(DISTINCT pc.id) AS phone_calls,
           COALESCE(SUM(DISTINCT o.amount), 0) AS total_revenue,
           COALESCE(SUM(cm.commission_earned), 0) AS total_commission
         FROM salespeople s
@@ -20,6 +21,7 @@ router.get('/', requireAuth, async (req, res) => {
         LEFT JOIN clicks c ON c.salesperson_id = s.id
         LEFT JOIN form_submissions fs ON fs.salesperson_id = s.id
         LEFT JOIN orders o ON o.salesperson_id = s.id
+        LEFT JOIN phone_calls pc ON pc.salesperson_id = s.id
         LEFT JOIN commissions cm ON cm.salesperson_id = s.id
         WHERE s.active = true
         GROUP BY s.id ORDER BY total_revenue DESC
@@ -35,18 +37,20 @@ router.get('/', requireAuth, async (req, res) => {
         ORDER BY fs.submitted_at DESC LIMIT 15
       `),
       pool.query(`
+        SELECT pc.caller_number, pc.tracking_number, pc.duration_seconds, pc.called_at, s.name AS salesperson
+        FROM phone_calls pc LEFT JOIN salespeople s ON s.id = pc.salesperson_id
+        ORDER BY pc.called_at DESC LIMIT 15
+      `),
+      pool.query(`
         SELECT
-          COUNT(DISTINCT l.id) AS total_leads,
-          COUNT(DISTINCT c.id) AS total_clicks,
-          COUNT(DISTINCT fs.id) AS total_forms,
-          COUNT(DISTINCT o.id) AS total_orders,
-          COALESCE(SUM(o.amount), 0) AS total_revenue,
-          COALESCE(SUM(cm.commission_earned), 0) AS total_commission
-        FROM leads l
-        FULL OUTER JOIN clicks c ON true
-        FULL OUTER JOIN form_submissions fs ON true
-        FULL OUTER JOIN orders o ON true
-        FULL OUTER JOIN commissions cm ON true
+          (SELECT COUNT(*) FROM leads) AS total_leads,
+          (SELECT COUNT(*) FROM clicks) AS total_clicks,
+          (SELECT COUNT(*) FROM form_submissions) AS total_forms,
+          (SELECT COUNT(*) FROM orders) AS total_orders,
+          (SELECT COUNT(*) FROM phone_calls) AS total_calls,
+          (SELECT COUNT(*) FROM suppression_list) AS total_suppressed,
+          (SELECT COALESCE(SUM(amount),0) FROM orders) AS total_revenue,
+          (SELECT COALESCE(SUM(commission_earned),0) FROM commissions) AS total_commission
       `),
     ]);
 
@@ -61,10 +65,12 @@ router.get('/', requireAuth, async (req, res) => {
         <td class="px-4 py-3">
           <div class="font-medium text-gray-900">${sp.name}</div>
           <div class="text-xs text-gray-400">${sp.email}</div>
+          ${sp.tracking_phone_number ? `<div class="text-xs text-purple-500 mt-0.5">📞 ${sp.tracking_phone_number}</div>` : '<div class="text-xs text-red-300 mt-0.5">No tracking number</div>'}
         </td>
         <td class="px-4 py-3 text-center text-sm">${sp.total_leads}</td>
         <td class="px-4 py-3 text-center text-sm">${sp.total_clicks}</td>
         <td class="px-4 py-3 text-center text-sm">${sp.form_submissions}</td>
+        <td class="px-4 py-3 text-center text-sm">${sp.phone_calls}</td>
         <td class="px-4 py-3 text-center text-sm">${sp.orders}</td>
         <td class="px-4 py-3 text-right font-semibold text-green-700">${formatCurrency(sp.total_revenue)}</td>
         <td class="px-4 py-3 text-right font-bold text-blue-700">${formatCurrency(sp.total_commission)}</td>
@@ -114,7 +120,7 @@ router.get('/', requireAuth, async (req, res) => {
   <div class="max-w-7xl mx-auto px-6 py-8">
 
     <!-- Summary Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
       <div class="bg-white rounded-xl shadow-sm p-5">
         <p class="text-xs text-gray-500 uppercase tracking-wide">Total Leads</p>
         <p class="text-3xl font-bold text-gray-800 mt-1">${parseInt(totals.total_leads || 0).toLocaleString()}</p>
@@ -132,6 +138,25 @@ router.get('/', requireAuth, async (req, res) => {
         <p class="text-3xl font-bold text-blue-700 mt-1">${formatCurrency(totals.total_commission)}</p>
       </div>
     </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div class="bg-white rounded-xl shadow-sm p-5">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Phone Calls</p>
+        <p class="text-3xl font-bold text-purple-700 mt-1">${parseInt(totals.total_calls || 0).toLocaleString()}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm p-5">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Form Submissions</p>
+        <p class="text-3xl font-bold text-gray-800 mt-1">${parseInt(totals.total_forms || 0).toLocaleString()}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm p-5">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Orders</p>
+        <p class="text-3xl font-bold text-gray-800 mt-1">${parseInt(totals.total_orders || 0).toLocaleString()}</p>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm p-5">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Suppressed</p>
+        <p class="text-3xl font-bold text-gray-400 mt-1">${parseInt(totals.total_suppressed || 0).toLocaleString()}</p>
+        <p class="text-xs text-gray-400 mt-1">existing customers</p>
+      </div>
+    </div>
 
     <!-- Salesperson Leaderboard -->
     <div class="bg-white rounded-xl shadow-sm mb-8 overflow-hidden">
@@ -146,6 +171,7 @@ router.get('/', requireAuth, async (req, res) => {
               <th class="px-4 py-3 text-center">Leads</th>
               <th class="px-4 py-3 text-center">Clicks</th>
               <th class="px-4 py-3 text-center">Forms</th>
+              <th class="px-4 py-3 text-center">Calls</th>
               <th class="px-4 py-3 text-center">Orders</th>
               <th class="px-4 py-3 text-right">Revenue</th>
               <th class="px-4 py-3 text-right">Commission</th>
@@ -153,7 +179,7 @@ router.get('/', requireAuth, async (req, res) => {
             </tr>
           </thead>
           <tbody>
-            ${spRows || '<tr><td colspan="8" class="px-4 py-4 text-center text-gray-400">No salespeople yet — add one via the API</td></tr>'}
+            ${spRows || '<tr><td colspan="9" class="px-4 py-4 text-center text-gray-400">No salespeople yet — add one via the API</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -199,6 +225,37 @@ router.get('/', requireAuth, async (req, res) => {
             <tbody>${formRows}</tbody>
           </table>
         </div>
+      </div>
+    </div>
+
+    <!-- Recent Phone Calls -->
+    <div class="bg-white rounded-xl shadow-sm mt-6 overflow-hidden">
+      <div class="px-6 py-4 border-b flex justify-between items-center">
+        <h2 class="font-semibold text-gray-800">Recent Phone Calls <span class="text-xs text-purple-500 font-normal ml-2">(via CallRail tracking numbers)</span></h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+            <tr>
+              <th class="px-4 py-2 text-left">Date</th>
+              <th class="px-4 py-2 text-left">Caller Number</th>
+              <th class="px-4 py-2 text-left">Tracking Number</th>
+              <th class="px-4 py-2 text-left">Duration</th>
+              <th class="px-4 py-2 text-left">Salesperson</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${recentCalls.rows.length > 0 ? recentCalls.rows.map(c => `
+              <tr class="border-t text-sm hover:bg-gray-50">
+                <td class="px-4 py-2 text-gray-500">${formatDate(c.called_at)}</td>
+                <td class="px-4 py-2">${c.caller_number || '—'}</td>
+                <td class="px-4 py-2 text-purple-600">${c.tracking_number || '—'}</td>
+                <td class="px-4 py-2">${c.duration_seconds ? Math.floor(c.duration_seconds/60)+'m '+((c.duration_seconds||0)%60)+'s' : '—'}</td>
+                <td class="px-4 py-2">${c.salesperson || '<span class="text-red-400">Unknown</span>'}</td>
+              </tr>
+            `).join('') : '<tr><td colspan="5" class="px-4 py-4 text-center text-gray-400">No calls yet — set up CallRail tracking numbers to start</td></tr>'}
+          </tbody>
+        </table>
       </div>
     </div>
 

@@ -97,7 +97,73 @@ async function initDb() {
     );
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS phone_calls (
+      id SERIAL PRIMARY KEY,
+      salesperson_id INTEGER REFERENCES salespeople(id),
+      lead_id INTEGER REFERENCES leads(id),
+      tracking_number VARCHAR(50),
+      caller_number VARCHAR(50),
+      duration_seconds INTEGER DEFAULT 0,
+      recording_url TEXT,
+      callrail_id VARCHAR(255) UNIQUE,
+      called_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS suppression_list (
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      reason VARCHAR(50) DEFAULT 'existing_customer',
+      added_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS landing_page_matrix (
+      id SERIAL PRIMARY KEY,
+      audience_type VARCHAR(10),
+      product_interest VARCHAR(50),
+      location_type VARCHAR(50),
+      intent_level VARCHAR(20),
+      angle VARCHAR(50),
+      destination_url TEXT NOT NULL,
+      label VARCHAR(255),
+      active BOOLEAN DEFAULT true
+    );
+
+    -- Add tracking_number column to salespeople if not exists
+    ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS tracking_phone_number VARCHAR(50);
+    ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS callrail_number_id VARCHAR(255);
+  `);
+
+  await seedLandingPageMatrix();
+
   console.log('Database tables ready.');
+}
+
+async function seedLandingPageMatrix() {
+  const existing = await pool.query('SELECT COUNT(*) FROM landing_page_matrix');
+  if (parseInt(existing.rows[0].count) > 0) return;
+
+  const rows = [
+    ['B2C', 'door',    null,       'normal',   'product',    '/products/double-french-security-screen-doors', 'B2C – Door interest'],
+    ['B2C', 'window',  null,       'normal',   'product',    '/products/fixed-security-screen-windows',       'B2C – Window interest'],
+    ['B2C', 'both',    null,       'normal',   'product',    '/collections/all',                              'B2C – Door + Window'],
+    ['B2C', null,      'la_county','normal',   'install',    '/pages/installations',                          'B2C – LA County (pro install)'],
+    ['B2C', null,      'national', 'normal',   'diy',        '/collections/all',                              'B2C – Nationwide (DIY/shipping)'],
+    ['B2C', null,      null,       'high',     'close',      '/pages/request-a-quote',                        'B2C – High intent (close)'],
+    ['B2C', null,      null,       'normal',   'financing',  '/pages/financing',                              'B2C – Financing angle'],
+    ['B2C', null,      null,       'normal',   'reconnect',  '/',                                             'B2C – Generic reconnect'],
+    ['B2B', null,      null,       'normal',   'dealer',     '/pages/become-a-dealer',                        'B2B – Dealer CTA'],
+    ['B2B', null,      null,       'high',     'close',      '/pages/become-a-dealer',                        'B2B – High intent close'],
+  ];
+
+  for (const [audience_type, product_interest, location_type, intent_level, angle, destination_url, label] of rows) {
+    await pool.query(
+      `INSERT INTO landing_page_matrix
+         (audience_type, product_interest, location_type, intent_level, angle, destination_url, label)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`,
+      [audience_type, product_interest, location_type, intent_level, angle, destination_url, label]
+    );
+  }
 }
 
 module.exports = { pool, initDb };
