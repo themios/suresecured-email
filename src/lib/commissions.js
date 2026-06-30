@@ -15,7 +15,7 @@
  *   ]
  * }
  *
- * tier.from = inclusive lower bound, tier.to = exclusive upper bound (null = no cap)
+ * tier.from = inclusive lower bound, tier.to = inclusive upper bound (null = no cap)
  * bonus.units = unit count that triggers a one-time bonus, checked at crossing point only
  *
  * @param {number} saleAmount   - Dollar amount of the order
