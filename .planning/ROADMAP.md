@@ -11,7 +11,7 @@ SalesPilot AI evolves an existing single-tenant CommissionTracker into a multi-t
 - Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 1: Foundation** - Multi-tenancy DB, user auth, client config, dynamic branding, scale-ready cron ✓ 2026-06-30
-- [ ] **Phase 2: Commission Engine** - Tiered commission calculation, salesperson + agency dashboards, Shopify webhook
+- [x] **Phase 2: Commission Engine** - Tiered commission calculation, salesperson + agency dashboards, Shopify webhook ✓ 2026-06-30
 - [ ] **Phase 3: Email Deliverability** - Open/click tracking pixels, bounce suppression
 - [ ] **Phase 4: Voice** - Retell AI via single Twilio number with client extensions (deferrable until Twilio number acquired)
 - [ ] **Phase 5: AI Intelligence** - Daily digest emails, lead engagement scoring
@@ -106,7 +106,7 @@ Phase 4 (Voice) can be deferred without blocking Phase 5.
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 5/5 | ✓ Complete | 2026-06-30 |
-| 2. Commission Engine | 0/4 | Not started | - |
+| 2. Commission Engine | 4/4 | ✓ Complete | 2026-06-30 |
 | 3. Email Deliverability | 0/3 | Not started | - |
 | 4. Voice | 0/2 | Not started | - |
 | 5. AI Intelligence | 0/2 | Not started | - |

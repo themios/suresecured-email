@@ -72,10 +72,10 @@
 | TENT-02 | Phase 1 | Complete ✓ |
 | TENT-03 | Phase 1 | Complete ✓ |
 | TENT-04 | Phase 1 | Complete ✓ |
-| COMM-01 | Phase 2 | Pending |
-| COMM-02 | Phase 2 | Pending |
-| COMM-03 | Phase 2 | Pending |
-| COMM-04 | Phase 2 | Pending |
+| COMM-01 | Phase 2 | Complete ✓ |
+| COMM-02 | Phase 2 | Complete ✓ |
+| COMM-03 | Phase 2 | Complete ✓ |
+| COMM-04 | Phase 2 | Complete ✓ |
 | EMAI-01 | Phase 3 | Pending |
 | EMAI-02 | Phase 3 | Pending |
 | EMAI-03 | Phase 1 | Complete ✓ |
