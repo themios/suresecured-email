@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 
 ## Current Position
 
-Phase: 3 of 5 (Email Deliverability) — In progress
-Plan: 2/4 complete
-Status: In progress
-Last activity: 2026-06-30 — Completed 03-02-PLAN.md — rewriteLinks(), /e/:token route, INSERT-before-send ordering
+Phase: 3 of 5 (Email Deliverability) — Complete
+Plan: 4/4 complete
+Status: Phase complete — ready for Phase 5 (Phase 4 blocked on Twilio)
+Last activity: 2026-06-30 — Completed 03-04-PLAN.md — per-sequence deliverability report API + UI
 
-Progress: [████████████░░░░░░░░] 55% (phases 1–2 + 03-01 + 03-02)
+Progress: [████████████████░░░░] 75% (phases 1–2 + all of phase 3)
 
 ## Performance Metrics
 
@@ -29,7 +29,7 @@ Progress: [████████████░░░░░░░░] 55% (ph
 |-------|-------|-------|----------|
 | 01-foundation | 5/5 | 47 min | 9 min |
 | 02-commission-engine | 4/4 | ~20 min | ~5 min |
-| 03-email-deliverability | 2/4 | ~16 min | ~8 min |
+| 03-email-deliverability | 4/4 | ~32 min | ~8 min |
 
 **Recent Trend:**
 - Last 5 plans: 01-05 (8 min), 02-01 (12 min), 02-04 (8 min)
@@ -82,6 +82,9 @@ Recent decisions affecting current work:
 - 03-02: rewriteLinks() outside try/catch — DB failures on token INSERT surface as thrown errors, not silent ok:false
 - 03-02: Click count increment is fire-and-forget after res.redirect() — minimizes redirect latency for email recipients
 - 03-02: URL de-duplication via Set before INSERT loop — one token per unique URL per send
+- 03-04: NULLIF(COUNT(es.id), 0) in SQL rather than COALESCE in JS — null semantics clean; JS handles null->0.0% display
+- 03-04: COUNT FILTER pattern over correlated subqueries — single-pass aggregation per sequence
+- 03-04: Bounce rate >5% threshold for red highlight — pragmatic industry benchmark; no config needed
 
 ### Pending Todos
 
@@ -96,6 +99,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T20:59:00Z
-Stopped at: Completed 03-02-PLAN.md — rewriteLinks(), /e/:token click route, INSERT-before-send refactor
+Last session: 2026-06-30T21:18:00Z
+Stopped at: Completed 03-04-PLAN.md — per-sequence deliverability report API + Deliverability Report UI table
 Resume file: None
