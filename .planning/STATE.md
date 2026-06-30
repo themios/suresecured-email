@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 1 of 5 (Foundation)
-Plan: 1 of 5 in current phase
+Plan: 3 of 5 in current phase
 Status: In progress
-Last activity: 2026-06-30 — Completed 01-01-PLAN.md (DB migration)
+Last activity: 2026-06-30 — Completed 01-03-PLAN.md (Client management UI)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [███░░░░░░░] 30%
 
 ## Performance Metrics
 
@@ -27,11 +27,11 @@ Progress: [█░░░░░░░░░] 10%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-foundation | 1/5 | 15 min | 15 min |
+| 01-foundation | 3/5 | 27 min | 9 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (15 min)
-- Trend: —
+- Last 5 plans: 01-01 (15 min), 01-03 (12 min)
+- Trend: faster
 
 *Updated after each plan completion*
 
@@ -48,6 +48,8 @@ Recent decisions affecting current work:
 - 01-01: DO $$ FOREACH loop for client_id addition — more maintainable than 17 separate ALTER TABLE statements
 - 01-01: admin_users table kept in place — 01-02 will unify auth; co-existence is safe
 - 01-01: client_id nullable initially — backfill and NOT NULL enforcement deferred to application layer
+- 01-03: No EJS template engine introduced — inline Tailwind HTML via res.send() matches existing codebase pattern; clientFormHtml() is the "view" equivalent
+- 01-03: parseJsonField() helper normalizes JSONB textarea inputs (string → object) before DB storage
 
 ### Pending Todos
 
@@ -62,6 +64,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T18:28:00Z
-Stopped at: Completed 01-01-PLAN.md — DB migration artifacts created, committed
+Last session: 2026-06-30T18:47:00Z
+Stopped at: Completed 01-03-PLAN.md — Client management UI routes in admin.js
 Resume file: None
