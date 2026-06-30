@@ -321,4 +321,75 @@ async function checkForReplies(salespersonId, gmailThreadId) {
   }
 }
 
-module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, sendSequenceEmail, checkForReplies };
+/**
+ * buildDigestHtml — operator-facing digest email
+ * No pixel, no unsubscribe link, no CTA buttons — internal use only
+ */
+function buildDigestHtml(bodyText, brandConfig = {}) {
+  const {
+    primary_color = '#030302',
+    accent_color  = '#E91111',
+    bg_color      = '#EDEBE7',
+    name          = 'SalesPilot',
+  } = brandConfig;
+
+  const date = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  const paragraphs = bodyText.split(/\n\n+/).map(p =>
+    `<p style="margin:0 0 18px 0;color:${primary_color};font-size:15px;line-height:1.75">${p.replace(/\n/g, '<br>')}</p>`
+  ).join('\n');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0;padding:0;background:#f4f4f2;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f4f2;padding:32px 16px">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%">
+
+        <!-- Header -->
+        <tr><td style="background:${primary_color};padding:22px 32px">
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+              <td>
+                <span style="color:#ffffff;font-size:20px;font-weight:700;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
+              </td>
+              <td align="right">
+                <span style="color:#ffffff;font-size:11px;opacity:0.6">Daily Digest</span>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <!-- Accent bar -->
+        <tr><td style="background:${accent_color};height:4px;font-size:0;line-height:0">&nbsp;</td></tr>
+
+        <!-- Date label -->
+        <tr><td style="background:#ffffff;padding:16px 40px 0">
+          <p style="margin:0;font-size:11px;color:#8a8a88;text-transform:uppercase;letter-spacing:0.8px">${date}</p>
+        </td></tr>
+
+        <!-- Body -->
+        <tr><td style="background:#ffffff;padding:24px 40px 36px">
+          ${paragraphs}
+        </td></tr>
+
+        <!-- Footer -->
+        <tr><td style="background:${bg_color};padding:16px 40px 24px;border-top:1px solid #d8d6d2;border-radius:0 0 6px 6px">
+          <p style="color:#8a8a88;font-size:11px;margin:0;line-height:1.7;text-align:center;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+            SalesPilot operator digest &mdash; ${name}<br>
+            This is an internal operational email.
+          </p>
+        </td></tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, buildDigestHtml, sendSequenceEmail, checkForReplies };
