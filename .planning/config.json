@@ -1,0 +1,7 @@
+{
+  "mode": "yolo",
+  "depth": "standard",
+  "parallelization": true,
+  "phases_target": "5-8",
+  "plans_per_phase": "3-5"
+}
