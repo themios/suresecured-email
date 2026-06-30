@@ -6,8 +6,10 @@
  */
 const express  = require('express');
 const router   = express.Router();
+const { google } = require('googleapis');
 const { pool } = require('../db');
-const { sendSequenceEmail, checkForReplies } = require('../lib/gmail');
+const { sendSequenceEmail, checkForReplies, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
+const { callOpenRouter, buildDigestPrompt } = require('../lib/openrouter');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -213,6 +215,158 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
   }
 
   res.json({ ok: true, sent, skipped, errors, timestamp: now });
+});
+
+/**
+ * GET /cron/daily-digest
+ * Generates AI-powered daily metrics summary email per client.
+ * Called once daily by cron-job.org at 06:00 UTC.
+ * Auth: Authorization: Bearer <CRON_SECRET>
+ *
+ * Recipient: the operator salesperson's own Gmail address (resolved from DB at runtime).
+ * The digest is sent FROM and TO the operator's connected Gmail account — no separate
+ * OPENROUTER_DIGEST_EMAIL env var is needed.
+ */
+router.get('/daily-digest', cronAuth, async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+  let processed = 0, skipped = 0, errors = 0;
+  const errorDetails = [];
+
+  // Get all active clients
+  const { rows: clients } = await pool.query(
+    `SELECT id, brand_config FROM clients WHERE active = true`
+  );
+
+  for (const client of clients) {
+    try {
+      // Idempotency: skip if digest already sent today for this client
+      const idempotency = await pool.query(
+        `INSERT INTO digest_sends (client_id, period)
+         VALUES ($1, $2)
+         ON CONFLICT (client_id, period) DO NOTHING
+         RETURNING id`,
+        [client.id, today]
+      );
+      if (idempotency.rows.length === 0) {
+        skipped++;
+        continue;
+      }
+
+      // Query 24h metrics for this client.
+      // Joins flow through leads (l) — email_sends and contact_enrollments have lead_id, not client_id.
+      const { rows: [metrics] } = await pool.query(`
+        SELECT
+          COUNT(DISTINCT l.id) FILTER (WHERE l.created_at >= NOW() - INTERVAL '24 hours')      AS new_leads_24h,
+          COUNT(es.id)         FILTER (WHERE es.sent_at   >= NOW() - INTERVAL '24 hours')      AS emails_sent_24h,
+          COALESCE(AVG(es.open_count)  FILTER (WHERE es.sent_at >= NOW() - INTERVAL '24 hours'), 0) AS avg_opens,
+          COALESCE(AVG(es.click_count) FILTER (WHERE es.sent_at >= NOW() - INTERVAL '24 hours'), 0) AS avg_clicks,
+          COUNT(ce.id) FILTER (
+            WHERE ce.status = 'paused'
+              AND ce.paused_reason = 'replied'
+              AND ce.replied_at >= NOW() - INTERVAL '24 hours'
+          )                                                                                      AS replies_24h,
+          COUNT(es.id) FILTER (WHERE es.bounced = true AND es.sent_at >= NOW() - INTERVAL '24 hours') AS bounces_24h,
+          ROUND(
+            COUNT(ce.id) FILTER (
+              WHERE ce.status = 'paused'
+                AND ce.paused_reason = 'replied'
+                AND ce.replied_at >= NOW() - INTERVAL '24 hours'
+            )::numeric
+            / NULLIF(COUNT(es.id) FILTER (WHERE es.sent_at >= NOW() - INTERVAL '24 hours'), 0) * 100,
+            1
+          )                                                                                      AS reply_rate_pct
+        FROM clients c
+        LEFT JOIN leads l                ON l.client_id  = c.id
+        LEFT JOIN contact_enrollments ce ON ce.lead_id   = l.id
+        LEFT JOIN email_sends es         ON es.lead_id   = l.id
+        WHERE c.id = $1
+      `, [client.id]);
+
+      // Ensure reply_rate_pct is never null in the prompt
+      metrics.reply_rate_pct = metrics.reply_rate_pct != null ? metrics.reply_rate_pct : '0.0';
+
+      // Top subject lines by open rate (last 7 days)
+      const { rows: topSubjects } = await pool.query(`
+        SELECT ss.subject,
+               SUM(es.open_count)                                                AS total_opens,
+               COUNT(es.id)                                                      AS sends,
+               ROUND(SUM(es.open_count)::numeric / NULLIF(COUNT(es.id), 0), 2) AS open_rate
+        FROM email_sends es
+        JOIN sequence_steps ss ON ss.id = es.step_id
+        JOIN leads l           ON l.id  = es.lead_id
+        WHERE l.client_id = $1
+          AND es.sent_at >= NOW() - INTERVAL '7 days'
+        GROUP BY ss.subject
+        ORDER BY open_rate DESC
+        LIMIT 3
+      `, [client.id]);
+
+      metrics.top_subjects = topSubjects.length
+        ? topSubjects.map(r => `"${r.subject}" (${r.open_rate}x opens/send)`)
+        : ['No email data yet'];
+
+      // Build AI prompt and call OpenRouter
+      const prompt = buildDigestPrompt(metrics);
+      let aiSummary;
+      try {
+        aiSummary = await callOpenRouter(prompt);
+      } catch (aiErr) {
+        // Fall back to plain metrics summary if AI fails
+        console.error(`[digest] OpenRouter failed for client ${client.id}:`, aiErr.message);
+        aiSummary = `Yesterday: ${metrics.new_leads_24h} new leads, ${metrics.emails_sent_24h} emails sent, ${metrics.replies_24h} replies (${metrics.reply_rate_pct}% reply rate), ${metrics.bounces_24h} bounces.`;
+      }
+
+      // Find an operator-role salesperson with Gmail connected for this client
+      const { rows: senders } = await pool.query(`
+        SELECT s.id AS salesperson_id, s.email AS salesperson_email
+        FROM salespeople s
+        JOIN users u ON LOWER(u.email) = LOWER(s.email)
+        WHERE u.client_id = $1
+          AND u.role IN ('operator', 'owner')
+          AND s.active = true
+        LIMIT 1
+      `, [client.id]);
+
+      if (!senders[0]) {
+        console.warn(`[digest] no operator salesperson found for client ${client.id} — skipping send`);
+        errors++;
+        continue;
+      }
+
+      const sender = senders[0];
+      const auth = await getAuthedClient(sender.salesperson_id);
+      if (!auth) {
+        console.warn(`[digest] no Gmail account for salesperson ${sender.salesperson_id} — skipping`);
+        errors++;
+        continue;
+      }
+
+      const { client: gmailAuth, account } = auth;
+      const brandConfig = client.brand_config || {};
+      const clientName = brandConfig.name || 'SalesPilot';
+
+      const html = buildDigestHtml(aiSummary, brandConfig);
+      const raw = await buildRawMessage({
+        fromName:    `${clientName} Digest`,
+        fromAddress: account.email,
+        to:          sender.salesperson_email,
+        subject:     `${clientName} Daily Digest — ${today}`,
+        textBody:    aiSummary,
+        htmlBody:    html,
+      });
+
+      const gmail = google.gmail({ version: 'v1', auth: gmailAuth });
+      await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+
+      processed++;
+    } catch (clientErr) {
+      errors++;
+      errorDetails.push({ client_id: client.id, error: clientErr.message });
+      console.error(`[digest] error for client ${client.id}:`, clientErr.message);
+    }
+  }
+
+  res.json({ ok: true, processed, skipped, errors, date: today, errorDetails });
 });
 
 module.exports = router;
