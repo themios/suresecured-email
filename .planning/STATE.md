@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 1 of 5 (Foundation)
-Plan: 4 of 5 in current phase
-Status: In progress
-Last activity: 2026-06-30 — Completed 01-04-PLAN.md (dynamic email branding)
+Plan: 5 of 5 in current phase
+Status: Phase complete
+Last activity: 2026-06-30 — Completed 01-05-PLAN.md (scale-safe cron + connection pool + seed script)
 
-Progress: [████░░░░░░] 40%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -27,11 +27,11 @@ Progress: [████░░░░░░] 40%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-foundation | 4/5 | 39 min | 10 min |
+| 01-foundation | 5/5 | 47 min | 9 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (15 min), 01-03 (12 min), 01-04 (12 min)
-- Trend: consistent
+- Last 5 plans: 01-01 (15 min), 01-03 (12 min), 01-04 (12 min), 01-05 (8 min)
+- Trend: consistent, slight improvement
 
 *Updated after each plan completion*
 
@@ -56,6 +56,10 @@ Recent decisions affecting current work:
 - 01-04: SureSecured values kept as brandConfig destructure defaults — backward-compatible; NULL client_id rows render SureSecured branding without backfill
 - 01-04: buildHtml() exported from gmail.js — enables direct unit testing; previously unexported
 - 01-04: phoneDigits derived via phone.replace(/\D/g,'') — tel: href handles any phone format in brand_config
+- 01-05: FOR UPDATE OF ce (not bare FOR UPDATE) — scopes lock to contact_enrollments only; avoids contention on joined tables
+- 01-05: All cron loop queries use client not pool — required to stay in transaction; SKIP LOCKED only effective within transaction
+- 01-05: Pool max:20 — Railway/Heroku PgBouncer ceiling before connection exhaustion on hobby tiers
+- 01-05: Seed uses multi-row INSERT batches not COPY — works with app-level credentials; no superuser required
 
 ### Pending Todos
 
@@ -65,11 +69,11 @@ Recent decisions affecting current work:
 ### Blockers/Concerns
 
 - Phase 4 (Voice): Blocked until Twilio number is purchased and provisioned. All other phases are independent.
-- Phase 1: Must enable Railway PostgreSQL connection pooler before Phase 2 scale work begins.
+- Phase 1 complete — Phase 2 can begin. Enable Railway PostgreSQL connection pooler before Phase 2 scale work begins.
 - 01-01 verification: DATABASE_URL is placeholder — migration file and db.js are complete but untested against live DB.
 
 ## Session Continuity
 
-Last session: 2026-06-30T18:29:00Z
-Stopped at: Completed 01-04-PLAN.md — dynamic email branding via brandConfig in gmail.js and cron.js
+Last session: 2026-06-30T18:50:00Z
+Stopped at: Completed 01-05-PLAN.md — scale-safe cron (SKIP LOCKED), pool tuning, 500k seed script
 Resume file: None
