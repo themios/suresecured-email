@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 
 ## Current Position
 
-Phase: 2 of 5 (Commission Engine) — COMPLETE ✓
-Plan: 4/4 complete
-Status: Ready for Phase 3
-Last activity: 2026-06-30 — Phase 02 verified (12/12 must-haves), docstring fix committed
+Phase: 3 of 5 (Email Deliverability) — In progress
+Plan: 1/4 complete
+Status: In progress
+Last activity: 2026-06-30 — Completed 03-01-PLAN.md — migration 003, pixel route, buildHtml pixel injection
 
-Progress: [██████████] 100% (phases 1–2)
+Progress: [██████████░░░░░░░░░░] 50% (phases 1–2 + 03-01)
 
 ## Performance Metrics
 
@@ -29,6 +29,7 @@ Progress: [██████████] 100% (phases 1–2)
 |-------|-------|-------|----------|
 | 01-foundation | 5/5 | 47 min | 9 min |
 | 02-commission-engine | 4/4 | ~20 min | ~5 min |
+| 03-email-deliverability | 1/4 | 8 min | 8 min |
 
 **Recent Trend:**
 - Last 5 plans: 01-05 (8 min), 02-01 (12 min), 02-04 (8 min)
@@ -73,6 +74,10 @@ Recent decisions affecting current work:
 - 02-04: clientId null path records order but skips commission — avoids Shopify retry storm on unknown shop domain
 - 02-04: spResult joins on salesperson's own client_id (not webhook-resolved) to fetch commission_rules — multi-client edge case deferred v2
 - 02-04: unitsBefore query excludes current orderId to get correct pre-sale unit count for tier lookup
+- 03-01: pixelToken pre-generated in JS via crypto.randomUUID() — URL must be known before Gmail send and INSERT
+- 03-01: Pixel route responds immediately then fires async DB update — email clients time out image requests in ~1-2s
+- 03-01: COALESCE(opened_at, NOW()) in pixel UPDATE — sets opened_at on first open only, preserves original timestamp on repeat hits
+- 03-01: buildHtml() pixelUrl param defaults to '' and only injects img tag when truthy — backward-compatible
 
 ### Pending Todos
 
@@ -87,6 +92,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T20:51:00Z
-Stopped at: Completed 02-02-PLAN.md — portal dashboard tier context, pending/paid payout split
+Last session: 2026-06-30T21:22:00Z
+Stopped at: Completed 03-01-PLAN.md — migration 003, pixel route, buildHtml pixel injection
 Resume file: None
