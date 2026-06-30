@@ -68,17 +68,17 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TENT-01 | Phase 1 | Pending |
-| TENT-02 | Phase 1 | Pending |
-| TENT-03 | Phase 1 | Pending |
-| TENT-04 | Phase 1 | Pending |
+| TENT-01 | Phase 1 | Complete ✓ |
+| TENT-02 | Phase 1 | Complete ✓ |
+| TENT-03 | Phase 1 | Complete ✓ |
+| TENT-04 | Phase 1 | Complete ✓ |
 | COMM-01 | Phase 2 | Pending |
 | COMM-02 | Phase 2 | Pending |
 | COMM-03 | Phase 2 | Pending |
 | COMM-04 | Phase 2 | Pending |
 | EMAI-01 | Phase 3 | Pending |
 | EMAI-02 | Phase 3 | Pending |
-| EMAI-03 | Phase 1 | Pending |
+| EMAI-03 | Phase 1 | Complete ✓ |
 | VOIC-01 | Phase 4 | Pending |
 | AIML-01 | Phase 5 | Pending |
 | AIML-02 | Phase 5 | Pending |
