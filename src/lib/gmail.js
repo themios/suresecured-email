@@ -99,13 +99,26 @@ function buildUnsubscribeUrl(email) {
   return `${base}/unsubscribe?t=${token}`;
 }
 
-function buildHtml(body, salespersonName, unsubscribeUrl) {
-  // Brand colors extracted directly from suresecured.com
-  // Near-black: #030302  |  Red CTA: #E91111  |  Warm gray: #EDEBE7  |  Info blue: #CBDEE8
+function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}) {
+  const {
+    primary_color = '#030302',
+    accent_color  = '#E91111',
+    bg_color      = '#EDEBE7',
+    info_color    = '#CBDEE8',
+    name          = 'SureSecured',
+    phone         = '(747) 688-9992',
+    website       = 'suresecured.com',
+    address       = 'SureSecured Security Products • Simi Valley, CA 93063',
+    cta_url       = 'https://suresecured.com/pages/request-a-quote',
+    cta_label     = 'Request a Quote',
+  } = brandConfig;
+
+  const phoneDigits = phone.replace(/\D/g, '');
+
   const paragraphs = body.split(/\n\n+/).map(p =>
-    '<p style="margin:0 0 18px 0;color:#030302;font-size:15px;line-height:1.75">' +
+    `<p style="margin:0 0 18px 0;color:${primary_color};font-size:15px;line-height:1.75">` +
     p.split('\n').map(line =>
-      line.replace(/(https?:\/\/[^\s<>"]+)/g, '<a href="$1" style="color:#E91111;font-weight:600;text-decoration:underline">$1</a>')
+      line.replace(/(https?:\/\/[^\s<>"]+)/g, `<a href="$1" style="color:${accent_color};font-weight:600;text-decoration:underline">$1</a>`)
     ).join('<br>') +
     '</p>'
   ).join('\n');
@@ -123,45 +136,45 @@ function buildHtml(body, salespersonName, unsubscribeUrl) {
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%">
 
-        <!-- Announcement bar — matches site's info bar -->
-        <tr><td style="background:#CBDEE8;padding:10px 32px;text-align:center">
-          <span style="font-size:12px;color:#030302;font-weight:600;letter-spacing:0.2px">For More Information Call/Text: <a href="tel:7476889992" style="color:#030302;text-decoration:none;font-weight:700">(747) 688-9992</a></span>
+        <!-- Announcement bar -->
+        <tr><td style="background:${info_color};padding:10px 32px;text-align:center">
+          <span style="font-size:12px;color:${primary_color};font-weight:600;letter-spacing:0.2px">For More Information Call/Text: <a href="tel:${phoneDigits}" style="color:${primary_color};text-decoration:none;font-weight:700">${phone}</a></span>
         </td></tr>
 
-        <!-- Header — matches site nav (near-black) -->
-        <tr><td style="background:#030302;padding:22px 32px">
+        <!-- Header -->
+        <tr><td style="background:${primary_color};padding:22px 32px">
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
             <tr>
               <td>
-                <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">SureSecured</span>
+                <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
               </td>
               <td align="right">
-                <span style="color:#ffffff;font-size:11px;opacity:0.6;letter-spacing:0.5px">suresecured.com</span>
+                <span style="color:#ffffff;font-size:11px;opacity:0.6;letter-spacing:0.5px">${website}</span>
               </td>
             </tr>
           </table>
         </td></tr>
 
-        <!-- Red accent bar — matches site's red CTA strip -->
-        <tr><td style="background:#E91111;height:4px;font-size:0;line-height:0">&nbsp;</td></tr>
+        <!-- Accent bar -->
+        <tr><td style="background:${accent_color};height:4px;font-size:0;line-height:0">&nbsp;</td></tr>
 
-        <!-- Body — white card, matches site body -->
+        <!-- Body -->
         <tr><td style="background:#ffffff;padding:36px 40px">
           ${paragraphs}
 
-          <!-- Quote CTA — red button matching site's primary CTA style -->
+          <!-- CTA -->
           <table cellpadding="0" cellspacing="0" role="presentation" style="margin-top:28px">
             <tr>
-              <td style="background:#E91111;border-radius:4px">
-                <a href="https://suresecured.com/pages/request-a-quote"
+              <td style="background:${accent_color};border-radius:4px">
+                <a href="${cta_url}"
                    style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;letter-spacing:0.2px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
-                  Request a Free Quote &rarr;
+                  ${cta_label} &rarr;
                 </a>
               </td>
               <td width="12"></td>
-              <td style="border:2px solid #030302;border-radius:4px">
-                <a href="https://suresecured.com"
-                   style="display:inline-block;padding:11px 24px;color:#030302;font-size:14px;font-weight:600;text-decoration:none;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+              <td style="border:2px solid ${primary_color};border-radius:4px">
+                <a href="https://${website}"
+                   style="display:inline-block;padding:11px 24px;color:${primary_color};font-size:14px;font-weight:600;text-decoration:none;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
                   Shop Products
                 </a>
               </td>
@@ -169,17 +182,17 @@ function buildHtml(body, salespersonName, unsubscribeUrl) {
           </table>
         </td></tr>
 
-        <!-- Signature — warm gray card, matches site card bg -->
-        <tr><td style="background:#EDEBE7;padding:24px 40px;border-top:1px solid #d8d6d2">
+        <!-- Signature -->
+        <tr><td style="background:${bg_color};padding:24px 40px;border-top:1px solid #d8d6d2">
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
             <tr>
               <td>
-                <p style="margin:0;font-size:14px;color:#030302;font-weight:700;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${salespersonName}</p>
-                <p style="margin:3px 0 0;font-size:12px;color:#5a5a58">Security Specialist &mdash; SureSecured</p>
+                <p style="margin:0;font-size:14px;color:${primary_color};font-weight:700;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${salespersonName}</p>
+                <p style="margin:3px 0 0;font-size:12px;color:#5a5a58">Security Specialist &mdash; ${name}</p>
                 <p style="margin:6px 0 0;font-size:12px;color:#5a5a58">
-                  <a href="tel:7476889992" style="color:#030302;text-decoration:none;font-weight:600">(747) 688-9992</a>
+                  <a href="tel:${phoneDigits}" style="color:${primary_color};text-decoration:none;font-weight:600">${phone}</a>
                   &nbsp;&nbsp;|&nbsp;&nbsp;
-                  <a href="https://suresecured.com" style="color:#030302;text-decoration:none;font-weight:600">suresecured.com</a>
+                  <a href="https://${website}" style="color:${primary_color};text-decoration:none;font-weight:600">${website}</a>
                 </p>
               </td>
             </tr>
@@ -187,10 +200,10 @@ function buildHtml(body, salespersonName, unsubscribeUrl) {
         </td></tr>
 
         <!-- Footer -->
-        <tr><td style="background:#EDEBE7;padding:16px 40px 24px;border-top:1px solid #d8d6d2;border-radius:0 0 6px 6px">
+        <tr><td style="background:${bg_color};padding:16px 40px 24px;border-top:1px solid #d8d6d2;border-radius:0 0 6px 6px">
           <p style="color:#8a8a88;font-size:11px;margin:0;line-height:1.7;text-align:center;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
-            You received this because you requested information from SureSecured.<br>
-            SureSecured Security Products &bull; Simi Valley, CA 93063<br>
+            You received this because you requested information from ${name}.<br>
+            ${address}<br>
             <a href="${unsubscribeUrl}" style="color:#8a8a88;text-decoration:underline">Unsubscribe</a>
           </p>
         </td></tr>
@@ -202,7 +215,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl) {
 </html>`;
 }
 
-async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrollmentId, stepId, leadId }) {
+async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrollmentId, stepId, leadId }, brandConfig = {}) {
   const auth = await getAuthedClient(salespersonId);
   if (!auth) return { ok: false, error: 'no_account' };
 
@@ -212,9 +225,9 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
   const resolvedBody    = substituteVars(body, vars);
 
   const gmail          = google.gmail({ version: 'v1', auth: client });
-  const fromName       = vars.salesperson_name || 'SureSecured Team';
+  const fromName       = vars.salesperson_name || `${brandConfig.name || 'SureSecured'} Team`;
   const unsubscribeUrl = buildUnsubscribeUrl(to);
-  const html           = buildHtml(resolvedBody, fromName, unsubscribeUrl);
+  const html           = buildHtml(resolvedBody, fromName, unsubscribeUrl, brandConfig);
 
   try {
     const raw = await buildRawMessage({
@@ -267,4 +280,4 @@ async function checkForReplies(salespersonId, gmailThreadId) {
   }
 }
 
-module.exports = { oauthClient, getAuthUrl, exchangeCode, sendSequenceEmail, checkForReplies };
+module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, sendSequenceEmail, checkForReplies };
