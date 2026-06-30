@@ -46,7 +46,7 @@ Plans:
   2. Salesperson can open their dashboard and see current tier, units sold this month, pending payout amount, and paid history — all filtered to their assigned client
   3. Operator can open the agency dashboard and see all clients in a single view with units, revenue, and commission owed per client, and can click into any client without re-logging in
   4. When a Shopify order webhook fires with a recognized attribution token, the order is recorded against the lead, commission is calculated, and the salesperson's monthly total updates within 30 seconds
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
 - [ ] 02-01: Tiered commission engine — configurable rules from client.commission_rules, monthly reset logic, bonus threshold detection
