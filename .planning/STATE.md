@@ -9,29 +9,30 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 
 ## Current Position
 
-Phase: 1 of 5 (Foundation) — COMPLETE ✓
-Plan: 5/5 complete
-Status: Ready for Phase 2
-Last activity: 2026-06-30 — Phase 01 verified (17/17 must-haves), ready for Commission Engine
+Phase: 2 of 5 (Commission Engine) — In progress
+Plan: 1/4 complete in current phase
+Status: In progress
+Last activity: 2026-06-30 — Completed 02-01-PLAN.md
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
+- Total plans completed: 6
 - Average duration: 10 min
-- Total execution time: 39 min
+- Total execution time: 59 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-foundation | 5/5 | 47 min | 9 min |
+| 02-commission-engine | 1/4 | 12 min | 12 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (15 min), 01-03 (12 min), 01-04 (12 min), 01-05 (8 min)
-- Trend: consistent, slight improvement
+- Last 5 plans: 01-03 (12 min), 01-04 (12 min), 01-05 (8 min), 02-01 (12 min)
+- Trend: consistent
 
 *Updated after each plan completion*
 
@@ -60,6 +61,9 @@ Recent decisions affecting current work:
 - 01-05: All cron loop queries use client not pool — required to stay in transaction; SKIP LOCKED only effective within transaction
 - 01-05: Pool max:20 — Railway/Heroku PgBouncer ceiling before connection exhaustion on hobby tiers
 - 01-05: Seed uses multi-row INSERT batches not COPY — works with app-level credentials; no superuser required
+- 02-01: No test framework introduced — plain node:assert script keeps zero-devDependencies style
+- 02-01: tier.to is exclusive upper bound — thisUnit <= t.to means boundary unit stays in current tier
+- 02-01: Bonus filter unitsBefore < b.units && thisUnit >= b.units — triggers exactly once at crossing sale
 
 ### Pending Todos
 
@@ -74,6 +78,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T18:50:00Z
-Stopped at: Completed 01-05-PLAN.md — scale-safe cron (SKIP LOCKED), pool tuning, 500k seed script
+Last session: 2026-06-30T20:28:10Z
+Stopped at: Completed 02-01-PLAN.md — tiered commission module, unit tests, schema migration
 Resume file: None

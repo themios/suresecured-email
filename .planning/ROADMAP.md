@@ -49,7 +49,7 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 02-01: Tiered commission engine — configurable rules from client.commission_rules, monthly reset logic, bonus threshold detection
+- [x] 02-01: Tiered commission engine — configurable rules from client.commission_rules, monthly reset logic, bonus threshold detection ✓ 2026-06-30
 - [ ] 02-02: Salesperson commission dashboard — per-client view, tier progress, pending/paid history
 - [ ] 02-03: Agency cross-client dashboard — all clients in one view, quick-switch navigation
 - [ ] 02-04: Shopify webhook wiring — parse inbound order, match attribution token, post commission, update monthly totals
