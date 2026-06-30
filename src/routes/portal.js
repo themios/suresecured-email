@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { pool } = require('../db');
 const { requireSpAuth } = require('../middleware/spAuth');
+const { calculateCommission } = require('../lib/commissions');
 
 // ─── Login ─────────────────────────────────────────────────────────────────
 
@@ -102,7 +103,7 @@ router.get('/', requireSpAuth, async (req, res) => {
   const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   try {
-    const [sp, thisMonth, allTime, goal, monthlyHistory, recentActivity, recentClicks] = await Promise.all([
+    const [sp, thisMonth, allTime, goal, monthlyHistory, recentActivity, recentClicks, tierContext, payoutSplit] = await Promise.all([
 
       // Salesperson info
       pool.query('SELECT * FROM salespeople WHERE id = $1', [spId]),
@@ -185,6 +186,31 @@ router.get('/', requireSpAuth, async (req, res) => {
         WHERE c.salesperson_id = $1
         ORDER BY c.clicked_at DESC LIMIT 10
       `, [spId]),
+
+      // Tier context: units this month + commission rules (scoped to client)
+      pool.query(`
+        SELECT
+          c.commission_rules,
+          s.commission_rate,
+          COUNT(o.id) AS units_this_month
+        FROM salespeople s
+        JOIN clients c ON c.id = s.client_id
+        LEFT JOIN orders o ON o.salesperson_id = s.id
+          AND o.client_id = s.client_id
+          AND DATE_TRUNC('month', o.ordered_at) = DATE_TRUNC('month', NOW())
+        WHERE s.id = $1
+        GROUP BY c.commission_rules, s.commission_rate
+      `, [spId]),
+
+      // Pending/paid payout split (scoped to client)
+      pool.query(`
+        SELECT
+          SUM(commission_earned) FILTER (WHERE status = 'pending') AS pending_payout,
+          SUM(commission_earned) FILTER (WHERE status = 'paid')    AS paid_total
+        FROM commissions
+        WHERE salesperson_id = $1
+          AND client_id = $2
+      `, [spId, req.salesperson.client_id]),
     ]);
 
     const info   = sp.rows[0];
@@ -192,6 +218,24 @@ router.get('/', requireSpAuth, async (req, res) => {
     const at     = allTime.rows[0];
     const g      = goal.rows[0];
     const hist   = monthlyHistory.rows;
+
+    const tier = tierContext.rows[0];
+    const rules = tier?.commission_rules || {};
+    const flatRate = tier?.commission_rate || 100;
+    const unitsThisMonth = parseInt(tier?.units_this_month || 0);
+
+    // Current tier rate: use unitsBefore = unitsThisMonth (since these units are already completed,
+    // the "current" rate is what the NEXT sale would earn — matches operator mental model of "what tier am I in")
+    const { rate: currentTierRate } = calculateCommission(0, unitsThisMonth, rules, flatRate);
+
+    // Find next tier threshold for progress display
+    const tiers = rules?.tiers || [];
+    const nextTier = tiers.find(t => t.from >= unitsThisMonth);
+    const unitsToNextTier = nextTier ? (nextTier.from - unitsThisMonth) : null;
+
+    const payout = payoutSplit.rows[0];
+    const pendingPayout = parseFloat(payout?.pending_payout || 0);
+    const paidTotal = parseFloat(payout?.paid_total || 0);
 
     const fmt    = n => '$' + parseFloat(n||0).toLocaleString('en-US', { minimumFractionDigits: 0 });
     const fmtD   = d => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -267,7 +311,7 @@ router.get('/', requireSpAuth, async (req, res) => {
     <!-- Header -->
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-gray-800">My Dashboard</h1>
-      <p class="text-gray-400 text-sm mt-1">${monthLabel} · Commission rate: <strong class="text-gray-700">${info.commission_rate}%</strong></p>
+      <p class="text-gray-400 text-sm mt-1">${monthLabel} · Current tier rate: <strong class="text-gray-700">${currentTierRate}%</strong></p>
     </div>
 
     <!-- Goal Progress -->
@@ -307,6 +351,32 @@ router.get('/', requireSpAuth, async (req, res) => {
     <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6 text-sm text-yellow-800">
       No goal set for ${monthLabel} yet. Ask your manager to set a monthly goal.
     </div>`}
+
+    <!-- Commission Tier -->
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+      <h2 class="font-semibold text-gray-700 mb-4">Commission Tier — ${monthLabel}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div>
+          <p class="text-xs text-gray-500 uppercase tracking-wide">Units This Month</p>
+          <p class="text-2xl font-bold text-gray-800 mt-1">${unitsThisMonth}</p>
+          ${unitsToNextTier !== null ? `<p class="text-xs text-gray-400 mt-1">${unitsToNextTier} more unit${unitsToNextTier === 1 ? '' : 's'} to reach ${nextTier.rate}% tier</p>` : '<p class="text-xs text-gray-400 mt-1">Top tier reached</p>'}
+        </div>
+        <div>
+          <p class="text-xs text-gray-500 uppercase tracking-wide">Pending Payout</p>
+          <p class="text-2xl font-bold text-yellow-600 mt-1">${fmt(pendingPayout)}</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500 uppercase tracking-wide">Paid To Date</p>
+          <p class="text-2xl font-bold text-green-700 mt-1">${fmt(paidTotal)}</p>
+        </div>
+      </div>
+      ${unitsToNextTier !== null ? `
+      <div class="mt-4">
+        <div class="h-3 bg-gray-100 rounded-full overflow-hidden">
+          <div class="h-3 bg-blue-500 rounded-full transition-all" style="width:${Math.min(100, (unitsThisMonth / nextTier.from * 100)).toFixed(0)}%"></div>
+        </div>
+      </div>` : ''}
+    </div>
 
     <!-- This Month Stats -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
