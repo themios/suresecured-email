@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "setup": "node src/setup.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "seed:contacts": "node scripts/seed-contacts.js"
   },
   "engines": {
     "node": ">=18"
