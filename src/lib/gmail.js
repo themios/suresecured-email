@@ -392,4 +392,4 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
 </html>`;
 }
 
-module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, buildDigestHtml, sendSequenceEmail, checkForReplies };
+module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, buildDigestHtml, sendSequenceEmail, checkForReplies, getAuthedClient, buildRawMessage };
