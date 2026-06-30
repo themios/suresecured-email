@@ -19,6 +19,7 @@ const gmailOAuthRouter = require('./routes/gmail-oauth');
 const cronRouter        = require('./routes/cron');
 const unsubscribeRouter = require('./routes/unsubscribe');
 const pixelRouter       = require('./routes/pixel');
+const emailClickRouter  = require('./routes/email-click');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,6 +37,9 @@ app.use('/r', redirectRouter);
 
 // Pixel tracking (no auth — must be publicly accessible)
 app.use('/pixel', pixelRouter);
+
+// Email click tracking (no auth — tracked email link redirect)
+app.use('/e', emailClickRouter);
 
 // Auth
 app.use('/', authRouter);

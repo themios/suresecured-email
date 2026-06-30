@@ -2,6 +2,7 @@ const { google } = require('googleapis');
 const nodemailer  = require('nodemailer');
 const { pool }    = require('../db');
 const { generateToken } = require('./unsubscribe');
+const { rewriteLinks }  = require('./email-tracking');
 
 function oauthClient() {
   return new google.auth.OAuth2(
@@ -225,14 +226,30 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
   const resolvedSubject = substituteVars(subject, vars);
   const resolvedBody    = substituteVars(body, vars);
 
-  const pixelToken   = require('crypto').randomUUID();
-  const trackerBase  = process.env.TRACKER_URL || 'https://your-app.railway.app';
-  const pixelUrl     = `${trackerBase}/pixel/${pixelToken}`;
+  // Pre-generate pixel token
+  const pixelToken  = require('crypto').randomUUID();
+  const trackerBase = process.env.TRACKER_URL || 'https://your-app.railway.app';
+  const pixelUrl    = `${trackerBase}/pixel/${pixelToken}`;
 
   const gmail          = google.gmail({ version: 'v1', auth: client });
   const fromName       = vars.salesperson_name || `${brandConfig.name || 'SureSecured'} Team`;
   const unsubscribeUrl = buildUnsubscribeUrl(to);
-  const html           = buildHtml(resolvedBody, fromName, unsubscribeUrl, brandConfig, pixelUrl);
+
+  // INSERT email_sends with status='sending' BEFORE Gmail send
+  // This is required: email_tracking_tokens has NOT NULL FK to email_sends.id
+  const insertResult = await pool.query(
+    `INSERT INTO email_sends
+       (enrollment_id, step_id, salesperson_id, lead_id, to_email, subject, status, pixel_token)
+     VALUES ($1,$2,$3,$4,$5,$6,'sending',$7)
+     RETURNING id`,
+    [enrollmentId, stepId, salespersonId, leadId, to, resolvedSubject, pixelToken]
+  );
+  const emailSendId = insertResult.rows[0].id;
+
+  // Rewrite body links AFTER insert (FK now satisfied)
+  const rewrittenBody = await rewriteLinks(resolvedBody, emailSendId);
+
+  const html = buildHtml(rewrittenBody, fromName, unsubscribeUrl, brandConfig, pixelUrl);
 
   try {
     const raw = await buildRawMessage({
@@ -240,18 +257,18 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
       fromAddress: account.email,
       to,
       subject: resolvedSubject,
-      textBody: resolvedBody,
+      textBody: rewrittenBody,
       htmlBody: html,
     });
 
     const sent = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
 
+    // Update status to 'sent' with Gmail message/thread IDs
     await pool.query(
-      `INSERT INTO email_sends
-         (enrollment_id, step_id, salesperson_id, lead_id, to_email, subject, gmail_message_id, gmail_thread_id, status, pixel_token)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sent',$9)`,
-      [enrollmentId, stepId, salespersonId, leadId, to, resolvedSubject,
-       sent.data.id, sent.data.threadId, pixelToken]
+      `UPDATE email_sends
+       SET status = 'sent', gmail_message_id = $1, gmail_thread_id = $2
+       WHERE id = $3`,
+      [sent.data.id, sent.data.threadId, emailSendId]
     );
 
     await pool.query(
@@ -262,10 +279,18 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
     return { ok: true, messageId: sent.data.id };
   } catch (err) {
     const msg = err.message || 'Unknown error';
+
+    // Update status to 'failed' — row already exists from pre-send INSERT
+    await pool.query(
+      `UPDATE email_sends SET status = 'failed' WHERE id = $1`,
+      [emailSendId]
+    ).catch(() => {}); // ignore secondary failure
+
     await pool.query(
       'UPDATE email_accounts SET last_error = $1 WHERE salesperson_id = $2',
       [msg.slice(0, 500), salespersonId]
     );
+
     return { ok: false, error: msg };
   }
 }
