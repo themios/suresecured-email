@@ -48,6 +48,9 @@ Recent decisions affecting current work:
 - 01-01: DO $$ FOREACH loop for client_id addition — more maintainable than 17 separate ALTER TABLE statements
 - 01-01: admin_users table kept in place — 01-02 will unify auth; co-existence is safe
 - 01-01: client_id nullable initially — backfill and NOT NULL enforcement deferred to application layer
+- 01-02: Login route at POST /auth/login (not /login) — GET /login still serves the form; legacy /logout kept
+- 01-02: spAuth DB-backed client_id lookup — fetches from salespeople row rather than expanding stale JWT
+- 01-02: requireRole uses rest-params with flat() — supports requireRole('op') and requireRole(['op','owner'])
 - 01-03: No EJS template engine introduced — inline Tailwind HTML via res.send() matches existing codebase pattern; clientFormHtml() is the "view" equivalent
 - 01-03: parseJsonField() helper normalizes JSONB textarea inputs (string → object) before DB storage
 
