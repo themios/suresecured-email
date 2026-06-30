@@ -99,7 +99,7 @@ function buildUnsubscribeUrl(email) {
   return `${base}/unsubscribe?t=${token}`;
 }
 
-function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}) {
+function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixelUrl = '') {
   const {
     primary_color = '#030302',
     accent_color  = '#E91111',
@@ -211,6 +211,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}) {
       </table>
     </td></tr>
   </table>
+  ${pixelUrl ? `<img src="${pixelUrl}" width="1" height="1" style="display:none;border:0" alt="" aria-hidden="true">` : ''}
 </body>
 </html>`;
 }
@@ -224,10 +225,14 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
   const resolvedSubject = substituteVars(subject, vars);
   const resolvedBody    = substituteVars(body, vars);
 
+  const pixelToken   = require('crypto').randomUUID();
+  const trackerBase  = process.env.TRACKER_URL || 'https://your-app.railway.app';
+  const pixelUrl     = `${trackerBase}/pixel/${pixelToken}`;
+
   const gmail          = google.gmail({ version: 'v1', auth: client });
   const fromName       = vars.salesperson_name || `${brandConfig.name || 'SureSecured'} Team`;
   const unsubscribeUrl = buildUnsubscribeUrl(to);
-  const html           = buildHtml(resolvedBody, fromName, unsubscribeUrl, brandConfig);
+  const html           = buildHtml(resolvedBody, fromName, unsubscribeUrl, brandConfig, pixelUrl);
 
   try {
     const raw = await buildRawMessage({
@@ -243,10 +248,10 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
 
     await pool.query(
       `INSERT INTO email_sends
-         (enrollment_id, step_id, salesperson_id, lead_id, to_email, subject, gmail_message_id, gmail_thread_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sent')`,
+         (enrollment_id, step_id, salesperson_id, lead_id, to_email, subject, gmail_message_id, gmail_thread_id, status, pixel_token)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sent',$9)`,
       [enrollmentId, stepId, salespersonId, leadId, to, resolvedSubject,
-       sent.data.id, sent.data.threadId]
+       sent.data.id, sent.data.threadId, pixelToken]
     );
 
     await pool.query(
