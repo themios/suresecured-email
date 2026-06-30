@@ -37,4 +37,40 @@ async function rewriteLinks(body, emailSendId) {
   });
 }
 
-module.exports = { rewriteLinks };
+/**
+ * Returns true if the Gmail API error message indicates a permanent address failure.
+ *
+ * SCOPE: API-level errors only. Gmail returns HTTP 200 for recipient-server 550 bounces
+ * (DSN emails arrive in the sender's inbox instead). This function only catches cases
+ * where the Gmail API itself rejects the send request.
+ *
+ * Error patterns matched (MEDIUM confidence — Gmail does not document these formally):
+ * - '550' in message — permanent SMTP rejection surfaced in API error
+ * - '553' in message — mailbox name invalid
+ * - 'invalid recipient' — Gmail rejected address at API layer
+ * - 'user not found' — recipient does not exist per Google
+ * - 'does not exist' — broad existence failure
+ * - 'mailbox unavailable' — recipient mailbox permanently unavailable
+ * - 'no such user' — SMTP permanent rejection
+ * - 'user unknown' — SMTP permanent rejection
+ *
+ * @param {string} errMsg - err.message from Gmail API catch block
+ * @returns {boolean}
+ */
+const PERM_BOUNCE_PATTERNS = [
+  /\b550\b/,
+  /\b553\b/,
+  /invalid\s+recipient/i,
+  /user\s+not\s+found/i,
+  /does\s+not\s+exist/i,
+  /mailbox\s+unavailable/i,
+  /no\s+such\s+user/i,
+  /user\s+unknown/i,
+];
+
+function isPermanentBounce(errMsg) {
+  if (!errMsg || typeof errMsg !== 'string') return false;
+  return PERM_BOUNCE_PATTERNS.some(pattern => pattern.test(errMsg));
+}
+
+module.exports = { rewriteLinks, isPermanentBounce };
