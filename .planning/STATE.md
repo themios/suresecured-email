@@ -82,6 +82,11 @@ Recent decisions affecting current work:
 - 03-02: rewriteLinks() outside try/catch — DB failures on token INSERT surface as thrown errors, not silent ok:false
 - 03-02: Click count increment is fire-and-forget after res.redirect() — minimizes redirect latency for email recipients
 - 03-02: URL de-duplication via Set before INSERT loop — one token per unique URL per send
+- 03-03: isPermanentBounce() added to email-tracking.js (not a separate file) — colocated with other email-send helpers
+- 03-03: Bounce scope is API-level errors only — true 550 DSN bounces (Gmail 200, inbox NDR) explicitly out of scope; documented in code
+- 03-03: suppression_list UNIQUE(email) has no client_id scoping — bounce in any client suppresses globally; ON CONFLICT DO NOTHING required
+- 03-03: Secondary bounce DB failure logs via console.error (not silent .catch) — observability for new code path
+- 03-03: permanentBounce:false returned for transient failures — cron.js only acts when flag is true; no behavior change for existing error path
 - 03-04: NULLIF(COUNT(es.id), 0) in SQL rather than COALESCE in JS — null semantics clean; JS handles null->0.0% display
 - 03-04: COUNT FILTER pattern over correlated subqueries — single-pass aggregation per sequence
 - 03-04: Bounce rate >5% threshold for red highlight — pragmatic industry benchmark; no config needed
@@ -100,5 +105,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-06-30T21:18:00Z
-Stopped at: Completed 03-04-PLAN.md — per-sequence deliverability report API + Deliverability Report UI table
+Stopped at: Completed 03-03-PLAN.md — isPermanentBounce(), bounce detection in sendSequenceEmail(), suppression + pause in cron.js (03-04 also complete from prior session)
 Resume file: None
