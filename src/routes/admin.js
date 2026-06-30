@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
 const { navHtml } = require('./analytics');
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -141,6 +141,12 @@ router.get('/', requireAuth, async (req, res) => {
 
   <div class="max-w-7xl mx-auto px-6 py-8">
     ${flash}
+
+    <div class="mb-4">
+      <a href="/admin/agency" class="inline-block px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition">
+        View Agency Dashboard (All Clients) &rarr;
+      </a>
+    </div>
 
     <!-- ── Salespeople ─────────────────────────────── -->
     <div class="bg-white rounded-xl shadow-sm mb-6 overflow-hidden">
@@ -824,6 +830,177 @@ router.post('/clients/:id', express.urlencoded({ extended: true }), requireAuth,
   } catch (err) {
     console.error('Update client error:', err);
     res.redirect('/admin/clients');
+  }
+});
+
+// ─── Agency Dashboard ──────────────────────────────────────────────────────
+
+router.get('/agency', requireAuth, requireRole('operator', 'owner'), async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        c.id,
+        c.name AS client_name,
+        c.slug,
+        COUNT(DISTINCT o.id)                                AS units_this_month,
+        COALESCE(SUM(o.amount), 0)                         AS revenue_this_month,
+        COALESCE(SUM(cm.commission_earned), 0)             AS commission_owed,
+        COALESCE(SUM(cm.commission_earned) FILTER (WHERE cm.status = 'paid'), 0) AS commission_paid,
+        COUNT(DISTINCT s.id)                               AS salesperson_count
+      FROM clients c
+        LEFT JOIN orders o  ON o.client_id = c.id
+          AND DATE_TRUNC('month', o.ordered_at) = DATE_TRUNC('month', NOW())
+        LEFT JOIN commissions cm ON cm.client_id = c.id
+          AND DATE_TRUNC('month', cm.created_at) = DATE_TRUNC('month', NOW())
+        LEFT JOIN salespeople s ON s.client_id = c.id AND s.active = true
+      WHERE c.organization_id = $1
+        AND c.active = true
+      GROUP BY c.id, c.name, c.slug
+      ORDER BY revenue_this_month DESC
+    `, [req.user.organization_id]);
+
+    const fmt = n => '$' + parseFloat(n||0).toLocaleString('en-US', { minimumFractionDigits: 0 });
+
+    const clientRows = rows.length === 0
+      ? `<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No clients yet.</td></tr>`
+      : rows.map(c => `
+        <tr class="border-t hover:bg-gray-50">
+          <td class="px-4 py-3 font-medium text-gray-900">${c.client_name}</td>
+          <td class="px-4 py-3 text-center text-sm">${c.salesperson_count}</td>
+          <td class="px-4 py-3 text-center text-sm">${c.units_this_month}</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-green-700">${fmt(c.revenue_this_month)}</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-blue-700">${fmt(c.commission_owed)}</td>
+          <td class="px-4 py-3 text-right">
+            <a href="/admin/agency/clients/${c.id}/dashboard" class="text-xs text-blue-600 hover:underline">View &rarr;</a>
+          </td>
+        </tr>`).join('');
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <title>SureSecured — Agency Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+  ${navHtml('admin')}
+  <div class="max-w-6xl mx-auto px-6 py-8">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-semibold text-gray-800">Agency Dashboard</h2>
+      <p class="text-sm text-gray-400">All clients — current month</p>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+          <tr>
+            <th class="px-4 py-3 text-left">Client</th>
+            <th class="px-4 py-3 text-center">Salespeople</th>
+            <th class="px-4 py-3 text-center">Units</th>
+            <th class="px-4 py-3 text-right">Revenue</th>
+            <th class="px-4 py-3 text-right">Commission Owed</th>
+            <th class="px-4 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>${clientRows}</tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>`);
+  } catch (err) {
+    console.error('Agency dashboard error:', err);
+    res.status(500).send('Server error loading agency dashboard');
+  }
+});
+
+router.get('/agency/clients/:clientId/dashboard', requireAuth, requireRole('operator', 'owner'), async (req, res) => {
+  try {
+    const clientCheck = await pool.query(
+      'SELECT id, name, organization_id FROM clients WHERE id = $1',
+      [req.params.clientId]
+    );
+    if (!clientCheck.rows.length || clientCheck.rows[0].organization_id !== req.user.organization_id) {
+      return res.status(404).send('Client not found');
+    }
+    const client = clientCheck.rows[0];
+
+    const { rows } = await pool.query(`
+      SELECT
+        s.id, s.name, s.email,
+        COUNT(o.id)                                     AS units_this_month,
+        COALESCE(SUM(o.amount), 0)                     AS revenue_this_month,
+        COALESCE(SUM(cm.commission_earned), 0)         AS commission_owed,
+        c.commission_rules
+      FROM salespeople s
+      JOIN clients c ON c.id = s.client_id
+      LEFT JOIN orders o ON o.salesperson_id = s.id
+        AND o.client_id = s.client_id
+        AND DATE_TRUNC('month', o.ordered_at) = DATE_TRUNC('month', NOW())
+      LEFT JOIN commissions cm ON cm.salesperson_id = s.id
+        AND cm.client_id = s.client_id
+        AND DATE_TRUNC('month', cm.created_at) = DATE_TRUNC('month', NOW())
+      WHERE s.client_id = $1 AND s.active = true
+      GROUP BY s.id, s.name, s.email, c.commission_rules
+      ORDER BY revenue_this_month DESC
+    `, [req.params.clientId]);
+
+    const fmt = n => '$' + parseFloat(n||0).toLocaleString('en-US', { minimumFractionDigits: 0 });
+    const { calculateCommission } = require('../lib/commissions');
+
+    const spRows = rows.length === 0
+      ? `<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No active salespeople for this client.</td></tr>`
+      : rows.map(sp => {
+          const units = parseInt(sp.units_this_month || 0);
+          const { rate } = calculateCommission(0, units, sp.commission_rules || {}, 100);
+          return `
+        <tr class="border-t hover:bg-gray-50">
+          <td class="px-4 py-3">
+            <div class="font-medium text-gray-900">${sp.name}</div>
+            <div class="text-xs text-gray-400">${sp.email}</div>
+          </td>
+          <td class="px-4 py-3 text-center text-sm">${units}</td>
+          <td class="px-4 py-3 text-center text-sm">${rate}%</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-green-700">${fmt(sp.revenue_this_month)}</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-blue-700">${fmt(sp.commission_owed)}</td>
+        </tr>`;
+        }).join('');
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <title>SureSecured — ${client.name} Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+  ${navHtml('admin')}
+  <div class="max-w-6xl mx-auto px-6 py-8">
+    <div class="flex justify-between items-center mb-4">
+      <div>
+        <a href="/admin/agency" class="text-xs text-blue-600 hover:underline">&larr; Back to Agency Dashboard</a>
+        <h2 class="text-xl font-semibold text-gray-800 mt-1">${client.name}</h2>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+          <tr>
+            <th class="px-4 py-3 text-left">Salesperson</th>
+            <th class="px-4 py-3 text-center">Units This Month</th>
+            <th class="px-4 py-3 text-center">Current Tier</th>
+            <th class="px-4 py-3 text-right">Revenue</th>
+            <th class="px-4 py-3 text-right">Commission Owed</th>
+          </tr>
+        </thead>
+        <tbody>${spRows}</tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>`);
+  } catch (err) {
+    console.error('Client drilldown error:', err);
+    res.status(500).send('Server error loading client dashboard');
   }
 });
 
