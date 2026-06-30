@@ -64,6 +64,9 @@ Recent decisions affecting current work:
 - 02-01: No test framework introduced — plain node:assert script keeps zero-devDependencies style
 - 02-01: tier.to is exclusive upper bound — thisUnit <= t.to means boundary unit stays in current tier
 - 02-01: Bonus filter unitsBefore < b.units && thisUnit >= b.units — triggers exactly once at crossing sale
+- 02-02: calculateCommission(0, unitsThisMonth, rules, flatRate) called with saleAmount=0 to display current tier rate — earned discarded; same code path as webhook ensures displayed rate matches actual earned rate
+- 02-02: nextTier = tiers.find(t => t.from >= unitsThisMonth) — finds first uncrossed threshold for progress indicator; null means top tier reached
+- 02-02: req.salesperson.client_id used directly in payout split query param — populated by spAuth middleware, not re-fetched from DB
 - 02-03: requireRole imported alongside requireAuth — co-located imports, consistent with middleware/auth.js exports
 - 02-03: calculateCommission(0, units, rules, 100) with passAmount=0 in drilldown — gets rate only, avoids double-counting stored commission amounts
 - 02-03: Cross-org guard uses !== strict comparison on organization_id — pg driver and JWT both produce number type; safe and explicit
@@ -84,6 +87,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T20:48:00Z
-Stopped at: Completed 02-03-PLAN.md — agency dashboard and per-client drilldown routes (backfilled after 02-04)
+Last session: 2026-06-30T20:51:00Z
+Stopped at: Completed 02-02-PLAN.md — portal dashboard tier context, pending/paid payout split
 Resume file: None
