@@ -149,6 +149,72 @@ async function initDb() {
     ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS callrail_number_id VARCHAR(255);
   `);
 
+  // Email campaign tables
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS email_accounts (
+      id SERIAL PRIMARY KEY,
+      salesperson_id INTEGER REFERENCES salespeople(id) ON DELETE CASCADE,
+      email VARCHAR(255) NOT NULL,
+      oauth_refresh_token TEXT,
+      oauth_access_token TEXT,
+      oauth_token_expiry TIMESTAMPTZ,
+      enabled BOOLEAN DEFAULT true,
+      last_error TEXT,
+      connected_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(salesperson_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS sequences (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      description TEXT,
+      audience_type VARCHAR(10) DEFAULT 'B2C',
+      active BOOLEAN DEFAULT true,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS sequence_steps (
+      id SERIAL PRIMARY KEY,
+      sequence_id INTEGER REFERENCES sequences(id) ON DELETE CASCADE,
+      step_number INTEGER NOT NULL,
+      delay_days INTEGER NOT NULL DEFAULT 0,
+      subject VARCHAR(500) NOT NULL,
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(sequence_id, step_number)
+    );
+
+    CREATE TABLE IF NOT EXISTS contact_enrollments (
+      id SERIAL PRIMARY KEY,
+      lead_id INTEGER REFERENCES leads(id) ON DELETE CASCADE,
+      sequence_id INTEGER REFERENCES sequences(id) ON DELETE CASCADE,
+      salesperson_id INTEGER REFERENCES salespeople(id),
+      status VARCHAR(20) DEFAULT 'active',
+      current_step INTEGER DEFAULT 0,
+      enrolled_at TIMESTAMPTZ DEFAULT NOW(),
+      next_send_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_at TIMESTAMPTZ,
+      paused_reason VARCHAR(50),
+      UNIQUE(lead_id, sequence_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS email_sends (
+      id SERIAL PRIMARY KEY,
+      enrollment_id INTEGER REFERENCES contact_enrollments(id) ON DELETE CASCADE,
+      step_id INTEGER REFERENCES sequence_steps(id),
+      salesperson_id INTEGER REFERENCES salespeople(id),
+      lead_id INTEGER REFERENCES leads(id),
+      to_email VARCHAR(255),
+      subject TEXT,
+      gmail_message_id VARCHAR(255),
+      gmail_thread_id VARCHAR(255),
+      status VARCHAR(20) DEFAULT 'sent',
+      sent_at TIMESTAMPTZ DEFAULT NOW(),
+      opened_at TIMESTAMPTZ,
+      replied_at TIMESTAMPTZ
+    );
+  `);
+
   await seedLandingPageMatrix();
 
   console.log('Database tables ready.');

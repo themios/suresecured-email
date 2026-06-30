@@ -10,8 +10,11 @@ const authRouter = require('./routes/auth');
 const dashboardRouter = require('./routes/dashboard');
 const phonecallRouter = require('./routes/phonecall');
 const { router: analyticsRouter } = require('./routes/analytics');
-const adminRouter = require('./routes/admin');
-const portalRouter = require('./routes/portal');
+const adminRouter     = require('./routes/admin');
+const portalRouter    = require('./routes/portal');
+const sequencesRouter = require('./routes/sequences');
+const gmailOAuthRouter = require('./routes/gmail-oauth');
+const cronRouter      = require('./routes/cron');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,6 +50,15 @@ app.use('/admin', adminRouter);
 
 // Salesperson portal
 app.use('/portal', portalRouter);
+
+// Email sequences
+app.use('/sequences', sequencesRouter);
+
+// Gmail OAuth connect/callback
+app.use('/gmail', gmailOAuthRouter);
+
+// Cron — send due emails
+app.use('/cron', cronRouter);
 
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

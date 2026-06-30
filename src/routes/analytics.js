@@ -20,9 +20,10 @@ function navHtml(activePage) {
           <span class="text-gray-400 text-sm ml-2">Commission Tracker</span>
         </div>
         <div class="flex gap-1">
-          ${tab('Overview', '/dashboard', 'dashboard')}
-          ${tab('Analytics', '/analytics', 'analytics')}
-          ${tab('Admin', '/admin', 'admin')}
+          ${tab('Overview',  '/dashboard',  'dashboard')}
+          ${tab('Analytics', '/analytics',  'analytics')}
+          ${tab('Sequences', '/sequences',  'sequences')}
+          ${tab('Admin',     '/admin',      'admin')}
         </div>
       </div>
       <a href="/logout" class="text-sm text-gray-500 hover:text-red-600 transition">Sign out</a>
