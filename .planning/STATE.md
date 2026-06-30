@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 2 of 5 (Commission Engine) — In progress
-Plan: 1/4 complete in current phase
-Status: In progress
-Last activity: 2026-06-30 — Completed 02-01-PLAN.md
+Plan: 4/4 complete in current phase
+Status: Phase complete
+Last activity: 2026-06-30 — Completed 02-04-PLAN.md
 
-Progress: [██████░░░░] 60%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -28,10 +28,10 @@ Progress: [██████░░░░] 60%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-foundation | 5/5 | 47 min | 9 min |
-| 02-commission-engine | 1/4 | 12 min | 12 min |
+| 02-commission-engine | 4/4 | ~20 min | ~5 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-03 (12 min), 01-04 (12 min), 01-05 (8 min), 02-01 (12 min)
+- Last 5 plans: 01-05 (8 min), 02-01 (12 min), 02-04 (8 min)
 - Trend: consistent
 
 *Updated after each plan completion*
@@ -64,6 +64,9 @@ Recent decisions affecting current work:
 - 02-01: No test framework introduced — plain node:assert script keeps zero-devDependencies style
 - 02-01: tier.to is exclusive upper bound — thisUnit <= t.to means boundary unit stays in current tier
 - 02-01: Bonus filter unitsBefore < b.units && thisUnit >= b.units — triggers exactly once at crossing sale
+- 02-04: clientId null path records order but skips commission — avoids Shopify retry storm on unknown shop domain
+- 02-04: spResult joins on salesperson's own client_id (not webhook-resolved) to fetch commission_rules — multi-client edge case deferred v2
+- 02-04: unitsBefore query excludes current orderId to get correct pre-sale unit count for tier lookup
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T20:28:10Z
-Stopped at: Completed 02-01-PLAN.md — tiered commission module, unit tests, schema migration
+Last session: 2026-06-30T20:43:00Z
+Stopped at: Completed 02-04-PLAN.md — Shopify webhook tiered commission engine with client_id resolution
 Resume file: None
