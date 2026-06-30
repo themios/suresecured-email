@@ -10,28 +10,28 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 1 of 5 (Foundation)
-Plan: 3 of 5 in current phase
+Plan: 4 of 5 in current phase
 Status: In progress
-Last activity: 2026-06-30 — Completed 01-03-PLAN.md (Client management UI)
+Last activity: 2026-06-30 — Completed 01-04-PLAN.md (dynamic email branding)
 
-Progress: [███░░░░░░░] 30%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 1
-- Average duration: 15 min
-- Total execution time: 15 min
+- Total plans completed: 4
+- Average duration: 10 min
+- Total execution time: 39 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-foundation | 3/5 | 27 min | 9 min |
+| 01-foundation | 4/5 | 39 min | 10 min |
 
 **Recent Trend:**
-- Last 5 plans: 01-01 (15 min), 01-03 (12 min)
-- Trend: faster
+- Last 5 plans: 01-01 (15 min), 01-03 (12 min), 01-04 (12 min)
+- Trend: consistent
 
 *Updated after each plan completion*
 
@@ -53,6 +53,9 @@ Recent decisions affecting current work:
 - 01-02: requireRole uses rest-params with flat() — supports requireRole('op') and requireRole(['op','owner'])
 - 01-03: No EJS template engine introduced — inline Tailwind HTML via res.send() matches existing codebase pattern; clientFormHtml() is the "view" equivalent
 - 01-03: parseJsonField() helper normalizes JSONB textarea inputs (string → object) before DB storage
+- 01-04: SureSecured values kept as brandConfig destructure defaults — backward-compatible; NULL client_id rows render SureSecured branding without backfill
+- 01-04: buildHtml() exported from gmail.js — enables direct unit testing; previously unexported
+- 01-04: phoneDigits derived via phone.replace(/\D/g,'') — tel: href handles any phone format in brand_config
 
 ### Pending Todos
 
@@ -67,6 +70,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T18:47:00Z
-Stopped at: Completed 01-03-PLAN.md — Client management UI routes in admin.js
+Last session: 2026-06-30T18:29:00Z
+Stopped at: Completed 01-04-PLAN.md — dynamic email branding via brandConfig in gmail.js and cron.js
 Resume file: None
