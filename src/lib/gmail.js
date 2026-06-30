@@ -100,10 +100,12 @@ function buildUnsubscribeUrl(email) {
 }
 
 function buildHtml(body, salespersonName, unsubscribeUrl) {
+  // Brand colors extracted directly from suresecured.com
+  // Near-black: #030302  |  Red CTA: #E91111  |  Warm gray: #EDEBE7  |  Info blue: #CBDEE8
   const paragraphs = body.split(/\n\n+/).map(p =>
-    '<p style="margin:0 0 16px 0">' +
+    '<p style="margin:0 0 18px 0;color:#030302;font-size:15px;line-height:1.75">' +
     p.split('\n').map(line =>
-      line.replace(/(https?:\/\/[^\s<>"]+)/g, '<a href="$1" style="color:#c8922a;font-weight:600">$1</a>')
+      line.replace(/(https?:\/\/[^\s<>"]+)/g, '<a href="$1" style="color:#E91111;font-weight:600;text-decoration:underline">$1</a>')
     ).join('<br>') +
     '</p>'
   ).join('\n');
@@ -114,59 +116,82 @@ function buildHtml(body, salespersonName, unsubscribeUrl) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="light">
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 </head>
-<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Helvetica Neue',Arial,sans-serif">
-  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f0f2f5;padding:40px 16px">
+<body style="margin:0;padding:0;background:#f4f4f2;-webkit-text-size-adjust:100%;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f4f2;padding:32px 16px">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%">
 
-        <!-- Header -->
-        <tr><td style="background:#0d2d52;border-radius:10px 10px 0 0;padding:28px 40px">
+        <!-- Announcement bar — matches site's info bar -->
+        <tr><td style="background:#CBDEE8;padding:10px 32px;text-align:center">
+          <span style="font-size:12px;color:#030302;font-weight:600;letter-spacing:0.2px">For More Information Call/Text: <a href="tel:7476889992" style="color:#030302;text-decoration:none;font-weight:700">(747) 688-9992</a></span>
+        </td></tr>
+
+        <!-- Header — matches site nav (near-black) -->
+        <tr><td style="background:#030302;padding:22px 32px">
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
             <tr>
               <td>
-                <span style="color:#ffffff;font-size:22px;font-weight:800;letter-spacing:-0.5px">SURE<span style="color:#c8922a">SECURED</span></span>
-                <br>
-                <span style="color:#8bafd4;font-size:11px;letter-spacing:1.5px;text-transform:uppercase">Marine-Grade Security Screen Doors &amp; Windows</span>
+                <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">SureSecured</span>
               </td>
               <td align="right">
-                <span style="color:#c8922a;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase">Simi Valley, CA</span>
+                <span style="color:#ffffff;font-size:11px;opacity:0.6;letter-spacing:0.5px">suresecured.com</span>
               </td>
             </tr>
           </table>
         </td></tr>
 
-        <!-- Gold accent bar -->
-        <tr><td style="background:#c8922a;height:3px;font-size:0;line-height:0">&nbsp;</td></tr>
+        <!-- Red accent bar — matches site's red CTA strip -->
+        <tr><td style="background:#E91111;height:4px;font-size:0;line-height:0">&nbsp;</td></tr>
 
-        <!-- Body -->
-        <tr><td style="background:#ffffff;padding:36px 40px;color:#2d3748;font-size:15px;line-height:1.7">
+        <!-- Body — white card, matches site body -->
+        <tr><td style="background:#ffffff;padding:36px 40px">
           ${paragraphs}
 
-          <!-- Signature divider -->
-          <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin-top:28px;border-top:2px solid #c8922a">
-            <tr><td style="padding-top:20px">
-              <p style="margin:0;font-size:14px;color:#2d3748;font-weight:700">${salespersonName}</p>
-              <p style="margin:4px 0 0;font-size:13px;color:#64748b">Security Specialist &mdash; SureSecured</p>
-              <p style="margin:4px 0 0;font-size:13px;color:#64748b">📞 (805) 527-3511 &nbsp;|&nbsp; 🌐 <a href="https://suresecured.com" style="color:#0d2d52;text-decoration:none">suresecured.com</a></p>
-              <p style="margin:12px 0 0;font-size:13px;color:#64748b">
+          <!-- Quote CTA — red button matching site's primary CTA style -->
+          <table cellpadding="0" cellspacing="0" role="presentation" style="margin-top:28px">
+            <tr>
+              <td style="background:#E91111;border-radius:4px">
                 <a href="https://suresecured.com/pages/request-a-quote"
-                   style="display:inline-block;background:#0d2d52;color:#ffffff;padding:10px 22px;border-radius:5px;text-decoration:none;font-weight:700;font-size:13px">
-                  Request a Free Quote →
+                   style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;letter-spacing:0.2px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+                  Request a Free Quote &rarr;
                 </a>
-              </p>
-            </td></tr>
+              </td>
+              <td width="12"></td>
+              <td style="border:2px solid #030302;border-radius:4px">
+                <a href="https://suresecured.com"
+                   style="display:inline-block;padding:11px 24px;color:#030302;font-size:14px;font-weight:600;text-decoration:none;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+                  Shop Products
+                </a>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+
+        <!-- Signature — warm gray card, matches site card bg -->
+        <tr><td style="background:#EDEBE7;padding:24px 40px;border-top:1px solid #d8d6d2">
+          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+            <tr>
+              <td>
+                <p style="margin:0;font-size:14px;color:#030302;font-weight:700;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${salespersonName}</p>
+                <p style="margin:3px 0 0;font-size:12px;color:#5a5a58">Security Specialist &mdash; SureSecured</p>
+                <p style="margin:6px 0 0;font-size:12px;color:#5a5a58">
+                  <a href="tel:7476889992" style="color:#030302;text-decoration:none;font-weight:600">(747) 688-9992</a>
+                  &nbsp;&nbsp;|&nbsp;&nbsp;
+                  <a href="https://suresecured.com" style="color:#030302;text-decoration:none;font-weight:600">suresecured.com</a>
+                </p>
+              </td>
+            </tr>
           </table>
         </td></tr>
 
         <!-- Footer -->
-        <tr><td style="background:#f8f9fb;border-top:1px solid #e2e8f0;border-radius:0 0 10px 10px;padding:20px 40px">
-          <p style="color:#94a3b8;font-size:11px;margin:0;line-height:1.6;text-align:center">
-            You are receiving this email because you previously requested information from SureSecured.<br>
-            <strong style="color:#64748b">SureSecured Security Products</strong> &bull; Simi Valley, CA 93063<br>
-            <a href="${unsubscribeUrl}" style="color:#94a3b8;text-decoration:underline">Unsubscribe</a>
-            &nbsp;&bull;&nbsp;
-            <a href="https://suresecured.com" style="color:#94a3b8;text-decoration:underline">suresecured.com</a>
+        <tr><td style="background:#EDEBE7;padding:16px 40px 24px;border-top:1px solid #d8d6d2;border-radius:0 0 6px 6px">
+          <p style="color:#8a8a88;font-size:11px;margin:0;line-height:1.7;text-align:center;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+            You received this because you requested information from SureSecured.<br>
+            SureSecured Security Products &bull; Simi Valley, CA 93063<br>
+            <a href="${unsubscribeUrl}" style="color:#8a8a88;text-decoration:underline">Unsubscribe</a>
           </p>
         </td></tr>
 
