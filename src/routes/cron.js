@@ -179,6 +179,27 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
       } else {
         errors++;
         console.error(`[cron] send failed for enrollment ${row.enrollment_id}:`, sendResult.error);
+
+        // Handle permanent bounce: suppress email address and pause enrollment
+        if (sendResult.permanentBounce) {
+          try {
+            await client.query(
+              `INSERT INTO suppression_list (email, reason, client_id)
+               VALUES ($1, 'bounced', $2)
+               ON CONFLICT (email) DO NOTHING`,
+              [row.lead_email, row.client_id]
+            );
+            await client.query(
+              `UPDATE contact_enrollments
+               SET status = 'paused', paused_reason = 'bounced'
+               WHERE id = $1`,
+              [row.enrollment_id]
+            );
+            console.log(`[cron] permanent bounce — suppressed ${row.lead_email}, paused enrollment ${row.enrollment_id}`);
+          } catch (bounceErr) {
+            console.error('[cron] bounce suppression failed:', bounceErr.message);
+          }
+        }
       }
     }
 

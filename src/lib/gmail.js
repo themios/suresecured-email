@@ -2,7 +2,7 @@ const { google } = require('googleapis');
 const nodemailer  = require('nodemailer');
 const { pool }    = require('../db');
 const { generateToken } = require('./unsubscribe');
-const { rewriteLinks }  = require('./email-tracking');
+const { rewriteLinks, isPermanentBounce }  = require('./email-tracking');
 
 function oauthClient() {
   return new google.auth.OAuth2(
@@ -286,12 +286,23 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
       [emailSendId]
     ).catch(() => {}); // ignore secondary failure
 
+    // Detect permanent bounce and mark the email_sends row
+    const isBounce = isPermanentBounce(msg);
+    if (isBounce) {
+      await pool.query(
+        `UPDATE email_sends
+         SET bounced = TRUE, bounce_error = $1
+         WHERE id = $2`,
+        [msg.slice(0, 500), emailSendId]
+      ).catch(err2 => console.error('[bounce] db update error:', err2.message));
+    }
+
     await pool.query(
       'UPDATE email_accounts SET last_error = $1 WHERE salesperson_id = $2',
       [msg.slice(0, 500), salespersonId]
     );
 
-    return { ok: false, error: msg };
+    return { ok: false, error: msg, permanentBounce: isBounce };
   }
 }
 
