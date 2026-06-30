@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 3 of 5 (Email Deliverability) — In progress
-Plan: 1/4 complete
+Plan: 2/4 complete
 Status: In progress
-Last activity: 2026-06-30 — Completed 03-01-PLAN.md — migration 003, pixel route, buildHtml pixel injection
+Last activity: 2026-06-30 — Completed 03-02-PLAN.md — rewriteLinks(), /e/:token route, INSERT-before-send ordering
 
-Progress: [██████████░░░░░░░░░░] 50% (phases 1–2 + 03-01)
+Progress: [████████████░░░░░░░░] 55% (phases 1–2 + 03-01 + 03-02)
 
 ## Performance Metrics
 
@@ -29,7 +29,7 @@ Progress: [██████████░░░░░░░░░░] 50% (ph
 |-------|-------|-------|----------|
 | 01-foundation | 5/5 | 47 min | 9 min |
 | 02-commission-engine | 4/4 | ~20 min | ~5 min |
-| 03-email-deliverability | 1/4 | 8 min | 8 min |
+| 03-email-deliverability | 2/4 | ~16 min | ~8 min |
 
 **Recent Trend:**
 - Last 5 plans: 01-05 (8 min), 02-01 (12 min), 02-04 (8 min)
@@ -78,6 +78,10 @@ Recent decisions affecting current work:
 - 03-01: Pixel route responds immediately then fires async DB update — email clients time out image requests in ~1-2s
 - 03-01: COALESCE(opened_at, NOW()) in pixel UPDATE — sets opened_at on first open only, preserves original timestamp on repeat hits
 - 03-01: buildHtml() pixelUrl param defaults to '' and only injects img tag when truthy — backward-compatible
+- 03-02: INSERT email_sends with status='sending' before Gmail API call — email_tracking_tokens.email_send_id is NOT NULL FK, must insert parent first
+- 03-02: rewriteLinks() outside try/catch — DB failures on token INSERT surface as thrown errors, not silent ok:false
+- 03-02: Click count increment is fire-and-forget after res.redirect() — minimizes redirect latency for email recipients
+- 03-02: URL de-duplication via Set before INSERT loop — one token per unique URL per send
 
 ### Pending Todos
 
@@ -92,6 +96,6 @@ Recent decisions affecting current work:
 
 ## Session Continuity
 
-Last session: 2026-06-30T21:22:00Z
-Stopped at: Completed 03-01-PLAN.md — migration 003, pixel route, buildHtml pixel injection
+Last session: 2026-06-30T20:59:00Z
+Stopped at: Completed 03-02-PLAN.md — rewriteLinks(), /e/:token click route, INSERT-before-send refactor
 Resume file: None
