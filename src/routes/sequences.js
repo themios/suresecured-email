@@ -353,6 +353,28 @@ router.get('/', requireAuth, async (req, res) => {
       </div>
     </div>
 
+    <!-- Deliverability Report -->
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="font-semibold text-gray-700">Deliverability Report</h2>
+        <span class="text-xs text-gray-400">Open, click, and bounce rates per sequence</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm" id="report-table">
+          <thead><tr class="text-left text-gray-500 border-b">
+            <th class="pb-2">Sequence</th>
+            <th class="pb-2 text-right">Total Sends</th>
+            <th class="pb-2 text-right">Open Rate</th>
+            <th class="pb-2 text-right">Click Rate</th>
+            <th class="pb-2 text-right">Bounce Rate</th>
+          </tr></thead>
+          <tbody id="report-body">
+            <tr><td colspan="5" class="py-4 text-center text-gray-400">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Contact Import -->
     <div class="bg-white rounded-xl shadow-sm p-6">
       <h2 class="font-semibold text-gray-700 mb-4">Import Contacts (CSV)</h2>
@@ -750,6 +772,38 @@ function importCsv() {
   };
   reader.readAsText(file);
 }
+
+function loadReport() {
+  fetch('/sequences/api/sequences/report')
+    .then(function(r) { return r.json(); })
+    .then(function(rows) {
+      var tbody = document.getElementById('report-body');
+      if (!rows || !rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">No data yet — send some emails first</td></tr>';
+        return;
+      }
+      tbody.innerHTML = rows.map(function(r) {
+        var openRate   = r.open_rate_pct   != null ? r.open_rate_pct   + '%' : '0.0%';
+        var clickRate  = r.click_rate_pct  != null ? r.click_rate_pct  + '%' : '0.0%';
+        var bounceRate = r.bounce_rate_pct != null ? r.bounce_rate_pct + '%' : '0.0%';
+        var bounceClass = parseFloat(r.bounce_rate_pct) > 5 ? 'text-red-600 font-semibold' : 'text-gray-700';
+        return '<tr class="border-b last:border-0">' +
+          '<td class="py-2 font-medium">' + r.sequence_name + '</td>' +
+          '<td class="py-2 text-right text-gray-600">' + (r.total_sends || 0) + '</td>' +
+          '<td class="py-2 text-right text-green-700 font-medium">' + openRate + '</td>' +
+          '<td class="py-2 text-right text-blue-700 font-medium">'  + clickRate + '</td>' +
+          '<td class="py-2 text-right ' + bounceClass + '">' + bounceRate + '</td>' +
+        '</tr>';
+      }).join('');
+    })
+    .catch(function(err) {
+      document.getElementById('report-body').innerHTML =
+        '<tr><td colspan="5" class="py-4 text-center text-red-400">Failed to load report</td></tr>';
+    });
+}
+
+// Load report on page load
+loadReport();
 </script>
 </body>
 </html>`);
