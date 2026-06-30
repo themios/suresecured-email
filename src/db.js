@@ -98,6 +98,21 @@ async function initDb() {
   `);
 
   await pool.query(`
+    ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS portal_password_hash VARCHAR(255);
+
+    CREATE TABLE IF NOT EXISTS salesperson_goals (
+      id SERIAL PRIMARY KEY,
+      salesperson_id INTEGER REFERENCES salespeople(id) ON DELETE CASCADE,
+      period_start DATE NOT NULL,
+      period_type VARCHAR(20) DEFAULT 'monthly',
+      target_revenue NUMERIC(10,2) DEFAULT 0,
+      target_orders INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(salesperson_id, period_start)
+    );
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS phone_calls (
       id SERIAL PRIMARY KEY,
       salesperson_id INTEGER REFERENCES salespeople(id),

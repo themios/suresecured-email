@@ -11,6 +11,7 @@ const dashboardRouter = require('./routes/dashboard');
 const phonecallRouter = require('./routes/phonecall');
 const { router: analyticsRouter } = require('./routes/analytics');
 const adminRouter = require('./routes/admin');
+const portalRouter = require('./routes/portal');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -43,6 +44,9 @@ app.use('/analytics', analyticsRouter);
 
 // Admin
 app.use('/admin', adminRouter);
+
+// Salesperson portal
+app.use('/portal', portalRouter);
 
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

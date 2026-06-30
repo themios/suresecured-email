@@ -32,8 +32,14 @@ function navHtml(activePage) {
 // Data endpoint — returns all chart data as JSON
 router.get('/data', requireAuth, async (req, res) => {
   const days = parseInt(req.query.days) || 30;
+  const spFilter = req.query.sp ? parseInt(req.query.sp) : null;
 
   try {
+    const spWhere = spFilter ? `AND salesperson_id = ${spFilter}` : '';
+    const spWhereL = spFilter ? `AND l.salesperson_id = ${spFilter}` : '';
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+
     const [
       revenueByDay,
       clicksByDay,
@@ -43,44 +49,36 @@ router.get('/data', requireAuth, async (req, res) => {
       funnel,
       audienceSplit,
       topProducts,
+      goalVsActual,
+      salespeople,
     ] = await Promise.all([
 
-      // Revenue per day
       pool.query(`
         SELECT DATE(ordered_at) AS date, COALESCE(SUM(amount),0) AS revenue
-        FROM orders
-        WHERE ordered_at >= NOW() - INTERVAL '${days} days'
+        FROM orders WHERE ordered_at >= NOW() - INTERVAL '${days} days' ${spWhere}
         GROUP BY DATE(ordered_at) ORDER BY date
       `),
 
-      // Clicks per day
       pool.query(`
         SELECT DATE(clicked_at) AS date, COUNT(*) AS clicks
-        FROM clicks
-        WHERE clicked_at >= NOW() - INTERVAL '${days} days'
+        FROM clicks WHERE clicked_at >= NOW() - INTERVAL '${days} days' ${spWhere}
         GROUP BY DATE(clicked_at) ORDER BY date
       `),
 
-      // Phone calls per day
       pool.query(`
         SELECT DATE(called_at) AS date, COUNT(*) AS calls
-        FROM phone_calls
-        WHERE called_at >= NOW() - INTERVAL '${days} days'
+        FROM phone_calls WHERE called_at >= NOW() - INTERVAL '${days} days' ${spWhere}
         GROUP BY DATE(called_at) ORDER BY date
       `),
 
-      // Form submissions per day
       pool.query(`
         SELECT DATE(submitted_at) AS date, COUNT(*) AS forms
-        FROM form_submissions
-        WHERE submitted_at >= NOW() - INTERVAL '${days} days'
+        FROM form_submissions WHERE submitted_at >= NOW() - INTERVAL '${days} days' ${spWhere}
         GROUP BY DATE(submitted_at) ORDER BY date
       `),
 
-      // Commission & revenue per salesperson
       pool.query(`
-        SELECT
-          s.name,
+        SELECT s.name,
           COALESCE(SUM(o.amount), 0) AS revenue,
           COALESCE(SUM(cm.commission_earned), 0) AS commission,
           COUNT(DISTINCT o.id) AS orders,
@@ -89,36 +87,48 @@ router.get('/data', requireAuth, async (req, res) => {
         LEFT JOIN orders o ON o.salesperson_id = s.id
         LEFT JOIN commissions cm ON cm.salesperson_id = s.id
         LEFT JOIN clicks c ON c.salesperson_id = s.id
-        WHERE s.active = true
+        WHERE s.active = true ${spFilter ? 'AND s.id = ' + spFilter : ''}
         GROUP BY s.name ORDER BY revenue DESC LIMIT 10
       `),
 
-      // Conversion funnel totals
       pool.query(`
         SELECT
-          (SELECT COUNT(*) FROM leads) AS total_leads,
-          (SELECT COUNT(*) FROM clicks) AS total_clicks,
-          (SELECT COUNT(*) FROM form_submissions) AS total_forms,
-          (SELECT COUNT(*) FROM phone_calls) AS total_calls,
-          (SELECT COUNT(*) FROM orders) AS total_orders
+          (SELECT COUNT(*) FROM leads ${spFilter ? 'WHERE salesperson_id = ' + spFilter : ''}) AS total_leads,
+          (SELECT COUNT(*) FROM clicks ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_clicks,
+          (SELECT COUNT(*) FROM form_submissions ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_forms,
+          (SELECT COUNT(*) FROM phone_calls ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_calls,
+          (SELECT COUNT(*) FROM orders ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_orders
       `),
 
-      // B2C vs B2B split
       pool.query(`
-        SELECT audience_type, COUNT(*) AS count
-        FROM leads
-        GROUP BY audience_type
+        SELECT l.audience_type, COUNT(*) AS count FROM leads l
+        WHERE 1=1 ${spWhereL}
+        GROUP BY l.audience_type
       `),
 
-      // Top product interests
       pool.query(`
-        SELECT
-          COALESCE(product_interest, 'Unknown') AS product,
-          COUNT(*) AS count
-        FROM leads
-        GROUP BY product_interest
-        ORDER BY count DESC LIMIT 6
+        SELECT COALESCE(l.product_interest, 'Unknown') AS product, COUNT(*) AS count
+        FROM leads l WHERE 1=1 ${spWhereL}
+        GROUP BY l.product_interest ORDER BY count DESC LIMIT 6
       `),
+
+      // Goal vs actual for each salesperson (current month)
+      pool.query(`
+        SELECT s.name,
+          COALESCE(g.target_revenue, 0) AS goal_revenue,
+          COALESCE(SUM(o.amount), 0)    AS actual_revenue,
+          COALESCE(g.target_orders, 0)  AS goal_orders,
+          COUNT(DISTINCT o.id)          AS actual_orders
+        FROM salespeople s
+        LEFT JOIN salesperson_goals g ON g.salesperson_id = s.id AND g.period_start = $1
+        LEFT JOIN orders o ON o.salesperson_id = s.id AND DATE(o.ordered_at) >= $1
+        WHERE s.active = true ${spFilter ? 'AND s.id = ' + spFilter : ''}
+        GROUP BY s.name, g.target_revenue, g.target_orders
+        ORDER BY actual_revenue DESC
+      `, [monthStart]),
+
+      // Salesperson list for dropdown
+      pool.query('SELECT id, name FROM salespeople WHERE active = true ORDER BY name'),
     ]);
 
     res.json({
@@ -130,6 +140,8 @@ router.get('/data', requireAuth, async (req, res) => {
       funnel: funnel.rows[0],
       audienceSplit: audienceSplit.rows,
       topProducts: topProducts.rows,
+      goalVsActual: goalVsActual.rows,
+      salespeople: salespeople.rows,
     });
   } catch (err) {
     console.error('Analytics data error:', err);
@@ -153,10 +165,14 @@ router.get('/', requireAuth, async (req, res) => {
 
   <div class="max-w-7xl mx-auto px-6 py-8">
 
-    <!-- Period selector -->
-    <div class="flex justify-between items-center mb-6">
+    <!-- Filters -->
+    <div class="flex flex-wrap justify-between items-center gap-3 mb-6">
       <h1 class="text-xl font-bold text-gray-800">Analytics</h1>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2 items-center">
+        <select id="sp-filter" onchange="loadData(activeDays)"
+          class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400">
+          <option value="">All Salespeople</option>
+        </select>
         <button onclick="loadData(7)"  id="btn-7"  class="period-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white transition">7d</button>
         <button onclick="loadData(30)" id="btn-30" class="period-btn px-3 py-1.5 text-sm rounded-lg border border-blue-500 bg-blue-600 text-white transition">30d</button>
         <button onclick="loadData(60)" id="btn-60" class="period-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white transition">60d</button>
@@ -230,6 +246,14 @@ router.get('/', requireAuth, async (req, res) => {
 
     </div>
 
+    <!-- Goal vs Actual -->
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
+      <h2 class="font-semibold text-gray-700 mb-1 text-sm uppercase tracking-wide">Goal vs Actual — This Month</h2>
+      <p class="text-xs text-gray-400 mb-4">Revenue target set in Admin vs actual revenue this month per salesperson</p>
+      <canvas id="goalChart" height="100"></canvas>
+      <div id="goal-no-data" class="hidden text-center text-gray-400 text-sm py-6">No goals set yet. Set goals in the Admin tab.</div>
+    </div>
+
     <!-- Commission vs Revenue + Product Interest -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -249,6 +273,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 <script>
   let charts = {};
+  let activeDays = 30;
 
   const COLORS = {
     blue:   '#3B82F6',
@@ -283,26 +308,94 @@ router.get('/', requireAuth, async (req, res) => {
     charts[id] = new Chart(document.getElementById(id), config);
   }
 
-  function loadData(days = 30) {
+  function loadData(days) {
+    if (days) activeDays = days;
     // Update active button
-    document.querySelectorAll('.period-btn').forEach(b => {
+    document.querySelectorAll('.period-btn').forEach(function(b) {
       b.className = 'period-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white transition';
     });
-    const active = document.getElementById('btn-'+days);
+    var active = document.getElementById('btn-'+activeDays);
     if (active) active.className = 'period-btn px-3 py-1.5 text-sm rounded-lg border border-blue-500 bg-blue-600 text-white transition';
 
-    fetch('/analytics/data?days='+days)
-      .then(r => r.json())
-      .then(data => {
+    var spId = document.getElementById('sp-filter').value;
+    var url  = '/analytics/data?days=' + activeDays + (spId ? '&sp=' + spId : '');
+
+    fetch(url)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        // Populate salesperson dropdown (first load only)
+        var sel = document.getElementById('sp-filter');
+        if (sel.options.length <= 1 && data.salespeople && data.salespeople.length) {
+          data.salespeople.forEach(function(sp) {
+            var o = document.createElement('option');
+            o.value = sp.id; o.textContent = sp.name;
+            if (String(sp.id) === spId) o.selected = true;
+            sel.appendChild(o);
+          });
+        }
         renderFunnel(data.funnel);
-        renderRevenue(data.revenueByDay, days);
-        renderEngagement(data.clicksByDay, data.formsByDay, data.callsByDay, days);
+        renderRevenue(data.revenueByDay, activeDays);
+        renderEngagement(data.clicksByDay, data.formsByDay, data.callsByDay, activeDays);
         renderSalesperson(data.commissionBySp);
         renderCommission(data.commissionBySp);
         renderAudience(data.audienceSplit);
         renderProducts(data.topProducts);
+        renderGoalVsActual(data.goalVsActual);
       })
-      .catch(err => console.error('Analytics load error:', err));
+      .catch(function(err) { console.error('Analytics load error:', err); });
+  }
+
+  function renderGoalVsActual(rows) {
+    var hasGoals = rows && rows.some(function(r) { return parseFloat(r.goal_revenue) > 0; });
+    document.getElementById('goal-no-data').classList.toggle('hidden', hasGoals);
+    if (!hasGoals || !rows || !rows.length) return;
+    makeChart('goalChart', {
+      type: 'bar',
+      data: {
+        labels: rows.map(function(r) { return r.name; }),
+        datasets: [
+          {
+            label: 'Goal',
+            data: rows.map(function(r) { return parseFloat(r.goal_revenue||0); }),
+            backgroundColor: 'rgba(156,163,175,0.4)',
+            borderColor: '#9CA3AF',
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+          {
+            label: 'Actual Revenue',
+            data: rows.map(function(r) { return parseFloat(r.actual_revenue||0); }),
+            backgroundColor: rows.map(function(r) {
+              var pct = parseFloat(r.goal_revenue) > 0
+                ? parseFloat(r.actual_revenue) / parseFloat(r.goal_revenue)
+                : 1;
+              return pct >= 1 ? COLORS.green : pct >= 0.7 ? COLORS.orange : COLORS.blue;
+            }),
+            borderRadius: 4,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: 'top' },
+          tooltip: {
+            callbacks: {
+              afterBody: function(items) {
+                var r = rows[items[0].dataIndex];
+                var pct = parseFloat(r.goal_revenue) > 0
+                  ? (parseFloat(r.actual_revenue) / parseFloat(r.goal_revenue) * 100).toFixed(0) + '% to goal'
+                  : 'No goal set';
+                return [pct];
+              }
+            }
+          }
+        },
+        scales: {
+          y: { ticks: { callback: function(v) { return '$'+v.toLocaleString(); } }, beginAtZero: true },
+        }
+      }
+    });
   }
 
   function renderFunnel(f) {
