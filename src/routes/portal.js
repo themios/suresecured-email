@@ -103,7 +103,7 @@ router.get('/', requireSpAuth, async (req, res) => {
   const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
   try {
-    const [sp, thisMonth, allTime, goal, monthlyHistory, recentActivity, recentClicks, tierContext, payoutSplit] = await Promise.all([
+    const [sp, thisMonth, allTime, goal, monthlyHistory, recentActivity, recentClicks, tierContext, payoutSplit, topLeads] = await Promise.all([
 
       // Salesperson info
       pool.query('SELECT * FROM salespeople WHERE id = $1', [spId]),
@@ -211,6 +211,17 @@ router.get('/', requireSpAuth, async (req, res) => {
         WHERE salesperson_id = $1
           AND client_id = $2
       `, [spId, req.salesperson.client_id]),
+
+      // Top 5 leads by engagement_score — scoped via contact_enrollments.salesperson_id
+      pool.query(`
+        SELECT l.first_name, l.last_name, l.email, l.engagement_score
+        FROM leads l
+        JOIN contact_enrollments ce ON ce.lead_id = l.id
+        WHERE ce.salesperson_id = $1 AND l.engagement_score > 0
+        GROUP BY l.id, l.first_name, l.last_name, l.email, l.engagement_score
+        ORDER BY l.engagement_score DESC
+        LIMIT 5
+      `, [spId]),
     ]);
 
     const info   = sp.rows[0];
@@ -236,6 +247,22 @@ router.get('/', requireSpAuth, async (req, res) => {
     const payout = payoutSplit.rows[0];
     const pendingPayout = parseFloat(payout?.pending_payout || 0);
     const paidTotal = parseFloat(payout?.paid_total || 0);
+
+    const scoreBadge = (score) => {
+      const s = parseInt(score || 0);
+      const bg    = s >= 60 ? '#dcfce7' : s >= 30 ? '#fef9c3' : '#f3f4f6';
+      const color = s >= 60 ? '#166534' : s >= 30 ? '#854d0e' : '#6b7280';
+      return `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;background:${bg};color:${color}">${s}</span>`;
+    };
+
+    const topLeadRows = topLeads.rows.length
+      ? topLeads.rows.map(l => `
+        <tr class="border-t hover:bg-gray-50 text-sm">
+          <td class="px-4 py-2 font-medium text-gray-800">${l.first_name || ''} ${l.last_name || ''}</td>
+          <td class="px-4 py-2 text-gray-500">${l.email}</td>
+          <td class="px-4 py-2">${scoreBadge(l.engagement_score)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="3" class="px-4 py-4 text-center text-gray-400">No scored leads yet — run scoring cron to populate</td></tr>';
 
     const fmt    = n => '$' + parseFloat(n||0).toLocaleString('en-US', { minimumFractionDigits: 0 });
     const fmtD   = d => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -451,7 +478,7 @@ router.get('/', requireSpAuth, async (req, res) => {
     </div>
 
     <!-- Recent Email Clicks -->
-    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
       <div class="px-6 py-4 border-b">
         <h2 class="font-semibold text-gray-800">Recent Email Clicks</h2>
         <p class="text-xs text-gray-400 mt-0.5">Leads who clicked a link in one of your emails</p>
@@ -466,6 +493,26 @@ router.get('/', requireSpAuth, async (req, res) => {
             </tr>
           </thead>
           <tbody>${clickRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Top Leads by Engagement Score -->
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b">
+        <h2 class="font-semibold text-gray-800">Top Leads by Engagement Score</h2>
+        <p class="text-xs text-gray-400 mt-0.5">Highest engagement score leads in your sequences — prioritize these for outreach</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+            <tr>
+              <th class="px-4 py-2 text-left">Name</th>
+              <th class="px-4 py-2 text-left">Email</th>
+              <th class="px-4 py-2 text-left">Score</th>
+            </tr>
+          </thead>
+          <tbody>${topLeadRows}</tbody>
         </table>
       </div>
     </div>

@@ -10,6 +10,7 @@ const { google } = require('googleapis');
 const { pool } = require('../db');
 const { sendSequenceEmail, checkForReplies, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
 const { callOpenRouter, buildDigestPrompt } = require('../lib/openrouter');
+const { computeScore } = require('../lib/scoring');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -367,6 +368,63 @@ router.get('/daily-digest', cronAuth, async (req, res) => {
   }
 
   res.json({ ok: true, processed, skipped, errors, date: today, errorDetails });
+});
+
+/**
+ * POST /cron/score-leads
+ * Batch-updates leads.engagement_score for all active clients.
+ * Run after send-sequences cron (e.g., every 6 hours or nightly).
+ * Auth: Authorization: Bearer <CRON_SECRET>
+ */
+router.post('/score-leads', cronAuth, async (req, res) => {
+  let updated = 0, errors = 0;
+
+  // Get all active clients
+  const { rows: clients } = await pool.query(
+    `SELECT id FROM clients WHERE active = true`
+  );
+
+  for (const clientRow of clients) {
+    try {
+      // Aggregate per-lead engagement signals — scoped to this client
+      const { rows: leads } = await pool.query(`
+        SELECT
+          l.id                                                    AS lead_id,
+          COALESCE(SUM(es.open_count),  0)::integer              AS open_count,
+          COALESCE(SUM(es.click_count), 0)::integer              AS click_count,
+          COALESCE(bool_or(ce.paused_reason = 'replied'), false)  AS replied,
+          COALESCE(MAX(ce.current_step), 0)::integer             AS step_reached
+        FROM leads l
+        LEFT JOIN contact_enrollments ce ON ce.lead_id = l.id
+        LEFT JOIN email_sends es         ON es.lead_id = l.id
+        WHERE l.client_id = $1
+        GROUP BY l.id
+      `, [clientRow.id]);
+
+      for (const lead of leads) {
+        const score = computeScore(
+          lead.open_count,
+          lead.click_count,
+          lead.replied,
+          lead.step_reached
+        );
+
+        await pool.query(
+          `UPDATE leads
+           SET engagement_score = $1, scored_at = NOW()
+           WHERE id = $2 AND client_id = $3`,
+          [score, lead.lead_id, clientRow.id]
+        );
+
+        updated++;
+      }
+    } catch (clientErr) {
+      errors++;
+      console.error(`[score-leads] error for client ${clientRow.id}:`, clientErr.message);
+    }
+  }
+
+  res.json({ ok: true, updated, errors });
 });
 
 module.exports = router;
