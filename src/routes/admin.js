@@ -4,6 +4,14 @@ const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { navHtml } = require('./analytics');
 
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function parseJsonField(value, fallback) {
+  if (!value) return fallback;
+  if (typeof value === 'object') return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
 // ─── Admin page ────────────────────────────────────────────────────────────
 
 router.get('/', requireAuth, async (req, res) => {
@@ -666,5 +674,235 @@ router.post('/change-password', express.urlencoded({ extended: true }), requireA
     res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Failed to change password.'));
   }
 });
+
+// ─── Client Management ─────────────────────────────────────────────────────
+
+// GET /admin/clients — list all clients with org name
+router.get('/clients', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT c.id, c.name, c.slug, c.active, o.name AS org_name
+      FROM clients c
+      JOIN organizations o ON o.id = c.organization_id
+      ORDER BY o.name, c.name
+    `);
+    const rowsHtml = rows.length === 0
+      ? `<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No clients yet. Create one above.</td></tr>`
+      : rows.map(c => `
+        <tr class="border-t hover:bg-gray-50">
+          <td class="px-4 py-3 font-medium text-gray-900">${c.name}</td>
+          <td class="px-4 py-3 text-sm text-gray-600">${c.org_name}</td>
+          <td class="px-4 py-3 text-sm"><code class="bg-gray-100 px-1 rounded">${c.slug}</code></td>
+          <td class="px-4 py-3 text-center">
+            <span class="px-2 py-0.5 rounded text-xs ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${c.active ? 'Yes' : 'No'}</span>
+          </td>
+          <td class="px-4 py-3 text-right">
+            <a href="/admin/clients/${c.id}/edit" class="text-xs text-blue-600 hover:underline">Edit</a>
+          </td>
+        </tr>`).join('');
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <title>SureSecured — Clients</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+  ${navHtml('admin')}
+  <div class="max-w-5xl mx-auto px-6 py-8">
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-semibold text-gray-800">Clients</h2>
+      <a href="/admin/clients/new" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">+ New Client</a>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
+          <tr>
+            <th class="px-4 py-3 text-left">Name</th>
+            <th class="px-4 py-3 text-left">Org</th>
+            <th class="px-4 py-3 text-left">Slug</th>
+            <th class="px-4 py-3 text-center">Active</th>
+            <th class="px-4 py-3 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>`);
+  } catch (err) {
+    console.error('Clients list error:', err);
+    res.status(500).send('Server error loading clients');
+  }
+});
+
+// GET /admin/clients/new — blank create form
+router.get('/clients/new', requireAuth, async (req, res) => {
+  try {
+    const { rows: orgs } = await pool.query('SELECT id, name FROM organizations ORDER BY name');
+    const orgOptions = orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+    res.send(clientFormHtml(null, orgOptions, []));
+  } catch (err) {
+    console.error('New client form error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+// POST /admin/clients — create new client
+router.post('/clients', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+  const { organization_id, name, slug, brand_config, commission_rules, integration_settings } = req.body;
+  const errors = [];
+  if (!name || name.trim().length < 2) errors.push('Name must be at least 2 characters');
+  if (!slug || !/^[a-z0-9-]+$/.test(slug)) errors.push('Slug must be lowercase alphanumeric with hyphens only');
+
+  if (errors.length) {
+    try {
+      const { rows: orgs } = await pool.query('SELECT id, name FROM organizations ORDER BY name');
+      const orgOptions = orgs.map(o => `<option value="${o.id}" ${organization_id == o.id ? 'selected' : ''}>${o.name}</option>`).join('');
+      return res.status(400).send(clientFormHtml(null, orgOptions, errors, req.body));
+    } catch (err) {
+      return res.status(500).send('Server error');
+    }
+  }
+
+  const brandJson = parseJsonField(brand_config, {});
+  const commJson  = parseJsonField(commission_rules, {});
+  const intJson   = parseJsonField(integration_settings, {});
+
+  try {
+    await pool.query(
+      `INSERT INTO clients (organization_id, name, slug, brand_config, commission_rules, integration_settings)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [organization_id, name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson)]
+    );
+    res.redirect('/admin/clients');
+  } catch (err) {
+    const msg = err.code === '23505' ? 'Slug already exists — choose a different slug.' : 'Failed to create client.';
+    try {
+      const { rows: orgs } = await pool.query('SELECT id, name FROM organizations ORDER BY name');
+      const orgOptions = orgs.map(o => `<option value="${o.id}" ${organization_id == o.id ? 'selected' : ''}>${o.name}</option>`).join('');
+      return res.status(400).send(clientFormHtml(null, orgOptions, [msg], req.body));
+    } catch {
+      return res.status(500).send(msg);
+    }
+  }
+});
+
+// GET /admin/clients/:id/edit — pre-populated edit form
+router.get('/clients/:id/edit', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM clients WHERE id = $1', [req.params.id]);
+    if (!rows.length) return res.status(404).send('Client not found');
+    const { rows: orgs } = await pool.query('SELECT id, name FROM organizations ORDER BY name');
+    const client = rows[0];
+    const orgOptions = orgs.map(o => `<option value="${o.id}" ${client.organization_id == o.id ? 'selected' : ''}>${o.name}</option>`).join('');
+    res.send(clientFormHtml(client, orgOptions, []));
+  } catch (err) {
+    console.error('Edit client form error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+// POST /admin/clients/:id — update existing client
+router.post('/clients/:id', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+  const { name, slug, brand_config, commission_rules, integration_settings, active } = req.body;
+  const brandJson = parseJsonField(brand_config, {});
+  const commJson  = parseJsonField(commission_rules, {});
+  const intJson   = parseJsonField(integration_settings, {});
+  try {
+    await pool.query(
+      `UPDATE clients
+       SET name=$1, slug=$2, brand_config=$3, commission_rules=$4,
+           integration_settings=$5, active=$6
+       WHERE id=$7`,
+      [name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson),
+       JSON.stringify(intJson), active === 'on', req.params.id]
+    );
+    res.redirect('/admin/clients');
+  } catch (err) {
+    console.error('Update client error:', err);
+    res.redirect('/admin/clients');
+  }
+});
+
+// ─── Client form HTML helper ───────────────────────────────────────────────
+
+function clientFormHtml(client, orgOptions, errors, prefill = {}) {
+  const title = client ? `Edit Client: ${client.name}` : 'New Client';
+  const action = client ? `/admin/clients/${client.id}` : '/admin/clients';
+  const errHtml = errors.length
+    ? `<div class="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm"><ul class="list-disc list-inside">${errors.map(e => `<li>${e}</li>`).join('')}</ul></div>`
+    : '';
+  const val = (field, fallback = '') => {
+    if (prefill[field] !== undefined) return prefill[field];
+    if (client && client[field] !== undefined) return client[field];
+    return fallback;
+  };
+  const jsonVal = (field) => {
+    if (prefill[field] !== undefined) return prefill[field];
+    if (client && client[field] !== undefined) return JSON.stringify(client[field], null, 2);
+    return '{}';
+  };
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <title>SureSecured — ${title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen">
+  ${navHtml('admin')}
+  <div class="max-w-2xl mx-auto px-6 py-8">
+    <h2 class="text-xl font-semibold text-gray-800 mb-4">${title}</h2>
+    ${errHtml}
+    <div class="bg-white rounded-xl shadow-sm p-6">
+      <form method="POST" action="${action}" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Organization</label>
+          <select name="organization_id" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">${orgOptions}</select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Client Name</label>
+          <input type="text" name="name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" value="${val('name')}">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Slug (lowercase, hyphens only)</label>
+          <input type="text" name="slug" required pattern="[a-z0-9-]+" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" value="${val('slug')}">
+        </div>
+
+        <div class="border-t pt-4">
+          <h3 class="text-sm font-semibold text-gray-700 mb-1">Brand Config (JSON)</h3>
+          <p class="text-xs text-gray-400 mb-2">Keys: primary_color, accent_color, bg_color, name, phone, website, address, cta_url, cta_label</p>
+          <textarea name="brand_config" rows="8" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">${jsonVal('brand_config')}</textarea>
+        </div>
+
+        <div class="border-t pt-4">
+          <h3 class="text-sm font-semibold text-gray-700 mb-1">Commission Rules (JSON)</h3>
+          <textarea name="commission_rules" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">${jsonVal('commission_rules')}</textarea>
+        </div>
+
+        <div class="border-t pt-4">
+          <h3 class="text-sm font-semibold text-gray-700 mb-1">Integration Settings (JSON)</h3>
+          <textarea name="integration_settings" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">${jsonVal('integration_settings')}</textarea>
+        </div>
+
+        ${client ? `
+        <div class="flex items-center gap-2 pt-2">
+          <input type="checkbox" name="active" id="active" class="rounded" ${client.active ? 'checked' : ''}>
+          <label for="active" class="text-sm text-gray-700">Active</label>
+        </div>` : ''}
+
+        <div class="flex gap-3 pt-4">
+          <button type="submit" class="px-5 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition font-semibold">Save Client</button>
+          <a href="/admin/clients" class="px-5 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>`;
+}
 
 module.exports = router;
