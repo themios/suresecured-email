@@ -25,6 +25,20 @@ async function initDb() {
   );
   await pool.query(migration002Sql);
 
+  // Run email deliverability migration (idempotent)
+  const migration003Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/003_email_deliverability.sql'),
+    'utf8'
+  );
+  await pool.query(migration003Sql);
+
+  // Run AI intelligence migration (idempotent)
+  const migration005Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/005_ai_intelligence.sql'),
+    'utf8'
+  );
+  await pool.query(migration005Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,
