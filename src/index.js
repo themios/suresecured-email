@@ -18,6 +18,7 @@ const sequencesRouter = require('./routes/sequences');
 const gmailOAuthRouter = require('./routes/gmail-oauth');
 const cronRouter        = require('./routes/cron');
 const unsubscribeRouter = require('./routes/unsubscribe');
+const retellRouter      = require('./routes/retell');
 const pixelRouter       = require('./routes/pixel');
 const emailClickRouter  = require('./routes/email-click');
 
@@ -70,6 +71,9 @@ app.use('/gmail', gmailOAuthRouter);
 
 // Cron — send due emails
 app.use('/cron', cronRouter);
+
+// Retell AI webhook handlers — must be after express.json()
+app.use('/retell-hooks', retellRouter);
 
 // Unsubscribe (no auth — must be publicly accessible)
 app.use('/unsubscribe', unsubscribeRouter);
