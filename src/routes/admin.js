@@ -840,6 +840,70 @@ router.post('/clients/:id', express.urlencoded({ extended: true }), requireAuth,
   }
 });
 
+// ─── Provision Voice Agent ─────────────────────────────────────────────────
+
+/**
+ * POST /admin/clients/:id/provision-voice
+ * Creates a Retell LLM + agent for the client and stores the IDs.
+ * Idempotent: calling again re-provisions (overwrites existing agent IDs).
+ * Requires RETELL_API_KEY in env.
+ */
+router.post('/clients/:id/provision-voice', requireAuth, requireRole('operator', 'owner'), async (req, res) => {
+  const clientId = parseInt(req.params.id);
+  if (!clientId) return res.status(400).json({ error: 'invalid client id' });
+
+  try {
+    // Load client for name
+    const { rows } = await pool.query(
+      `SELECT brand_config FROM clients WHERE id = $1`,
+      [clientId]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'client not found' });
+
+    const brandConfig = rows[0].brand_config || {};
+    const clientName  = brandConfig.name || `Client ${clientId}`;
+    const appBaseUrl  = process.env.APP_BASE_URL || `https://${req.hostname}`;
+
+    // Step 1: Create LLM
+    const llmResult = await createLlm(
+      `You are a friendly sales assistant for ${clientName}. ` +
+      `Help callers with questions about our products and services. ` +
+      `Collect the caller's name and best callback number before ending the call.`
+    );
+    if (!llmResult.ok) {
+      console.error(`[provision-voice] createLlm failed for client ${clientId}:`, llmResult.error);
+      return res.status(500).json({ error: 'Failed to create Retell LLM', detail: llmResult.error });
+    }
+
+    // Step 2: Create Agent
+    const webhookUrl = `${appBaseUrl}/retell-hooks/call-ended`;
+    const agentResult = await createAgent(
+      llmResult.llmId,
+      `${clientName} AI Agent`,
+      webhookUrl
+    );
+    if (!agentResult.ok) {
+      console.error(`[provision-voice] createAgent failed for client ${clientId}:`, agentResult.error);
+      return res.status(500).json({ error: 'Failed to create Retell agent', detail: agentResult.error });
+    }
+
+    // Step 3: Save both IDs to clients table
+    await pool.query(
+      `UPDATE clients
+       SET retell_llm_id = $1, retell_agent_id = $2
+       WHERE id = $3`,
+      [llmResult.llmId, agentResult.agentId, clientId]
+    );
+
+    console.log(`[provision-voice] client ${clientId}: llm=${llmResult.llmId} agent=${agentResult.agentId}`);
+    return res.json({ ok: true, llmId: llmResult.llmId, agentId: agentResult.agentId });
+
+  } catch (err) {
+    console.error(`[provision-voice] unexpected error for client ${clientId}:`, err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Agency Dashboard ──────────────────────────────────────────────────────
 
 router.get('/agency', requireAuth, requireRole('operator', 'owner'), async (req, res) => {
