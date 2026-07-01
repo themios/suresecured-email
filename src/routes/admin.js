@@ -3,8 +3,13 @@ const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { navHtml } = require('./analytics');
+const { createLlm, createAgent } = require('../lib/retell');
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
+
+function escapeHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 function parseJsonField(value, fallback) {
   if (!value) return fallback;
@@ -759,6 +764,7 @@ router.get('/clients/new', requireAuth, async (req, res) => {
 // POST /admin/clients — create new client
 router.post('/clients', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
   const { organization_id, name, slug, brand_config, commission_rules, integration_settings } = req.body;
+  const voice_extension = (req.body.voice_extension || '').trim() || null;
   const errors = [];
   if (!name || name.trim().length < 2) errors.push('Name must be at least 2 characters');
   if (!slug || !/^[a-z0-9-]+$/.test(slug)) errors.push('Slug must be lowercase alphanumeric with hyphens only');
@@ -779,9 +785,9 @@ router.post('/clients', express.urlencoded({ extended: true }), requireAuth, asy
 
   try {
     await pool.query(
-      `INSERT INTO clients (organization_id, name, slug, brand_config, commission_rules, integration_settings)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [organization_id, name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson)]
+      `INSERT INTO clients (organization_id, name, slug, brand_config, commission_rules, integration_settings, voice_extension)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [organization_id, name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson), voice_extension]
     );
     res.redirect('/admin/clients');
   } catch (err) {
@@ -814,6 +820,7 @@ router.get('/clients/:id/edit', requireAuth, async (req, res) => {
 // POST /admin/clients/:id — update existing client
 router.post('/clients/:id', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
   const { name, slug, brand_config, commission_rules, integration_settings, active } = req.body;
+  const voice_extension = (req.body.voice_extension || '').trim() || null;
   const brandJson = parseJsonField(brand_config, {});
   const commJson  = parseJsonField(commission_rules, {});
   const intJson   = parseJsonField(integration_settings, {});
@@ -821,10 +828,10 @@ router.post('/clients/:id', express.urlencoded({ extended: true }), requireAuth,
     await pool.query(
       `UPDATE clients
        SET name=$1, slug=$2, brand_config=$3, commission_rules=$4,
-           integration_settings=$5, active=$6
-       WHERE id=$7`,
+           integration_settings=$5, active=$6, voice_extension=$7
+       WHERE id=$8`,
       [name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson),
-       JSON.stringify(intJson), active === 'on', req.params.id]
+       JSON.stringify(intJson), active === 'on', voice_extension, req.params.id]
     );
     res.redirect('/admin/clients');
   } catch (err) {
@@ -1063,6 +1070,59 @@ function clientFormHtml(client, orgOptions, errors, prefill = {}) {
         <div class="border-t pt-4">
           <h3 class="text-sm font-semibold text-gray-700 mb-1">Integration Settings (JSON)</h3>
           <textarea name="integration_settings" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">${jsonVal('integration_settings')}</textarea>
+        </div>
+
+        <div class="border-t pt-4 mt-4">
+          <h3 class="text-sm font-semibold text-gray-700 mb-3">Voice (Retell AI)</h3>
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Voice Extension</label>
+              <input type="text" name="voice_extension" value="${escapeHtml(client && client.voice_extension || '')}"
+                     placeholder="e.g. 1"
+                     class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+              <p class="text-xs text-gray-400 mt-1">Extension number for IVR routing (optional)</p>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">Retell Agent ID</label>
+              <input type="text" value="${escapeHtml(client && client.retell_agent_id || 'Not provisioned')}"
+                     readonly
+                     class="w-full border border-gray-200 rounded px-3 py-2 text-sm bg-gray-50 text-gray-500 cursor-not-allowed">
+            </div>
+          </div>
+          ${client && client.id ? `
+          <div class="mt-3">
+            <button type="button"
+                    onclick="provisionVoice(${client.id})"
+                    class="px-4 py-2 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
+              ${client.retell_agent_id ? 'Re-provision Voice Agent' : 'Provision Voice Agent'}
+            </button>
+            <span id="provision-status-${client.id}" class="ml-3 text-sm text-gray-500"></span>
+          </div>
+          <script>
+          async function provisionVoice(clientId) {
+            const btn = document.querySelector('[onclick="provisionVoice(' + clientId + ')"]');
+            const status = document.getElementById('provision-status-' + clientId);
+            btn.disabled = true;
+            status.textContent = 'Provisioning...';
+            try {
+              const r = await fetch('/admin/clients/' + clientId + '/provision-voice', { method: 'POST' });
+              const data = await r.json();
+              if (data.ok) {
+                status.textContent = 'Agent provisioned: ' + data.agentId;
+                status.className = 'ml-3 text-sm text-green-600';
+              } else {
+                status.textContent = 'Error: ' + (data.error || 'unknown');
+                status.className = 'ml-3 text-sm text-red-600';
+                btn.disabled = false;
+              }
+            } catch (e) {
+              status.textContent = 'Network error';
+              status.className = 'ml-3 text-sm text-red-600';
+              btn.disabled = false;
+            }
+          }
+          </script>
+          ` : '<p class="text-xs text-gray-400 mt-2">Save the client first, then provision voice agent.</p>'}
         </div>
 
         ${client ? `
