@@ -499,7 +499,6 @@ router.get('/', requireAuth, async (req, res) => {
     document.getElementById('edit-last').value  = names.slice(1).join(' ') || '';
     document.getElementById('edit-email').value = sp.email || '';
     document.getElementById('edit-commission').value = sp.commission_rate || 100;
-    document.getElementById('edit-tracking').value = sp.tracking_phone_number || '';
     document.getElementById('edit-phone').value = sp.phone || '';
     document.getElementById('edit-title').value = sp.title || '';
     document.getElementById('edit-extension').value = sp.voice_extension || '';
