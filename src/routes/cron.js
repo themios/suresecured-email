@@ -8,8 +8,8 @@ const express  = require('express');
 const router   = express.Router();
 const { google } = require('googleapis');
 const { pool } = require('../db');
-const { sendSequenceEmail, checkForReplies, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
-const { callOpenRouter, buildDigestPrompt } = require('../lib/openrouter');
+const { sendSequenceEmail, checkForReplies, sendReplyNotification, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
+const { callOpenRouter, buildDigestPrompt, classifyReply } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
 
@@ -51,7 +51,11 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         l.audience_type,
         s.name             AS salesperson_name,
         s.email            AS salesperson_email,
-        c.brand_config
+        s.phone            AS salesperson_phone,
+        s.title            AS salesperson_title,
+        c.brand_config,
+        COALESCE((SELECT SUM(es.open_count)  FROM email_sends es WHERE es.lead_id = l.id), 0) AS open_count,
+        COALESCE((SELECT SUM(es.click_count) FROM email_sends es WHERE es.lead_id = l.id), 0) AS click_count
       FROM contact_enrollments ce
       JOIN leads l       ON l.id  = ce.lead_id
       JOIN salespeople s ON s.id  = ce.salesperson_id
@@ -96,12 +100,31 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
       );
 
       if (priorSends[0]?.gmail_thread_id) {
-        const replied = await checkForReplies(row.salesperson_id, priorSends[0].gmail_thread_id);
-        if (replied) {
+        const replyCheck = await checkForReplies(row.salesperson_id, priorSends[0].gmail_thread_id);
+        if (replyCheck.replied) {
           await client.query(
-            `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'replied' WHERE id = $1`,
+            `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'replied', replied_at = NOW() WHERE id = $1`,
             [row.enrollment_id]
           );
+          // Classify reply with AI and store on lead — fire-and-forget
+          const lead = { id: row.lead_id, email: row.lead_email, first_name: row.first_name, last_name: row.last_name };
+          if (replyCheck.replyText) {
+            classifyReply(replyCheck.replyText, row.first_name).then(async (classification) => {
+              try {
+                await pool.query(
+                  `UPDATE leads SET reply_category=$1, reply_urgency=$2, reply_summary=$3, reply_classified_at=NOW()
+                   WHERE id=$4`,
+                  [classification.category, classification.urgency, classification.summary, row.lead_id]
+                );
+                replyCheck.classification = classification;
+              } catch {}
+              sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+            }).catch(() => {
+              sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+            });
+          } else {
+            sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+          }
           skipped++;
           continue;
         }
@@ -121,6 +144,8 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         continue;
       }
 
+      const brandConfig = row.brand_config || {};
+
       const vars = {
         first_name:        row.first_name || row.lead_email.split('@')[0],
         last_name:         row.last_name  || '',
@@ -128,9 +153,37 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         product_interest:  row.product_interest || 'security products',
         salesperson_name:  row.salesperson_name,
         salesperson_email: row.salesperson_email,
+        salesperson_phone: row.salesperson_phone || brandConfig.phone || '',
+        salesperson_title: row.salesperson_title || '',
+        company_name:      brandConfig.name     || '',
+        company_phone:     brandConfig.phone    || '',
+        company_website:   brandConfig.website  || '',
+        company_address:   brandConfig.address  || '',
       };
 
-      const brandConfig = row.brand_config || {};
+      // Resolve CTA URL from landing page matrix based on lead profile
+      // Templates can use {cta_url} for their main call-to-action link
+      const siteBase = brandConfig.website || 'https://suresecured.com';
+      try {
+        const intentLevel = (row.open_count >= 2 || row.click_count >= 1) ? 'high' : 'normal';
+        const { rows: matrixRows } = await client.query(`
+          SELECT destination_url FROM landing_page_matrix
+          WHERE active = true
+            AND (audience_type = $1 OR audience_type IS NULL)
+            AND (product_interest = $2 OR product_interest IS NULL)
+            AND (intent_level = $3 OR intent_level IS NULL)
+          ORDER BY
+            (audience_type = $1)::int DESC,
+            (product_interest = $2)::int DESC,
+            (intent_level = $3)::int DESC
+          LIMIT 1
+        `, [row.audience_type || 'B2C', row.product_interest || null, intentLevel]);
+
+        const dest = matrixRows[0]?.destination_url || '/';
+        vars.cta_url = dest.startsWith('http') ? dest : `${siteBase}${dest}`;
+      } catch {
+        vars.cta_url = siteBase;
+      }
 
       // ─── Dispatch: SMS or Email ───────────────────────────────────────────
       // 10DLC NOTE: SMS outbound is blocked by US carriers until Brand+Campaign
@@ -153,7 +206,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         // Interpolate vars into body (same {{var}} substitution as email)
         let smsBody = step.body || '';
         for (const [k, v] of Object.entries(vars)) {
-          smsBody = smsBody.replaceAll(`{{${k}}}`, v || '');
+          smsBody = smsBody.replaceAll(`{${k}}`, v || '');
         }
 
         const smsResult = await sendSms(row.lead_phone, smsBody);

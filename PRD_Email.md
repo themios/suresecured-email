@@ -3,7 +3,7 @@
 # Project Name
 
 SalesPilot AI
-Version 1.2
+Version 1.3
 
 Purpose:
 Build an AI-powered outbound email automation, lead attribution, and commission tracking platform for SureSecured — a manufacturer and installer of marine-grade stainless steel security screen doors and windows based in Simi Valley, CA. The system will automate personalized email campaigns for both B2C homeowner leads and B2B contractor/dealer leads, intelligently respond to customer engagement, and permanently attribute leads to the originating salesperson for commission purposes.
@@ -407,6 +407,84 @@ This step is mandatory before any email is sent. Sending to a dirty list will re
 * verification_status (valid / invalid / catch-all / role / disposable / unknown)
 * verified_at (timestamp)
 * verification_provider (ZeroBounce / NeverBounce)
+
+---
+
+# Landing Page Matrix
+
+Every campaign email must link to the most relevant page — not the homepage. The tracking token's `destination_url` field is set per segment when generating links. This improves conversion and produces cleaner attribution data.
+
+| Segment | Angle | Destination URL |
+|---------|-------|----------------|
+| B2C + product_interest = door | Product education / quote | `/products/double-french-security-screen-doors` or `/pages/request-a-quote` |
+| B2C + product_interest = window | Product education / quote | `/products/fixed-security-screen-windows` or `/pages/request-a-quote` |
+| B2C + city in LA County | Professional installation | `/pages/installations` |
+| B2C + nationwide / unknown location | DIY / free shipping | `/collections/all` with DIY messaging |
+| B2C + high intent (clicked 2x+) | Direct close | `/pages/request-a-quote` or Book a Consultation |
+| B2C + financing angle | Remove price objection | `/pages/financing` |
+| B2B | Dealer partnership | `/pages/become-a-dealer` |
+| B2B + high intent | Direct close | `/pages/become-a-dealer` (all B2B CTAs land here) |
+
+Tracking links are generated per segment — one campaign may produce 5 different destination URLs across its contact list. The commissions and clicks are all attributed back to the salesperson regardless of which URL was used.
+
+---
+
+# Phone Call Attribution
+
+## The Problem
+
+The SureSecured website prominently displays `(747) 688-9992`. A significant portion of leads who receive emails will call instead of replying or submitting a form. Without tracking, these calls are invisible to the commission system — the salesperson who sent the email gets no credit.
+
+## Solution: Per-Salesperson Tracking Numbers (CallRail)
+
+Each salesperson is assigned a unique tracked phone number via CallRail (or similar). These numbers:
+- Forward to the main SureSecured line
+- Record which number was dialed (identifying the salesperson)
+- Log call time, duration, and caller ID
+- Integrate with the commission system via webhook
+
+### Implementation
+
+* Each salesperson's email signature includes their unique CallRail number instead of the main business number
+* Example: John's emails show `(818) 555-0101` → forwards to `(747) 688-9992` → CallRail logs "John's number was called"
+* CallRail webhook fires to `/api/phone-call` on CommissionTracker
+* System creates a lead record (if new) and a commission event attributed to that salesperson
+
+### CallRail Cost
+
+~$45/mo for up to 10 tracking numbers with call recording and webhook support.
+
+### Database Addition
+
+```
+phone_calls table:
+  id, salesperson_id, caller_number, tracking_number,
+  duration_seconds, called_at, lead_id (if matched by email/phone)
+```
+
+### Priority
+
+Implement after Shopify webhook is confirmed working. This is Phase 2 of the commission engine.
+
+---
+
+# Pre-Campaign List Suppression
+
+Before launching any sequence, export existing Shopify customers and suppress them from the "dormant lead reconnect" campaign. Sending a "we haven't heard from you" email to someone who already purchased is a bad experience.
+
+## Steps
+
+1. Export all customers from Shopify Admin → Customers → Export
+2. Upload to the suppression list in CommissionTracker (or ZeroBounce suppression file)
+3. These contacts move to a separate **existing customer** list
+4. Existing customers get a different sequence: cross-sell (door buyer → window screens, window buyer → door upgrade) rather than the reconnect sequence
+
+## Cross-Sell Sequence (Existing Customers)
+
+* Email 1: "You protected your [doors/windows] — here's what most customers add next"
+* Email 2: Product education on the complementary product
+* Email 3: Bundle pricing or loyalty offer
+* Attribution still applies — original salesperson owns the cross-sell commission
 
 ---
 
@@ -1414,6 +1492,19 @@ The following tools are recommended for the phased deployment strategy while the
 | GoHighLevel | All-in-one, closest to full PRD | $97-297 |
 
 Note: No off-the-shelf tool replicates the immutable lead ownership + auditable commission attribution described in this PRD. That is the core custom differentiator.
+
+---
+
+# Open Integration Questions
+
+These items need a decision before full launch. Each affects commission attribution.
+
+| Item | Question | Impact |
+|------|----------|--------|
+| "Book a Consultation" | Is this Calendly, a Shopify app, or phone-only? | If Calendly: needs webhook to CommissionTracker. If phone-only: covered by CallRail. |
+| Quote form tool | Is it Typeform, JotForm, or native Shopify? | Determines how hidden fields are injected for attribution. |
+| Financing page | Is it Affirm, Shop Pay, or a third party? | If third-party checkout: cart attribution cookie may not carry through. Needs testing. |
+| Shopify snippet | Has it been added to theme.liquid by the Shopify developer? | Without it: clicks are tracked but form submissions and purchases are NOT attributed. **Blocking for commission accuracy.** |
 
 ---
 

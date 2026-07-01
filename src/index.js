@@ -15,6 +15,7 @@ const { router: analyticsRouter } = require('./routes/analytics');
 const adminRouter     = require('./routes/admin');
 const portalRouter    = require('./routes/portal');
 const sequencesRouter = require('./routes/sequences');
+const leadsRouter     = require('./routes/leads');
 const gmailOAuthRouter = require('./routes/gmail-oauth');
 const cronRouter        = require('./routes/cron');
 const unsubscribeRouter = require('./routes/unsubscribe');
@@ -63,6 +64,9 @@ app.use('/admin', adminRouter);
 
 // Salesperson portal
 app.use('/portal', portalRouter);
+
+// CRM leads
+app.use('/leads', leadsRouter);
 
 // Email sequences
 app.use('/sequences', sequencesRouter);

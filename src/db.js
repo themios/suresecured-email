@@ -187,6 +187,33 @@ async function initDb() {
     -- Add tracking_number column to salespeople if not exists
     ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS tracking_phone_number VARCHAR(50);
     ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS callrail_number_id VARCHAR(255);
+    ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
+    ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS title VARCHAR(255);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS reply_category VARCHAR(50);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS reply_urgency VARCHAR(10);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS reply_summary TEXT;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS reply_classified_at TIMESTAMPTZ;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT false;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS verification_status VARCHAR(20);
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+    ALTER TABLE salespeople ADD COLUMN IF NOT EXISTS voice_extension VARCHAR(20);
+    ALTER TABLE call_logs ADD COLUMN IF NOT EXISTS salesperson_id INTEGER REFERENCES salespeople(id);
+
+    -- CRM pipeline stage on leads
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS stage VARCHAR(30) DEFAULT 'new';
+  `);
+
+  // CRM notes / activity log
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS lead_notes (
+      id           SERIAL PRIMARY KEY,
+      lead_id      INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      client_id    INTEGER REFERENCES clients(id),
+      author_name  VARCHAR(255),
+      content      TEXT NOT NULL,
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_lead_notes_lead_id ON lead_notes(lead_id);
   `);
 
   // Email campaign tables

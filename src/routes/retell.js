@@ -78,6 +78,41 @@ router.post('/call-ended', async (req, res) => {
     );
     const clientId = clientRows[0]?.id || null;
 
+    // Extract extension from Retell call analysis (set by Retell LLM custom_analysis_data)
+    // Falls back to scanning transcript for digits the caller spoke
+    const analysisData = call.call_analysis?.custom_analysis_data || {};
+    let spokenExtension = analysisData.extension || null;
+
+    if (!spokenExtension && transcript) {
+      // Scan transcript for "extension 101" or "press 1" style patterns
+      const extMatch = transcript.match(/extension\s+(\w+)/i) || transcript.match(/\bext\.?\s*(\w+)/i);
+      if (extMatch) spokenExtension = extMatch[1];
+    }
+
+    // Look up salesperson by voice_extension
+    let salespersonId = null;
+    if (spokenExtension && clientId) {
+      const { rows: spRows } = await pool.query(
+        `SELECT id FROM salespeople
+         WHERE voice_extension = $1 AND client_id = $2 AND active = true
+         LIMIT 1`,
+        [spokenExtension, clientId]
+      );
+      salespersonId = spRows[0]?.id || null;
+    }
+
+    // Fall back to first active salesperson for client if no extension matched
+    if (!salespersonId && clientId) {
+      const { rows: spRows } = await pool.query(
+        `SELECT s.id FROM salespeople s
+         JOIN users u ON LOWER(u.email) = LOWER(s.email)
+         WHERE u.client_id = $1 AND s.active = true
+         LIMIT 1`,
+        [clientId]
+      );
+      salespersonId = spRows[0]?.id || null;
+    }
+
     // Duration in seconds (timestamps are ms epoch)
     const durationSeconds = (start_timestamp && end_timestamp)
       ? Math.round((end_timestamp - start_timestamp) / 1000)
@@ -107,35 +142,23 @@ router.post('/call-ended', async (req, res) => {
     // Insert call_log (idempotent on retell_call_id)
     await pool.query(
       `INSERT INTO call_logs
-         (client_id, lead_id, retell_call_id, from_number, to_number, duration_seconds,
+         (client_id, lead_id, salesperson_id, retell_call_id, from_number, to_number, duration_seconds,
           transcript, disconnection_reason, call_started_at, call_ended_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
        ON CONFLICT (retell_call_id) DO NOTHING`,
-      [clientId, leadId, retellCallId, from_number, to_number, durationSeconds,
+      [clientId, leadId, salespersonId, retellCallId, from_number, to_number, durationSeconds,
        transcript, disconnection_reason, callStartedAt, callEndedAt]
     );
 
-    // Auto-enroll in client's first active sequence (if lead exists and client found)
+    // Auto-enroll in matching sequence (B2C by default for inbound callers)
     if (leadId && clientId) {
       const { rows: seqRows } = await pool.query(
-        `SELECT s.id
-         FROM sequences s
-         JOIN clients c ON c.id = $1
-         WHERE s.active = true
-         ORDER BY s.id ASC LIMIT 1`,
+        `SELECT id FROM sequences
+         WHERE active = true AND client_id = $1
+         ORDER BY id ASC LIMIT 1`,
         [clientId]
       );
       if (seqRows[0]) {
-        // Find the first salesperson for this client to assign the enrollment
-        const { rows: spRows } = await pool.query(
-          `SELECT s.id FROM salespeople s
-           JOIN users u ON LOWER(u.email) = LOWER(s.email)
-           WHERE u.client_id = $1 AND s.active = true
-           LIMIT 1`,
-          [clientId]
-        );
-        const salespersonId = spRows[0]?.id || null;
-
         await pool.query(
           `INSERT INTO contact_enrollments
              (lead_id, sequence_id, salesperson_id, client_id, status, next_send_at)
@@ -146,7 +169,7 @@ router.post('/call-ended', async (req, res) => {
       }
     }
 
-    console.log(`[retell/call-ended] call_id=${retellCallId} lead_id=${leadId} duration=${durationSeconds}s`);
+    console.log(`[retell/call-ended] call_id=${retellCallId} lead_id=${leadId} sp_id=${salespersonId} ext=${spokenExtension} duration=${durationSeconds}s`);
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('[retell/call-ended] error:', err.message);

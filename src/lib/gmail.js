@@ -224,7 +224,13 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
   const { client, account } = auth;
 
   const resolvedSubject = substituteVars(subject, vars);
-  const resolvedBody    = substituteVars(body, vars);
+  const signature = [
+    vars.salesperson_name  || '',
+    vars.salesperson_title || '',
+    vars.salesperson_phone || vars.company_phone || '',
+    vars.salesperson_email || '',
+  ].filter(Boolean).join('\n');
+  const resolvedBody = substituteVars(body, vars) + (signature ? `\n\n${signature}` : '');
 
   // Pre-generate pixel token
   const pixelToken  = require('crypto').randomUUID();
@@ -308,16 +314,122 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
 
 async function checkForReplies(salespersonId, gmailThreadId) {
   const auth = await getAuthedClient(salespersonId);
-  if (!auth) return false;
+  if (!auth) return { replied: false };
 
   try {
-    const gmail = google.gmail({ version: 'v1', auth: auth.client });
-    const thread = await gmail.users.threads.get({ userId: 'me', id: gmailThreadId });
+    const gmail    = google.gmail({ version: 'v1', auth: auth.client });
+    const thread   = await gmail.users.threads.get({ userId: 'me', id: gmailThreadId, format: 'full' });
     const messages = thread.data.messages ?? [];
-    // If more than 1 message in thread, the customer replied
-    return messages.length > 1;
+    if (messages.length <= 1) return { replied: false };
+
+    // Last message is the customer reply
+    const last    = messages[messages.length - 1];
+    const headers = last.payload?.headers || [];
+    const from    = headers.find(h => h.name === 'From')?.value    || '';
+    const subject = headers.find(h => h.name === 'Subject')?.value || '';
+
+    // Extract plain text body
+    let replyText = '';
+    const findText = (parts) => {
+      for (const p of (parts || [])) {
+        if (p.mimeType === 'text/plain' && p.body?.data) {
+          replyText = Buffer.from(p.body.data, 'base64').toString('utf8').slice(0, 600);
+          return;
+        }
+        if (p.parts) findText(p.parts);
+      }
+    };
+    if (last.payload?.body?.data) {
+      replyText = Buffer.from(last.payload.body.data, 'base64').toString('utf8').slice(0, 600);
+    } else {
+      findText(last.payload?.parts);
+    }
+
+    return { replied: true, replyFrom: from, replySubject: subject, replyText: replyText.trim() };
   } catch {
-    return false;
+    return { replied: false };
+  }
+}
+
+async function sendReplyNotification(salespersonId, lead, replyData, brandConfig = {}) {
+  const auth = await getAuthedClient(salespersonId);
+  if (!auth) return;
+
+  try {
+    const { client, account } = auth;
+    const brand   = brandConfig.name || 'SalesPilot';
+    const appBase = process.env.TRACKER_URL || 'https://your-app.railway.app';
+    const leadUrl = `${appBase}/portal/leads/${lead.id}`;
+
+    const textBody = [
+      `${lead.first_name || lead.email} replied to your email.`,
+      '',
+      `From: ${replyData.replyFrom || lead.email}`,
+      `Lead: ${lead.first_name || ''} ${lead.last_name || ''} <${lead.email}>`.trim(),
+      '',
+      replyData.replyText ? `Their message:\n\n${replyData.replyText}` : '',
+      '',
+      `View lead: ${leadUrl}`,
+      '',
+      'Their sequence has been paused — follow up manually.',
+    ].join('\n');
+
+    const c = replyData.classification;
+    const categoryColors = {
+      hot_lead: '#16a34a', interested: '#2563eb', needs_quote: '#7c3aed',
+      question: '#d97706', not_interested: '#6b7280', unsubscribe: '#dc2626',
+      already_purchased: '#0891b2', wrong_person: '#9ca3af', spam: '#9ca3af',
+    };
+    const categoryLabels = {
+      hot_lead: '🔥 Hot Lead', interested: '👍 Interested', needs_quote: '📋 Needs Quote',
+      question: '❓ Question', not_interested: '👎 Not Interested', unsubscribe: '🚫 Unsubscribe',
+      already_purchased: '✅ Already Purchased', wrong_person: '❌ Wrong Person', spam: '⚠ Spam',
+    };
+    const urgencyBadge = c?.urgency === 'high'
+      ? '<span style="background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:700">HIGH URGENCY</span>'
+      : c?.urgency === 'medium'
+      ? '<span style="background:#fffbeb;color:#d97706;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600">Medium</span>'
+      : '';
+
+    const htmlBody = `
+      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:24px">
+        <h2 style="margin:0 0 12px 0;font-size:18px;color:#111">
+          💬 ${lead.first_name || lead.email} replied to your email
+        </h2>
+        ${c ? `
+        <div style="margin:0 0 16px 0;display:flex;align-items:center;gap:8px">
+          <span style="background:${categoryColors[c.category] || '#111'};color:#fff;padding:3px 10px;
+                border-radius:12px;font-size:13px;font-weight:600">${categoryLabels[c.category] || c.category}</span>
+          ${urgencyBadge}
+        </div>
+        <p style="margin:0 0 16px 0;font-size:14px;color:#374151;background:#f9fafb;
+                  padding:10px 14px;border-radius:6px">${c.summary}</p>
+        ` : ''}
+        ${replyData.replyText ? `
+        <div style="background:#f5f5f3;border-left:3px solid #888;padding:12px 16px;margin:0 0 20px 0;
+                    font-size:14px;color:#333;line-height:1.6;white-space:pre-wrap">${replyData.replyText}</div>
+        ` : ''}
+        <p style="margin:0 0 8px 0;font-size:14px;color:#555">
+          <strong>Lead:</strong> ${lead.first_name || ''} ${lead.last_name || ''} &lt;${lead.email}&gt;
+        </p>
+        <p style="margin:0 0 20px 0;font-size:13px;color:#888">Sequence paused — reply to them directly.</p>
+        <a href="${leadUrl}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;
+           padding:10px 20px;border-radius:6px;font-size:14px;font-weight:600">View Lead →</a>
+      </div>`;
+
+    const raw = await buildRawMessage({
+      fromName:    `${brand} Notifications`,
+      fromAddress: account.email,
+      to:          account.email,
+      subject:     `Reply from ${lead.first_name || lead.email} — action needed`,
+      textBody,
+      htmlBody,
+    });
+
+    const gmailApi = google.gmail({ version: 'v1', auth: client });
+    await gmailApi.users.messages.send({ userId: 'me', requestBody: { raw } });
+  } catch (err) {
+    console.error('[notify] reply notification failed:', err.message);
   }
 }
 
@@ -392,4 +504,4 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
 </html>`;
 }
 
-module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, buildDigestHtml, sendSequenceEmail, checkForReplies, getAuthedClient, buildRawMessage };
+module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, buildDigestHtml, sendSequenceEmail, checkForReplies, sendReplyNotification, getAuthedClient, buildRawMessage };

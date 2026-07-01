@@ -22,6 +22,7 @@ function navHtml(activePage) {
         <div class="flex gap-1">
           ${tab('Overview',  '/dashboard',  'dashboard')}
           ${tab('Analytics', '/analytics',  'analytics')}
+          ${tab('Leads',     '/leads',      'leads')}
           ${tab('Sequences', '/sequences',  'sequences')}
           ${tab('Admin',     '/admin',      'admin')}
         </div>

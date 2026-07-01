@@ -74,6 +74,60 @@ router.delete('/api/sequences/:seqId/steps/:stepId', requireAuth, async (req, re
   res.json({ ok: true });
 });
 
+// Auto-enroll: match all leads by audience_type to this sequence, skip suppressed + already enrolled
+router.post('/api/sequences/:id/auto-enroll', requireAuth, async (req, res) => {
+  try {
+    const { rows: seqRows } = await pool.query(
+      `SELECT audience_type FROM sequences WHERE id = $1`,
+      [req.params.id]
+    );
+    if (!seqRows[0]) return res.status(404).json({ error: 'Sequence not found' });
+
+    const audienceType = seqRows[0].audience_type;
+    const clientId     = req.session?.clientId || req.user?.client_id || null;
+    const salespersonId = req.session?.salespersonId || req.user?.salesperson_id || null;
+
+    const { rows: firstStep } = await pool.query(
+      `SELECT delay_days FROM sequence_steps WHERE sequence_id = $1 AND step_number = 1`,
+      [req.params.id]
+    );
+    const delayDays  = firstStep[0]?.delay_days ?? 0;
+    const nextSendAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
+
+    // Find eligible leads: matching audience_type, not suppressed, not already in this sequence
+    const { rows: leads } = await pool.query(`
+      SELECT l.id, l.salesperson_id
+      FROM leads l
+      WHERE l.audience_type = $1
+        ${clientId ? 'AND l.client_id = $2' : ''}
+        AND l.email NOT IN (SELECT email FROM suppression_list)
+        AND NOT EXISTS (
+          SELECT 1 FROM contact_enrollments ce
+          WHERE ce.lead_id = l.id AND ce.sequence_id = $${clientId ? 3 : 2}
+        )
+    `, clientId ? [audienceType, clientId, req.params.id] : [audienceType, req.params.id]);
+
+    let enrolled = 0, skipped = 0;
+    for (const lead of leads) {
+      try {
+        const spId = salespersonId || lead.salesperson_id;
+        await pool.query(
+          `INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, next_send_at)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (lead_id, sequence_id) DO NOTHING`,
+          [lead.id, req.params.id, spId, nextSendAt]
+        );
+        enrolled++;
+      } catch { skipped++; }
+    }
+
+    res.json({ ok: true, enrolled, skipped, audience_type: audienceType });
+  } catch (err) {
+    console.error('[auto-enroll]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Enroll contacts in a sequence
 router.post('/api/sequences/:id/enroll', requireAuth, async (req, res) => {
   const { salesperson_id, lead_ids } = req.body;
@@ -208,6 +262,69 @@ router.get('/api/leads/enrollable', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// Verify unverified leads via ZeroBounce — processes up to 50 at a time
+// Suppresses invalid/spamtrap/abuse addresses automatically
+router.post('/api/leads/verify-batch', requireAuth, async (req, res) => {
+  const { verifyEmail, BLOCK_STATUSES } = require('../lib/zerobounce');
+
+  if (!process.env.ZEROBOUNCE_API_KEY) {
+    return res.status(400).json({ error: 'ZEROBOUNCE_API_KEY not configured in environment' });
+  }
+
+  const clientId = req.user?.client_id || null;
+  const { rows: leads } = await pool.query(
+    `SELECT id, email FROM leads
+     WHERE email_verified IS NOT TRUE
+       ${clientId ? 'AND client_id = $1' : ''}
+     LIMIT 50`,
+    clientId ? [clientId] : []
+  );
+
+  if (leads.length === 0) return res.json({ ok: true, verified: 0, suppressed: 0, message: 'All leads already verified.' });
+
+  let verified = 0, suppressed = 0, errors = 0;
+
+  for (const lead of leads) {
+    try {
+      const result = await verifyEmail(lead.email);
+
+      await pool.query(
+        `UPDATE leads SET email_verified=$1, verification_status=$2, verified_at=NOW() WHERE id=$3`,
+        [result.valid, result.status, lead.id]
+      );
+
+      if (result.block) {
+        // Auto-suppress bad addresses
+        await pool.query(
+          `INSERT INTO suppression_list (email, reason) VALUES ($1,$2) ON CONFLICT (email) DO NOTHING`,
+          [lead.email, result.status]
+        );
+        await pool.query(
+          `UPDATE contact_enrollments SET status='paused', paused_reason='invalid_email'
+           WHERE lead_id=$1 AND status='active'`,
+          [lead.id]
+        );
+        suppressed++;
+      }
+
+      verified++;
+    } catch (err) {
+      console.error(`[zerobounce] ${lead.email}:`, err.message);
+      errors++;
+    }
+
+    // ~3 req/sec — stay well within ZeroBounce rate limits
+    await new Promise(r => setTimeout(r, 350));
+  }
+
+  const remaining = await pool.query(
+    `SELECT COUNT(*) FROM leads WHERE email_verified IS NOT TRUE ${clientId ? 'AND client_id = $1' : ''}`,
+    clientId ? [clientId] : []
+  );
+
+  res.json({ ok: true, verified, suppressed, errors, remaining: parseInt(remaining.rows[0].count) });
+});
+
 // CSV import of leads
 router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', limit: '10mb' }), async (req, res) => {
   const lines = req.body.split('\n').map(l => l.trim()).filter(Boolean);
@@ -252,6 +369,82 @@ router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', l
     } catch { skipped++; }
   }
   res.json({ ok: true, imported, skipped });
+});
+
+// ── Preview: send all steps of a sequence immediately to one email ──────────
+// POST /sequences/api/sequences/:id/preview
+// Body: { email, salesperson_id }
+router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
+  const seqId       = parseInt(req.params.id);
+  const { email, salesperson_id } = req.body;
+  if (!email) return res.status(400).json({ error: 'email required' });
+
+  const { rows: steps } = await pool.query(
+    `SELECT * FROM sequence_steps WHERE sequence_id = $1 ORDER BY step_number ASC`,
+    [seqId]
+  );
+  if (!steps.length) return res.status(404).json({ error: 'No steps found' });
+
+  // Get salesperson — use provided or first active one with Gmail connected
+  let spId = parseInt(salesperson_id) || null;
+  if (!spId) {
+    const { rows } = await pool.query(
+      `SELECT s.id FROM salespeople s
+       JOIN email_accounts ea ON ea.salesperson_id = s.id AND ea.enabled = true
+       WHERE s.active = true LIMIT 1`
+    );
+    spId = rows[0]?.id;
+  }
+  if (!spId) return res.status(400).json({ error: 'No salesperson with Gmail connected' });
+
+  const { rows: spRows } = await pool.query(
+    `SELECT s.*, ea.email AS gmail_email FROM salespeople s
+     JOIN email_accounts ea ON ea.salesperson_id = s.id
+     WHERE s.id = $1`, [spId]
+  );
+  const sp = spRows[0];
+  if (!sp) return res.status(400).json({ error: 'Salesperson not found' });
+
+  const vars = {
+    first_name: 'Preview',
+    last_name:  'Recipient',
+    city:       'Your City',
+    product_interest: 'security doors',
+    salesperson_name:  sp.name  || '',
+    salesperson_email: sp.email || '',
+    salesperson_phone: sp.phone || '',
+    salesperson_title: sp.title || '',
+    company_name:    'SureSecured',
+    company_phone:   '(747) 688-9992',
+    company_website: 'suresecured.com',
+    company_address: 'Simi Valley, CA',
+    cta_url:         'https://suresecured.com/pages/request-a-quote',
+  };
+
+  const { sendSequenceEmail } = require('../lib/gmail');
+  const results = [];
+
+  for (const step of steps) {
+    try {
+      await sendSequenceEmail({
+        salespersonId: spId,
+        to:            email,
+        subject:       `[PREVIEW Step ${step.step_number}] ${step.subject}`,
+        body:          step.body,
+        vars,
+        enrollmentId:  null,
+        stepId:        step.id,
+        leadId:        null,
+      });
+      results.push({ step: step.step_number, ok: true });
+      // Small pause so Gmail doesn't rate-limit
+      await new Promise(r => setTimeout(r, 1500));
+    } catch (err) {
+      results.push({ step: step.step_number, ok: false, error: err.message });
+    }
+  }
+
+  res.json({ ok: true, sent: results.filter(r => r.ok).length, total: steps.length, results });
 });
 
 // ── Sequences UI page ──────────────────────────────────────────────────────
@@ -344,6 +537,8 @@ router.get('/', requireAuth, async (req, res) => {
               <td class="py-2 flex gap-3">
                 <button onclick="editSequence(${s.id})" class="text-blue-600 hover:underline text-xs">Edit Steps</button>
                 <button onclick="enrollContacts(${s.id}, '${s.name}')" class="text-green-600 hover:underline text-xs">Enroll</button>
+                <button onclick="autoEnroll(${s.id}, '${s.name}', '${s.audience_type}')" class="text-purple-600 hover:underline text-xs">Auto-Enroll</button>
+                <button onclick="previewSequence(${s.id}, '${s.name}')" class="text-orange-500 hover:underline text-xs">Preview All</button>
                 <button onclick="viewEnrollments(${s.id}, '${s.name}')" class="text-gray-500 hover:underline text-xs">View</button>
                 <button onclick="deleteSeq(${s.id})" class="text-red-400 hover:underline text-xs">Delete</button>
               </td>
@@ -375,14 +570,26 @@ router.get('/', requireAuth, async (req, res) => {
       </div>
     </div>
 
-    <!-- Contact Import -->
+    <!-- Contact Import & Verification -->
     <div class="bg-white rounded-xl shadow-sm p-6">
-      <h2 class="font-semibold text-gray-700 mb-4">Import Contacts (CSV)</h2>
+      <h2 class="font-semibold text-gray-700 mb-1">Import Contacts (CSV)</h2>
       <p class="text-sm text-gray-500 mb-3">Required column: <code>email</code>. Optional: <code>first_name, last_name, phone, city, audience_type, product_interest</code></p>
-      <div class="flex gap-3 items-center flex-wrap">
+      <div class="flex gap-3 items-center flex-wrap mb-5">
         <input type="file" id="csv-file" accept=".csv" class="text-sm border border-gray-300 rounded p-2">
         <button onclick="importCsv()" class="bg-green-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-700">Upload & Import</button>
         <span id="import-status" class="text-sm text-gray-500"></span>
+      </div>
+      <div class="border-t pt-4">
+        <div class="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p class="text-sm font-medium text-gray-700">Email Verification (ZeroBounce)</p>
+            <p class="text-xs text-gray-400 mt-0.5">Verifies 50 unverified leads per run. Invalid/spam-trap addresses are auto-suppressed. Requires ZEROBOUNCE_API_KEY in environment.</p>
+          </div>
+          <button onclick="verifyBatch()" class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">
+            Verify Emails (50)
+          </button>
+        </div>
+        <p id="verify-status" class="text-sm text-gray-500 mt-2"></p>
       </div>
     </div>
   </div>
@@ -619,6 +826,69 @@ function deleteSeq(id) {
   if (!confirm('Delete this sequence? This cannot be undone.')) return;
   fetch('/sequences/api/sequences/' + id, { method: 'DELETE' })
     .then(function() { document.getElementById('seq-row-' + id).remove(); });
+}
+
+// ── Preview all steps ──
+function previewSequence(seqId, seqName) {
+  var email = prompt('Send all steps of "' + seqName + '" to which email?\n\n(Each step arrives with [PREVIEW Step N] prefix)');
+  if (!email) return;
+  var btn = event.target;
+  btn.textContent = 'Sending…';
+  btn.disabled = true;
+  fetch('/sequences/api/sequences/' + seqId + '/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    btn.textContent = 'Preview All';
+    btn.disabled = false;
+    if (data.ok) {
+      alert('Sent ' + data.sent + '/' + data.total + ' steps to ' + email + '. Check your inbox!');
+    } else {
+      alert('Error: ' + (data.error || 'Unknown error'));
+    }
+  })
+  .catch(function() {
+    btn.textContent = 'Preview All';
+    btn.disabled = false;
+    alert('Request failed');
+  });
+}
+
+// ── Email verification ──
+function verifyBatch() {
+  var status = document.getElementById('verify-status');
+  status.textContent = 'Verifying… (this takes ~20 seconds for 50 emails)';
+  fetch('/sequences/api/leads/verify-batch', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { status.textContent = 'Error: ' + d.error; return; }
+      status.textContent = '✓ Verified ' + d.verified + ' emails. Suppressed ' + d.suppressed + ' bad addresses. '
+        + (d.remaining > 0 ? d.remaining + ' unverified remaining — click again to continue.' : 'All leads verified!');
+    })
+    .catch(function() { status.textContent = 'Request failed. Check connection.'; });
+}
+
+// ── Auto-Enroll flow ──
+function autoEnroll(seqId, seqName, audienceType) {
+  if (!confirm(
+    'Auto-enroll all un-enrolled ' + audienceType + ' leads into "' + seqName + '"?\n\n' +
+    'Already enrolled and suppressed contacts are skipped automatically.'
+  )) return;
+
+  fetch('/sequences/api/sequences/' + seqId + '/auto-enroll', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        alert('Auto-enrolled ' + d.enrolled + ' ' + audienceType + ' leads. ' + d.skipped + ' skipped (already enrolled or suppressed).');
+        location.reload();
+      } else {
+        alert('Error: ' + (d.error || 'Unknown error'));
+      }
+    })
+    .catch(function() { alert('Request failed. Check your connection.'); });
 }
 
 // ── Enroll flow ──

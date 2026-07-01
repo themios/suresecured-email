@@ -64,4 +64,37 @@ Metrics:
 Write the summary now:`;
 }
 
-module.exports = { callOpenRouter, buildDigestPrompt };
+/**
+ * Classify an inbound reply into a sales intent category.
+ * Returns one of: hot_lead | interested | needs_quote | question |
+ *                 not_interested | already_purchased | unsubscribe | wrong_person | spam
+ * Also returns a one-line summary and urgency (high | medium | low).
+ */
+async function classifyReply(replyText, leadName) {
+  const prompt = `You are a sales assistant classifying an inbound email reply from a potential customer.
+
+Lead name: ${leadName || 'Unknown'}
+Their reply:
+"""
+${replyText.slice(0, 800)}
+"""
+
+Classify this reply. Respond with valid JSON only — no explanation, no markdown fences.
+
+{
+  "category": one of [hot_lead, interested, needs_quote, question, not_interested, already_purchased, unsubscribe, wrong_person, spam],
+  "urgency": one of [high, medium, low],
+  "summary": "one sentence describing what they said and what action the salesperson should take"
+}`;
+
+  try {
+    const raw = await callOpenRouter(prompt);
+    // Strip any markdown fences if model adds them
+    const clean = raw.replace(/```[a-z]*\n?/gi, '').trim();
+    return JSON.parse(clean);
+  } catch {
+    return { category: 'question', urgency: 'medium', summary: 'Reply received — review manually.' };
+  }
+}
+
+module.exports = { callOpenRouter, buildDigestPrompt, classifyReply };

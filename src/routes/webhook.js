@@ -54,10 +54,11 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
       console.warn('Webhook: no x-shopify-shop-domain header present — order will be recorded without client_id, commission skipped.');
     }
 
-    // Look for attribution token in order note attributes
+    // Look for attribution token in order note attributes (written by Shopify snippet via cart.attributes)
     const attrs = order.note_attributes || [];
     const tokenAttr = attrs.find(a => a.name === 'ss_token');
-    const spAttr = attrs.find(a => a.name === 'ss_salesperson_id');
+    const spAttr    = attrs.find(a => a.name === 'ss_salesperson') ||
+                      attrs.find(a => a.name === 'ss_salesperson_id'); // legacy fallback
 
     const token = tokenAttr?.value || null;
     const salespersonId = spAttr?.value ? parseInt(spAttr.value) : null;

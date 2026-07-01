@@ -308,13 +308,25 @@ router.get('/', requireAuth, async (req, res) => {
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Commission Rate (%)</label>
-            <input type="number" name="commission_rate" value="100" min="0" max="100" step="0.5" required
+            <label class="block text-xs font-medium text-gray-600 mb-1">Direct Phone</label>
+            <input type="text" name="phone" placeholder="(818) 555-0101"
               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">CallRail Tracking #</label>
-            <input type="text" name="tracking_phone_number" placeholder="(818) 555-0101"
+            <label class="block text-xs font-medium text-gray-600 mb-1">Title</label>
+            <input type="text" name="title" placeholder="Sales Representative"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Voice Extension</label>
+            <input type="text" name="voice_extension" placeholder="101"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Commission Rate (%)</label>
+            <input type="number" name="commission_rate" value="100" min="0" max="100" step="0.5" required
               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
           </div>
         </div>
@@ -355,13 +367,25 @@ router.get('/', requireAuth, async (req, res) => {
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Commission Rate (%)</label>
-            <input type="number" name="commission_rate" id="edit-commission" min="0" max="100" step="0.5" required
+            <label class="block text-xs font-medium text-gray-600 mb-1">Direct Phone</label>
+            <input type="text" name="phone" id="edit-phone" placeholder="(818) 555-0101"
               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">CallRail Tracking #</label>
-            <input type="text" name="tracking_phone_number" id="edit-tracking" placeholder="(818) 555-0101"
+            <label class="block text-xs font-medium text-gray-600 mb-1">Title</label>
+            <input type="text" name="title" id="edit-title" placeholder="Sales Representative"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Voice Extension</label>
+            <input type="text" name="voice_extension" id="edit-extension" placeholder="101"
+              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Commission Rate (%)</label>
+            <input type="number" name="commission_rate" id="edit-commission" min="0" max="100" step="0.5" required
               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
           </div>
         </div>
@@ -476,6 +500,9 @@ router.get('/', requireAuth, async (req, res) => {
     document.getElementById('edit-email').value = sp.email || '';
     document.getElementById('edit-commission').value = sp.commission_rate || 100;
     document.getElementById('edit-tracking').value = sp.tracking_phone_number || '';
+    document.getElementById('edit-phone').value = sp.phone || '';
+    document.getElementById('edit-title').value = sp.title || '';
+    document.getElementById('edit-extension').value = sp.voice_extension || '';
     document.getElementById('edit-sp-form').action = '/admin/salespeople/' + sp.id;
     document.getElementById('edit-sp-modal').classList.remove('hidden');
   }
@@ -525,16 +552,19 @@ router.get('/', requireAuth, async (req, res) => {
 // ─── Salesperson Actions ───────────────────────────────────────────────────
 
 router.post('/salespeople', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
-  const { first_name, last_name, email, commission_rate, tracking_phone_number } = req.body;
+  const { first_name, last_name, email, commission_rate, tracking_phone_number, phone, title, voice_extension } = req.body;
   try {
     await pool.query(
-      `INSERT INTO salespeople (name, email, commission_rate, tracking_phone_number)
-       VALUES ($1, $2, $3, $4)`,
+      `INSERT INTO salespeople (name, email, commission_rate, tracking_phone_number, phone, title, voice_extension)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         `${first_name} ${last_name}`.trim(),
         email,
         parseFloat(commission_rate) || 100,
         tracking_phone_number || null,
+        phone || null,
+        title || null,
+        voice_extension || null,
       ]
     );
     res.redirect('/admin?ok=1&msg=' + encodeURIComponent('Salesperson added successfully.'));
@@ -545,15 +575,18 @@ router.post('/salespeople', express.urlencoded({ extended: true }), requireAuth,
 });
 
 router.post('/salespeople/:id', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
-  const { first_name, last_name, email, commission_rate, tracking_phone_number } = req.body;
+  const { first_name, last_name, email, commission_rate, tracking_phone_number, phone, title, voice_extension } = req.body;
   try {
     await pool.query(
-      `UPDATE salespeople SET name=$1, email=$2, commission_rate=$3, tracking_phone_number=$4 WHERE id=$5`,
+      `UPDATE salespeople SET name=$1, email=$2, commission_rate=$3, tracking_phone_number=$4, phone=$5, title=$6, voice_extension=$7 WHERE id=$8`,
       [
         `${first_name} ${last_name}`.trim(),
         email,
         parseFloat(commission_rate) || 100,
         tracking_phone_number || null,
+        phone || null,
+        title || null,
+        voice_extension || null,
         req.params.id,
       ]
     );
