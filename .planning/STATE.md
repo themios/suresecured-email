@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 4 of 5 (Voice)
-Plan: 4/4 complete (04-04 done — voice admin form + Retell provisioning route)
-Status: Phase 4 complete
-Last activity: 2026-06-30 — Completed 04-04-PLAN.md — voice_extension field in client form + POST /admin/clients/:id/provision-voice
+Plan: 4/4 complete (04-03 done — Telnyx SMS inbound webhook + cron SMS dispatch branch)
+Status: Phase 4 in progress (04-03 complete; 04-04 pending)
+Last activity: 2026-06-30 — Completed 04-03-PLAN.md — POST /telnyx-hooks/sms + cron SMS channel branch
 
 Progress: [████████████████████] ~100% (all 04-voice plans complete)
 
@@ -110,6 +110,11 @@ Recent decisions affecting current work:
 - 04-02: call_ended idempotent via ON CONFLICT (retell_call_id) DO NOTHING — Retell may retry webhooks
 - 04-02: Auto-enrollment uses first active sequence by id — deterministic, no config needed for MVP
 - 04-02: retellRouter mounted after express.json() — parsed body required for webhook payloads
+- 04-03: telnyxRouter always returns 200 — Telnyx retries on 5xx; same pattern as retellRouter in 04-02
+- 04-03: sms_messages INSERT runs even when lead not found (leadId=null) — preserves unknown-sender records
+- 04-03: paused_reason='sms_reply' mirrors 'replied' semantics from email path; distinguishes channel
+- 04-03: SMS cron branch uses else — email is default, SMS is explicit per step; existing sequences unaffected
+- 04-03: 10DLC gate comment in both telnyx.js route and cron.js — outbound SMS blocked by carriers until Brand+Campaign registered
 - 04-04: escapeHtml() added inline in admin.js — no new dependency, consistent with no-template-engine pattern
 - 04-04: requireRole('operator', 'owner') multi-arg matches existing agency dashboard pattern
 - 04-04: APP_BASE_URL env with req.hostname fallback — webhook URL resolves without extra config on Railway
@@ -129,5 +134,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-06-30
-Stopped at: Completed 04-04-PLAN.md — voice admin form + Retell provisioning route
-Resume file: None — Phase 4 Voice complete
+Stopped at: Completed 04-03-PLAN.md — Telnyx SMS inbound webhook + cron SMS dispatch
+Resume file: None — continue with 04-04 (voice admin form + Retell provisioning)
