@@ -866,7 +866,7 @@ function verifyBatch() {
 // -- Auto-Enroll flow --
 function autoEnroll(seqId, seqName, audienceType) {
   if (!confirm(
-    'Auto-enroll all un-enrolled ' + audienceType + ' leads into "' + seqName + '"?\n\n' +
+    'Auto-enroll all un-enrolled ' + audienceType + ' leads into "' + seqName + '"?\\n\\n' +
     'Already enrolled and suppressed contacts are skipped automatically.'
   )) return;
 
