@@ -31,8 +31,8 @@
 
 ### AI Intelligence
 
-- [ ] **AIML-01**: Each client receives a daily email digest (via OpenRouter/Gemini) summarizing new leads, sequence performance, reply rate, and top-performing subject lines for the past 24 hours
-- [ ] **AIML-02**: Leads are scored 1–100 based on email engagement patterns (opens, clicks, step reached, reply) and score is visible on the lead record and commission dashboard
+- [x] **AIML-01**: Each client receives a daily email digest (via OpenRouter/Gemini) summarizing new leads, sequence performance, reply rate, and top-performing subject lines for the past 24 hours
+- [x] **AIML-02**: Leads are scored 1–100 based on email engagement patterns (opens, clicks, step reached, reply) and score is visible on the lead record and commission dashboard
 
 ## v2 Requirements
 
@@ -80,8 +80,8 @@
 | EMAI-02 | Phase 3 | Complete ✓ |
 | EMAI-03 | Phase 1 | Complete ✓ |
 | VOIC-01 | Phase 4 | Pending |
-| AIML-01 | Phase 5 | Pending |
-| AIML-02 | Phase 5 | Pending |
+| AIML-01 | Phase 5 | Complete ✓ |
+| AIML-02 | Phase 5 | Complete ✓ |
 
 **Coverage:**
 - v1 requirements: 14 total
@@ -90,4 +90,4 @@
 
 ---
 *Requirements defined: 2026-06-30*
-*Last updated: 2026-06-30 — Phase 3 complete, EMAI-01 and EMAI-02 marked Complete ✓*
+*Last updated: 2026-06-30 — Phase 5 complete, AIML-01 and AIML-02 marked Complete ✓. All v1 phases complete (Phase 4 Voice deferred pending Twilio).*

@@ -14,7 +14,7 @@ SalesPilot AI evolves an existing single-tenant CommissionTracker into a multi-t
 - [x] **Phase 2: Commission Engine** - Tiered commission calculation, salesperson + agency dashboards, Shopify webhook ✓ 2026-06-30
 - [x] **Phase 3: Email Deliverability** - Open/click tracking pixels, bounce suppression ✓ 2026-06-30
 - [ ] **Phase 4: Voice** - Retell AI via single Twilio number with client extensions (deferrable until Twilio number acquired)
-- [ ] **Phase 5: AI Intelligence** - Daily digest emails, lead engagement scoring
+- [x] **Phase 5: AI Intelligence** - Daily digest emails, lead engagement scoring ✓ 2026-06-30
 
 ## Phase Details
 
@@ -95,8 +95,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Daily digest engine: migration 005, openrouter.js, buildDigestHtml(), GET /cron/daily-digest route
-- [ ] 05-02-PLAN.md — Lead scoring: computeScore() pure function, POST /cron/score-leads batch route, score badge on portal
+- [x] 05-01-PLAN.md — Daily digest engine: migration 005, openrouter.js, buildDigestHtml(), POST /cron/daily-digest route ✓
+- [x] 05-02-PLAN.md — Lead scoring: computeScore() pure function, POST /cron/score-leads batch route, score badge on portal ✓
 
 ## Progress
 
@@ -110,4 +110,4 @@ Phase 4 (Voice) can be deferred without blocking Phase 5.
 | 2. Commission Engine | 4/4 | ✓ Complete | 2026-06-30 |
 | 3. Email Deliverability | 4/4 | ✓ Complete | 2026-06-30 |
 | 4. Voice | 0/2 | Not started | - |
-| 5. AI Intelligence | 0/2 | Not started | - |
+| 5. AI Intelligence | 2/2 | ✓ Complete | 2026-06-30 |
