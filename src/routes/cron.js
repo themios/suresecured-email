@@ -219,7 +219,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
 });
 
 /**
- * GET /cron/daily-digest
+ * POST /cron/daily-digest
  * Generates AI-powered daily metrics summary email per client.
  * Called once daily by cron-job.org at 06:00 UTC.
  * Auth: Authorization: Bearer <CRON_SECRET>
@@ -228,7 +228,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
  * The digest is sent FROM and TO the operator's connected Gmail account — no separate
  * OPENROUTER_DIGEST_EMAIL env var is needed.
  */
-router.get('/daily-digest', cronAuth, async (req, res) => {
+router.post('/daily-digest', cronAuth, async (req, res) => {
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
   let processed = 0, skipped = 0, errors = 0;
   const errorDetails = [];
