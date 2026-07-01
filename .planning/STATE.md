@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 ## Current Position
 
 Phase: 4 of 5 (Voice)
-Plan: 1/4 complete (04-01 done — voice schema migration + Telnyx SMS helper)
+Plan: 2/4 complete (04-02 done — Retell webhook handlers + API provisioning library)
 Status: In progress
-Last activity: 2026-06-30 — Completed 04-01-PLAN.md — migration 006_voice.sql (call_logs, sms_messages, voice cols) + src/lib/telnyx.js sendSms()
+Last activity: 2026-06-30 — Completed 04-02-PLAN.md — src/lib/retell.js + src/routes/retell.js (/retell-hooks/inbound + /call-ended) + index.js mount
 
 Progress: [████████████████░░░░] ~80% (04-01 complete; 04-02 through 04-04 remain)
 
@@ -105,6 +105,11 @@ Recent decisions affecting current work:
 - 04-01: sequence_steps.channel NOT NULL DEFAULT 'email' — preserves all existing email-only steps without backfill
 - 04-01: leads.phone gets UNIQUE index — enables call-ended webhook to upsert lead by phone number safely
 - 04-01: All voice schema in 006_voice.sql (not split across files) — simpler ordering, single re-run target
+- 04-02: /inbound always returns 200 — Retell requires valid HTTP response or call fails to connect
+- 04-02: Client lookup by telnyx_phone_number (call.to_number) for MVP — single number maps to single client without extension metadata
+- 04-02: call_ended idempotent via ON CONFLICT (retell_call_id) DO NOTHING — Retell may retry webhooks
+- 04-02: Auto-enrollment uses first active sequence by id — deterministic, no config needed for MVP
+- 04-02: retellRouter mounted after express.json() — parsed body required for webhook payloads
 
 ### Pending Todos
 
@@ -120,5 +125,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-06-30
-Stopped at: Completed 04-01-PLAN.md — voice schema migration 006 + telnyx.js sendSms()
-Resume file: None — continue with 04-02
+Stopped at: Completed 04-02-PLAN.md — Retell webhook handlers + API provisioning library
+Resume file: None — continue with 04-03
