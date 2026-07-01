@@ -538,7 +538,7 @@ router.get('/', requireAuth, async (req, res) => {
                 <button onclick="editSequence(${s.id})" class="text-blue-600 hover:underline text-xs">Edit Steps</button>
                 <button onclick="enrollContacts(${s.id}, '${s.name}')" class="text-green-600 hover:underline text-xs">Enroll</button>
                 <button onclick="autoEnroll(${s.id}, '${s.name}', '${s.audience_type}')" class="text-purple-600 hover:underline text-xs">Auto-Enroll</button>
-                <button onclick="previewSequence(${s.id}, '${s.name}')" class="text-orange-500 hover:underline text-xs">Preview All</button>
+                <button onclick="previewSequence(this)" data-seq-id="${s.id}" data-seq-name="${s.name.replace(/"/g, '&quot;')}" class="text-orange-500 hover:underline text-xs">Preview All</button>
                 <button onclick="viewEnrollments(${s.id}, '${s.name}')" class="text-gray-500 hover:underline text-xs">View</button>
                 <button onclick="deleteSeq(${s.id})" class="text-red-400 hover:underline text-xs">Delete</button>
               </td>
@@ -829,11 +829,12 @@ function deleteSeq(id) {
 }
 
 // ── Preview all steps ──
-function previewSequence(seqId, seqName) {
+function previewSequence(btn) {
+  var seqId   = btn.dataset.seqId;
+  var seqName = btn.dataset.seqName;
   var email = prompt('Send all steps of "' + seqName + '" to which email?\n\n(Each step arrives with [PREVIEW Step N] prefix)');
   if (!email) return;
-  var btn = event.target;
-  btn.textContent = 'Sending…';
+  btn.textContent = 'Sending...';
   btn.disabled = true;
   fetch('/sequences/api/sequences/' + seqId + '/preview', {
     method: 'POST',
@@ -856,6 +857,7 @@ function previewSequence(seqId, seqName) {
     alert('Request failed');
   });
 }
+
 
 // ── Email verification ──
 function verifyBatch() {
