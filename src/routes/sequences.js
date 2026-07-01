@@ -4,7 +4,7 @@ const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { navHtml } = require('./analytics');
 
-// ── API endpoints ──────────────────────────────────────────────────────────
+// -- API endpoints ----------------------------------------------------------
 
 // List sequences
 router.get('/api/sequences', requireAuth, async (req, res) => {
@@ -203,7 +203,7 @@ router.get('/api/email-accounts', requireAuth, async (req, res) => {
 });
 
 // Per-sequence deliverability report
-// Join path: sequences → contact_enrollments → email_sends
+// Join path: sequences -> contact_enrollments -> email_sends
 // Scoped to req.user.client_id for multi-tenant isolation
 router.get('/api/sequences/report', requireAuth, async (req, res) => {
   const clientId = req.user?.client_id || null;
@@ -240,7 +240,7 @@ router.get('/api/sequences/report', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
-// Contact list for enrollment — all leads with suppression check
+// Contact list for enrollment - all leads with suppression check
 router.get('/api/leads/enrollable', requireAuth, async (req, res) => {
   const seqId = req.query.sequence_id;
   const { rows } = await pool.query(
@@ -262,7 +262,7 @@ router.get('/api/leads/enrollable', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
-// Verify unverified leads via ZeroBounce — processes up to 50 at a time
+// Verify unverified leads via ZeroBounce - processes up to 50 at a time
 // Suppresses invalid/spamtrap/abuse addresses automatically
 router.post('/api/leads/verify-batch', requireAuth, async (req, res) => {
   const { verifyEmail, BLOCK_STATUSES } = require('../lib/zerobounce');
@@ -313,7 +313,7 @@ router.post('/api/leads/verify-batch', requireAuth, async (req, res) => {
       errors++;
     }
 
-    // ~3 req/sec — stay well within ZeroBounce rate limits
+    // ~3 req/sec - stay well within ZeroBounce rate limits
     await new Promise(r => setTimeout(r, 350));
   }
 
@@ -371,7 +371,7 @@ router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', l
   res.json({ ok: true, imported, skipped });
 });
 
-// ── Preview: send all steps of a sequence immediately to one email ──────────
+// -- Preview: send all steps of a sequence immediately to one email ----------
 // POST /sequences/api/sequences/:id/preview
 // Body: { email, salesperson_id }
 router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
@@ -385,7 +385,7 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
   );
   if (!steps.length) return res.status(404).json({ error: 'No steps found' });
 
-  // Get salesperson — use provided or first active one with Gmail connected
+  // Get salesperson - use provided or first active one with Gmail connected
   let spId = parseInt(salesperson_id) || null;
   if (!spId) {
     const { rows } = await pool.query(
@@ -447,7 +447,7 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
   res.json({ ok: true, sent: results.filter(r => r.ok).length, total: steps.length, results });
 });
 
-// ── Sequences UI page ──────────────────────────────────────────────────────
+// -- Sequences UI page ------------------------------------------------------
 
 router.get('/', requireAuth, async (req, res) => {
   const [seqRows, spRows] = await Promise.all([
@@ -467,7 +467,7 @@ router.get('/', requireAuth, async (req, res) => {
 <html lang="en">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sequences – SureSecured</title>
+  <title>Sequences - SureSecured</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -494,10 +494,10 @@ router.get('/', requireAuth, async (req, res) => {
               <td class="py-2 text-gray-600">${sp.gmail_email || '<span class="text-gray-400 italic">Not connected</span>'}</td>
               <td class="py-2">
                 ${sp.gmail_email && sp.enabled
-                  ? '<span class="text-green-600 font-medium">● Connected</span>'
+                  ? '<span class="text-green-600 font-medium">* Connected</span>'
                   : sp.last_error
-                    ? '<span class="text-red-500 text-xs">● Error</span>'
-                    : '<span class="text-gray-400">○ Not connected</span>'}
+                    ? '<span class="text-red-500 text-xs">* Error</span>'
+                    : '<span class="text-gray-400">o Not connected</span>'}
               </td>
               <td class="py-2">
                 ${sp.gmail_email
@@ -533,7 +533,7 @@ router.get('/', requireAuth, async (req, res) => {
               <td class="py-2"><span class="px-2 py-0.5 rounded text-xs ${s.audience_type === 'B2B' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${s.audience_type}</span></td>
               <td class="py-2">${s.step_count} steps</td>
               <td class="py-2">${s.active_enrollments} contacts</td>
-              <td class="py-2"><span class="${s.active ? 'text-green-600' : 'text-gray-400'}">${s.active ? '● Active' : '○ Inactive'}</span></td>
+              <td class="py-2"><span class="${s.active ? 'text-green-600' : 'text-gray-400'}">${s.active ? '* Active' : 'o Inactive'}</span></td>
               <td class="py-2 flex gap-3">
                 <button onclick="editSequence(${s.id})" class="text-blue-600 hover:underline text-xs">Edit Steps</button>
                 <button onclick="enrollContacts(${s.id}, '${s.name}')" class="text-green-600 hover:underline text-xs">Enroll</button>
@@ -564,7 +564,7 @@ router.get('/', requireAuth, async (req, res) => {
             <th class="pb-2 text-right">Bounce Rate</th>
           </tr></thead>
           <tbody id="report-body">
-            <tr><td colspan="5" class="py-4 text-center text-gray-400">Loading…</td></tr>
+            <tr><td colspan="5" class="py-4 text-center text-gray-400">Loading...</td></tr>
           </tbody>
         </table>
       </div>
@@ -599,14 +599,14 @@ router.get('/', requireAuth, async (req, res) => {
     <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
       <div class="flex justify-between items-center mb-4">
         <h3 id="seq-modal-title" class="font-semibold text-lg">New Sequence</h3>
-        <button onclick="closeSeqModal()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        <button onclick="closeSeqModal()" class="text-gray-400 hover:text-gray-600 text-xl">x</button>
       </div>
 
       <input type="hidden" id="seq-id">
       <div class="grid grid-cols-2 gap-4 mb-4">
         <div class="col-span-2">
           <label class="block text-sm font-medium text-gray-700 mb-1">Sequence Name</label>
-          <input id="seq-name" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="e.g. B2C Door Interest – 20 Email">
+          <input id="seq-name" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="e.g. B2C Door Interest - 20 Email">
         </div>
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Audience</label>
@@ -623,7 +623,7 @@ router.get('/', requireAuth, async (req, res) => {
 
       <button onclick="saveSequence()" class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 mb-6">Save Sequence</button>
 
-      <!-- Steps editor — only shown when editing existing -->
+      <!-- Steps editor - only shown when editing existing -->
       <div id="steps-section" class="hidden">
         <div class="flex justify-between items-center mb-3">
           <h4 class="font-semibold text-gray-700">Email Steps</h4>
@@ -638,8 +638,8 @@ router.get('/', requireAuth, async (req, res) => {
   <div id="enroll-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
     <div class="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-lg">Enroll Contacts – <span id="enroll-seq-name"></span></h3>
-        <button onclick="closeEnroll()" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        <h3 class="font-semibold text-lg">Enroll Contacts - <span id="enroll-seq-name"></span></h3>
+        <button onclick="closeEnroll()" class="text-gray-400 hover:text-gray-600 text-xl">x</button>
       </div>
 
       <div class="flex gap-3 flex-wrap mb-4">
@@ -672,8 +672,8 @@ router.get('/', requireAuth, async (req, res) => {
   <div id="view-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
     <div class="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
       <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-lg">Enrollments – <span id="view-seq-name"></span></h3>
-        <button onclick="document.getElementById('view-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+        <h3 class="font-semibold text-lg">Enrollments - <span id="view-seq-name"></span></h3>
+        <button onclick="document.getElementById('view-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl">x</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -731,7 +731,7 @@ function saveSequence() {
     if (!id) {
       activeSeqId = seq.id;
       document.getElementById('seq-id').value = seq.id;
-      document.getElementById('seq-modal-title').textContent = 'Edit Steps – ' + seq.name;
+      document.getElementById('seq-modal-title').textContent = 'Edit Steps - ' + seq.name;
       document.getElementById('steps-section').classList.remove('hidden');
     }
     location.reload();
@@ -747,7 +747,7 @@ function editSequence(id) {
       document.getElementById('seq-name').value = seq.name;
       document.getElementById('seq-desc').value = seq.description || '';
       document.getElementById('seq-audience').value = seq.audience_type;
-      document.getElementById('seq-modal-title').textContent = 'Edit – ' + seq.name;
+      document.getElementById('seq-modal-title').textContent = 'Edit - ' + seq.name;
       document.getElementById('steps-section').classList.remove('hidden');
       renderSteps(seq.steps || []);
       document.getElementById('seq-modal').classList.remove('hidden');
