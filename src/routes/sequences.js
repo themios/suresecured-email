@@ -807,7 +807,7 @@ function saveStep(stepNum, stepId) {
   .then(function(r) { return r.json(); })
   .then(function() {
     var btn = document.querySelector('#step-block-' + stepNum + ' button:last-child');
-    if (btn) { btn.textContent = '✓ Saved'; btn.style.background = '#16a34a'; }
+    if (btn) { btn.textContent = '(ok) Saved'; btn.style.background = '#16a34a'; }
   });
 }
 
@@ -828,12 +828,10 @@ function deleteSeq(id) {
     .then(function() { document.getElementById('seq-row-' + id).remove(); });
 }
 
-// ── Preview all steps ──
+// -- Preview all steps --
 function previewSequence(seqId) {
-  var email = prompt('Enter email to receive all steps of this sequence:\n(Each email arrives with [PREVIEW Step N] in the subject)');
+  var email = prompt('Email address to send all sequence steps to:');
   if (!email) return;
-  btn.textContent = 'Sending...';
-  btn.disabled = true;
   fetch('/sequences/api/sequences/' + seqId + '/preview', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -841,37 +839,31 @@ function previewSequence(seqId) {
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
-    btn.textContent = 'Preview All';
-    btn.disabled = false;
     if (data.ok) {
-      alert('Sent ' + data.sent + '/' + data.total + ' steps to ' + email + '. Check your inbox!');
+      alert('Sent ' + data.sent + ' of ' + data.total + ' steps to ' + email);
     } else {
-      alert('Error: ' + (data.error || 'Unknown error'));
+      alert('Error: ' + (data.error || 'Unknown'));
     }
   })
-  .catch(function() {
-    btn.textContent = 'Preview All';
-    btn.disabled = false;
-    alert('Request failed');
-  });
+  .catch(function() { alert('Request failed'); });
 }
 
 
-// ── Email verification ──
+// -- Email verification --
 function verifyBatch() {
   var status = document.getElementById('verify-status');
-  status.textContent = 'Verifying… (this takes ~20 seconds for 50 emails)';
+  status.textContent = 'Verifying... (this takes ~20 seconds for 50 emails)';
   fetch('/sequences/api/leads/verify-batch', { method: 'POST' })
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.error) { status.textContent = 'Error: ' + d.error; return; }
-      status.textContent = '✓ Verified ' + d.verified + ' emails. Suppressed ' + d.suppressed + ' bad addresses. '
-        + (d.remaining > 0 ? d.remaining + ' unverified remaining — click again to continue.' : 'All leads verified!');
+      status.textContent = '(ok) Verified ' + d.verified + ' emails. Suppressed ' + d.suppressed + ' bad addresses. '
+        + (d.remaining > 0 ? d.remaining + ' unverified remaining - click again to continue.' : 'All leads verified!');
     })
     .catch(function() { status.textContent = 'Request failed. Check connection.'; });
 }
 
-// ── Auto-Enroll flow ──
+// -- Auto-Enroll flow --
 function autoEnroll(seqId, seqName, audienceType) {
   if (!confirm(
     'Auto-enroll all un-enrolled ' + audienceType + ' leads into "' + seqName + '"?\n\n' +
@@ -891,14 +883,14 @@ function autoEnroll(seqId, seqName, audienceType) {
     .catch(function() { alert('Request failed. Check your connection.'); });
 }
 
-// ── Enroll flow ──
+// -- Enroll flow --
 var enrollSeqId = null;
 
 function enrollContacts(seqId, seqName) {
   enrollSeqId = seqId;
   document.getElementById('enroll-seq-name').textContent = seqName;
   document.getElementById('enroll-modal').classList.remove('hidden');
-  document.getElementById('leads-table').innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">Loading…</td></tr>';
+  document.getElementById('leads-table').innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">Loading...</td></tr>';
 
   fetch('/sequences/api/leads/enrollable?sequence_id=' + seqId)
     .then(function(r) { return r.json(); })
@@ -981,7 +973,7 @@ function enrollSelected() {
 function viewEnrollments(seqId, seqName) {
   document.getElementById('view-seq-name').textContent = seqName;
   document.getElementById('view-modal').classList.remove('hidden');
-  document.getElementById('view-table').innerHTML = '<tr><td colspan="7" class="py-4 text-center text-gray-400">Loading…</td></tr>';
+  document.getElementById('view-table').innerHTML = '<tr><td colspan="7" class="py-4 text-center text-gray-400">Loading...</td></tr>';
 
   fetch('/sequences/api/sequences/' + seqId + '/enrollments')
     .then(function(r) { return r.json(); })
@@ -991,11 +983,11 @@ function viewEnrollments(seqId, seqName) {
         return;
       }
       document.getElementById('view-table').innerHTML = rows.map(function(r) {
-        var nextSend = r.next_send_at ? new Date(r.next_send_at).toLocaleDateString() : '—';
+        var nextSend = r.next_send_at ? new Date(r.next_send_at).toLocaleDateString() : '-';
         var statusColor = r.status === 'active' ? 'text-green-600' : r.status === 'completed' ? 'text-gray-400' : 'text-yellow-600';
         return '<tr class="border-b last:border-0">' +
           '<td class="py-1.5">' + r.email + (r.first_name ? '<br><span class="text-xs text-gray-400">' + r.first_name + ' ' + (r.last_name||'') + '</span>' : '') + '</td>' +
-          '<td class="py-1.5 text-xs">' + (r.salesperson_name || '—') + '</td>' +
+          '<td class="py-1.5 text-xs">' + (r.salesperson_name || '-') + '</td>' +
           '<td class="py-1.5 text-center">' + r.current_step + '</td>' +
           '<td class="py-1.5 text-center">' + r.emails_sent + '</td>' +
           '<td class="py-1.5 ' + statusColor + ' capitalize">' + r.status + (r.paused_reason ? ' (' + r.paused_reason + ')' : '') + '</td>' +
@@ -1024,7 +1016,7 @@ function importCsv() {
   var file = document.getElementById('csv-file').files[0];
   if (!file) { alert('Select a CSV file first'); return; }
   var status = document.getElementById('import-status');
-  status.textContent = 'Importing…';
+  status.textContent = 'Importing...';
 
   var reader = new FileReader();
   reader.onload = function(e) {
@@ -1035,7 +1027,7 @@ function importCsv() {
     })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      status.textContent = '✓ Imported ' + d.imported + ' contacts. Skipped: ' + d.skipped;
+      status.textContent = '(ok) Imported ' + d.imported + ' contacts. Skipped: ' + d.skipped;
       status.style.color = '#16a34a';
     })
     .catch(function() { status.textContent = 'Import failed'; status.style.color = '#dc2626'; });
@@ -1049,7 +1041,7 @@ function loadReport() {
     .then(function(rows) {
       var tbody = document.getElementById('report-body');
       if (!rows || !rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">No data yet — send some emails first</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">No data yet - send some emails first</td></tr>';
         return;
       }
       tbody.innerHTML = rows.map(function(r) {
