@@ -6,3 +6,15 @@ startCommand = "npm start"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
+
+[[cron]]
+schedule = "*/15 * * * *"
+command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/send-sequences -H \"Authorization: Bearer $CRON_SECRET\""
+
+[[cron]]
+schedule = "0 6 * * *"
+command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/daily-digest -H \"Authorization: Bearer $CRON_SECRET\""
+
+[[cron]]
+schedule = "30 6 * * *"
+command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/score-leads -H \"Authorization: Bearer $CRON_SECRET\""
