@@ -10,7 +10,7 @@ router.get('/login', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html>
 <head>
-  <title>SureSecured — Commission Tracker Login</title>
+  <title>SureSecured — Sales Tracker Login</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
 </head>
@@ -18,7 +18,7 @@ router.get('/login', (req, res) => {
   <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-sm">
     <div class="text-center mb-6">
       <h1 class="text-2xl font-bold text-gray-800">SureSecured</h1>
-      <p class="text-gray-500 text-sm mt-1">Commission Tracker</p>
+      <p class="text-gray-500 text-sm mt-1">Sales Tracker</p>
     </div>
     ${req.query.error ? `<div class="bg-red-50 text-red-600 text-sm rounded p-3 mb-4">Invalid email or password.</div>` : ''}
     <form method="POST" action="/auth/login" class="space-y-4">

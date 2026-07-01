@@ -17,7 +17,7 @@ function navHtml(activePage) {
       <div class="flex items-center gap-6">
         <div>
           <span class="font-bold text-gray-800 text-lg">SureSecured</span>
-          <span class="text-gray-400 text-sm ml-2">Commission Tracker</span>
+          <span class="text-gray-400 text-sm ml-2">Sales Tracker</span>
         </div>
         <div class="flex gap-1">
           ${tab('Overview',  '/dashboard',  'dashboard')}

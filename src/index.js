@@ -95,7 +95,7 @@ app.get('/', (req, res) => res.redirect('/dashboard'));
 async function start() {
   await initDb();
   app.listen(PORT, () => {
-    console.log(`Commission Tracker running on port ${PORT}`);
+    console.log(`Sales Tracker running on port ${PORT}`);
   });
 }
 
