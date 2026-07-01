@@ -19,6 +19,7 @@ const gmailOAuthRouter = require('./routes/gmail-oauth');
 const cronRouter        = require('./routes/cron');
 const unsubscribeRouter = require('./routes/unsubscribe');
 const retellRouter      = require('./routes/retell');
+const telnyxRouter      = require('./routes/telnyx');
 const pixelRouter       = require('./routes/pixel');
 const emailClickRouter  = require('./routes/email-click');
 
@@ -74,6 +75,9 @@ app.use('/cron', cronRouter);
 
 // Retell AI webhook handlers — must be after express.json()
 app.use('/retell-hooks', retellRouter);
+
+// Telnyx SMS webhook handlers — must be after express.json()
+app.use('/telnyx-hooks', telnyxRouter);
 
 // Unsubscribe (no auth — must be publicly accessible)
 app.use('/unsubscribe', unsubscribeRouter);

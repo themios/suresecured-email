@@ -11,6 +11,7 @@ const { pool } = require('../db');
 const { sendSequenceEmail, checkForReplies, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
 const { callOpenRouter, buildDigestPrompt } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
+const { sendSms } = require('../lib/telnyx');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -42,6 +43,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         ce.enrolled_at,
         ce.client_id,
         l.email            AS lead_email,
+        l.phone            AS lead_phone,
         l.first_name,
         l.last_name,
         l.city,
@@ -129,16 +131,59 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
       };
 
       const brandConfig = row.brand_config || {};
-      const sendResult = await sendSequenceEmail({
-        salespersonId: row.salesperson_id,
-        to:            row.lead_email,
-        subject:       step.subject,
-        body:          step.body,
-        vars,
-        enrollmentId:  row.enrollment_id,
-        stepId:        step.id,
-        leadId:        row.lead_id,
-      }, brandConfig);
+
+      // ─── Dispatch: SMS or Email ───────────────────────────────────────────
+      // 10DLC NOTE: SMS outbound is blocked by US carriers until Brand+Campaign
+      // are registered in Telnyx portal (Messaging > Brands & Campaigns).
+      // 3-7 day approval. Remove this comment once 10DLC is approved.
+      let sendResult;
+
+      if (step.channel === 'sms') {
+        // SMS path
+        if (!row.lead_phone) {
+          await client.query(
+            `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'no_phone' WHERE id = $1`,
+            [row.enrollment_id]
+          );
+          console.warn(`[cron] SMS step ${step.id} skipped — no phone for lead ${row.lead_id}`);
+          skipped++;
+          continue;
+        }
+
+        // Interpolate vars into body (same {{var}} substitution as email)
+        let smsBody = step.body || '';
+        for (const [k, v] of Object.entries(vars)) {
+          smsBody = smsBody.replaceAll(`{{${k}}}`, v || '');
+        }
+
+        const smsResult = await sendSms(row.lead_phone, smsBody);
+        sendResult = smsResult;
+
+        if (smsResult.ok) {
+          // Log outbound SMS
+          await client.query(
+            `INSERT INTO sms_messages
+               (enrollment_id, step_id, lead_id, client_id, direction, from_number, to_number,
+                body, telnyx_message_id, status, sent_at)
+             VALUES ($1,$2,$3,$4,'outbound',$5,$6,$7,$8,'sent',NOW())`,
+            [row.enrollment_id, step.id, row.lead_id, row.client_id,
+             process.env.TELNYX_PHONE_NUMBER, row.lead_phone,
+             smsBody, smsResult.messageId]
+          );
+        }
+      } else {
+        // Email path (unchanged)
+        sendResult = await sendSequenceEmail({
+          salespersonId: row.salesperson_id,
+          to:            row.lead_email,
+          subject:       step.subject,
+          body:          step.body,
+          vars,
+          enrollmentId:  row.enrollment_id,
+          stepId:        step.id,
+          leadId:        row.lead_id,
+        }, brandConfig);
+      }
 
       if (sendResult.ok) {
         // Check if this was the last step
