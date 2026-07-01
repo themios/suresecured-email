@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-06-30)
 
 ## Current Position
 
-Phase: 5 of 5 (AI Intelligence)
-Plan: 2/2 complete (05-02 done — lead engagement scoring)
-Status: COMPLETE — all phases done
-Last activity: 2026-06-30 — Completed 05-02-PLAN.md — engagement scoring (computeScore + /cron/score-leads + portal badge)
+Phase: 4 of 5 (Voice)
+Plan: 1/4 complete (04-01 done — voice schema migration + Telnyx SMS helper)
+Status: In progress
+Last activity: 2026-06-30 — Completed 04-01-PLAN.md — migration 006_voice.sql (call_logs, sms_messages, voice cols) + src/lib/telnyx.js sendSms()
 
-Progress: [████████████████████] 100% (all phases complete)
+Progress: [████████████████░░░░] ~80% (04-01 complete; 04-02 through 04-04 remain)
 
 ## Performance Metrics
 
@@ -101,6 +101,10 @@ Recent decisions affecting current work:
 - 05-02: Portal top-5 leads query scopes via contact_enrollments.salesperson_id (not leads.salesperson_id which doesn't exist)
 - 05-02: score-leads UPDATE is idempotent — always sets current computed value, safe to run repeatedly
 - 05-02: engagement_score and scored_at columns already in migration 005 from 05-01 — no new migration needed
+- 04-01: No Telnyx SDK — plain https.request matches codebase style; zero new npm dependencies
+- 04-01: sequence_steps.channel NOT NULL DEFAULT 'email' — preserves all existing email-only steps without backfill
+- 04-01: leads.phone gets UNIQUE index — enables call-ended webhook to upsert lead by phone number safely
+- 04-01: All voice schema in 006_voice.sql (not split across files) — simpler ordering, single re-run target
 
 ### Pending Todos
 
@@ -116,5 +120,5 @@ Recent decisions affecting current work:
 ## Session Continuity
 
 Last session: 2026-06-30
-Stopped at: Completed 05-02-PLAN.md — lead engagement scoring (computeScore + /cron/score-leads + portal badge)
-Resume file: None — project complete
+Stopped at: Completed 04-01-PLAN.md — voice schema migration 006 + telnyx.js sendSms()
+Resume file: None — continue with 04-02
