@@ -13,7 +13,7 @@ SalesPilot AI evolves an existing single-tenant CommissionTracker into a multi-t
 - [x] **Phase 1: Foundation** - Multi-tenancy DB, user auth, client config, dynamic branding, scale-ready cron ✓ 2026-06-30
 - [x] **Phase 2: Commission Engine** - Tiered commission calculation, salesperson + agency dashboards, Shopify webhook ✓ 2026-06-30
 - [x] **Phase 3: Email Deliverability** - Open/click tracking pixels, bounce suppression ✓ 2026-06-30
-- [ ] **Phase 4: Voice** - Retell AI via single Twilio number with client extensions (deferrable until Twilio number acquired)
+- [x] **Phase 4: Voice** - Telnyx SMS + Retell AI inbound voice with post-call lead creation ✓ 2026-06-30
 - [x] **Phase 5: AI Intelligence** - Daily digest emails, lead engagement scoring ✓ 2026-06-30
 
 ## Phase Details
@@ -71,18 +71,22 @@ Plans:
 - [x] 03-04-PLAN.md — Deliverability report (per-sequence open/click/bounce rates, sequences page table) ✓
 
 ### Phase 4: Voice
-**Goal**: Inbound calls to a single Twilio number route to the correct client's Retell AI agent and post-call lead data lands in the platform automatically
+**Goal**: Inbound calls to the Telnyx number (+18183810202) route to the correct client's Retell AI agent; post-call lead data and transcripts land in the platform automatically; and outbound SMS fires from sequence steps as a channel alongside email
 **Depends on**: Phase 1
 **Requirements**: VOIC-01
-**Note**: This phase is deferrable. It cannot begin until a Twilio number is purchased and provisioned. All other phases are independent of this one.
+**Note**: Carrier switched from Twilio to Telnyx. Number +18183810202 already owned. 10DLC Brand+Campaign registration required in Telnyx portal before SMS goes live (3-7 day approval). Telnyx elastic SIP trunk -> sip.retellai.com for call routing.
 **Success Criteria** (what must be TRUE):
-  1. Caller dials the Twilio number, selects a client via extension or name prompt, and is connected to that client's Retell AI agent without reaching a dead end or wrong client
-  2. After a call ends, a new lead record appears in the correct client's lead list with call transcript metadata and the lead is enrolled in the appropriate sequence automatically
-**Plans**: TBD
+  1. Caller dials +18183810202 and is connected to the correct client's Retell AI agent; call transcript and duration appear in call_logs after call ends
+  2. After a call ends, a new lead record appears in the client's lead list and the lead is auto-enrolled in the client's active sequence
+  3. A sequence step with channel='sms' sends a Telnyx SMS to the lead's phone number; inbound SMS reply pauses the enrollment with paused_reason='sms_reply'
+  4. Operator can set voice_extension per client and click "Provision Voice Agent" to create the Retell LLM + agent and store the IDs
+**Plans**: 4 plans
 
 Plans:
-- [ ] 04-01: Twilio + Retell integration — provision number, configure routing logic, client extension map in JSONB config
-- [ ] 04-02: Post-call lead ingest — parse Retell callback, create lead, auto-enroll in client sequence (port from DealerWyze retell-callback/ingest.ts)
+- [x] 04-01-PLAN.md — Schema migration 006 (voice columns + call_logs + sms_messages tables) + src/lib/telnyx.js sendSms() ✓
+- [x] 04-02-PLAN.md — Retell voice routing: src/lib/retell.js + /retell-hooks/inbound + /retell-hooks/call-ended + index.js mount ✓
+- [x] 04-03-PLAN.md — SMS dispatch + inbound: /telnyx-hooks/sms + cron.js SMS branch + index.js mount ✓
+- [x] 04-04-PLAN.md — Client UI: voice_extension field + POST /admin/clients/:id/provision-voice (Retell LLM + agent creation) ✓
 
 ### Phase 5: AI Intelligence
 **Goal**: Each client receives a daily AI-generated performance digest and every lead has a visible engagement score so operators and salespeople can prioritize outreach
@@ -109,5 +113,5 @@ Phase 4 (Voice) can be deferred without blocking Phase 5.
 | 1. Foundation | 5/5 | ✓ Complete | 2026-06-30 |
 | 2. Commission Engine | 4/4 | ✓ Complete | 2026-06-30 |
 | 3. Email Deliverability | 4/4 | ✓ Complete | 2026-06-30 |
-| 4. Voice | 0/2 | Not started | - |
+| 4. Voice | 4/4 | ✓ Complete | 2026-06-30 |
 | 5. AI Intelligence | 2/2 | ✓ Complete | 2026-06-30 |

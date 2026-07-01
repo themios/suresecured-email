@@ -27,7 +27,7 @@
 
 ### Voice
 
-- [ ] **VOIC-01**: Inbound calls to a single Twilio number route to the correct client's Retell AI agent via extension or name selection; post-call, a lead is created and auto-enrolled in the client's appropriate sequence
+- [x] **VOIC-01**: Inbound calls to a single Telnyx number route to the correct client's Retell AI agent via extension or name selection; post-call, a lead is created and auto-enrolled in the client's appropriate sequence
 
 ### AI Intelligence
 
@@ -79,7 +79,7 @@
 | EMAI-01 | Phase 3 | Complete ✓ |
 | EMAI-02 | Phase 3 | Complete ✓ |
 | EMAI-03 | Phase 1 | Complete ✓ |
-| VOIC-01 | Phase 4 | Pending |
+| VOIC-01 | Phase 4 | Complete ✓ |
 | AIML-01 | Phase 5 | Complete ✓ |
 | AIML-02 | Phase 5 | Complete ✓ |
 
