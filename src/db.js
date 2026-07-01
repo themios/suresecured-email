@@ -39,6 +39,13 @@ async function initDb() {
   );
   await pool.query(migration005Sql);
 
+  // Run voice migration (idempotent)
+  const migration006Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/006_voice.sql'),
+    'utf8'
+  );
+  await pool.query(migration006Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,
