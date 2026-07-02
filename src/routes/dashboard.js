@@ -6,7 +6,7 @@ const { navHtml } = require('./analytics');
 
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const [spStats, recentOrders, recentForms, recentCalls, totalStats] = await Promise.all([
+    const [spStats, recentOrders, recentForms, recentCalls, totalStats, hotLeads] = await Promise.all([
       pool.query(`
         SELECT
           s.id, s.name, s.email, s.commission_rate, s.tracking_phone_number,
@@ -51,12 +51,22 @@ router.get('/', requireAuth, async (req, res) => {
           (SELECT COUNT(*) FROM phone_calls) AS total_calls,
           (SELECT COUNT(*) FROM suppression_list) AS total_suppressed,
           (SELECT COALESCE(SUM(amount),0) FROM orders) AS total_revenue,
-          (SELECT COALESCE(SUM(commission_earned),0) FROM commissions) AS total_commission
+          (SELECT COALESCE(SUM(commission_earned),0) FROM commissions) AS total_commission,
+          (SELECT COUNT(*) FROM leads WHERE reply_classified_at IS NOT NULL) AS total_replies,
+          (SELECT COUNT(*) FROM leads WHERE reply_urgency = 'high') AS hot_leads
+      `),
+      pool.query(`
+        SELECT l.id, l.first_name, l.last_name, l.email, l.reply_category, l.reply_urgency, l.reply_summary, l.reply_classified_at
+        FROM leads l
+        WHERE l.reply_classified_at IS NOT NULL
+        ORDER BY l.reply_classified_at DESC
+        LIMIT 10
       `),
     ]);
 
     const totals = totalStats.rows[0];
     const salespeople = spStats.rows;
+    const recentReplies = hotLeads.rows;
 
     const formatCurrency = n => '$' + parseFloat(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2 });
     const formatDate = d => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -151,7 +161,40 @@ router.get('/', requireAuth, async (req, res) => {
         <p class="text-3xl font-bold text-gray-400 mt-1">${parseInt(totals.total_suppressed || 0).toLocaleString()}</p>
         <p class="text-xs text-gray-400 mt-1">existing customers</p>
       </div>
+      <div class="bg-white rounded-xl shadow-sm p-5">
+        <p class="text-xs text-gray-500 uppercase tracking-wide">Replies</p>
+        <p class="text-3xl font-bold text-indigo-700 mt-1">${parseInt(totals.total_replies || 0).toLocaleString()}</p>
+        <p class="text-xs text-red-500 mt-1">🔥 ${parseInt(totals.hot_leads || 0)} hot leads</p>
+      </div>
     </div>
+
+    <!-- Hot Leads / Recent Replies -->
+    ${recentReplies.length ? `
+    <div class="bg-white rounded-xl shadow-sm mb-8 overflow-hidden">
+      <div class="px-6 py-4 border-b">
+        <h2 class="font-semibold text-gray-800">Recent Replies</h2>
+      </div>
+      <div class="divide-y">
+        ${recentReplies.map(r => `
+        <a href="/leads/${r.id}" class="flex items-center gap-4 px-6 py-3 hover:bg-gray-50 transition">
+          <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white
+            ${r.reply_urgency === 'high' ? 'bg-red-500' : r.reply_urgency === 'low' ? 'bg-gray-400' : 'bg-yellow-500'}">
+            ${(r.first_name?.[0] || r.email[0]).toUpperCase()}
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-900">${r.first_name || ''} ${r.last_name || ''} <span class="text-gray-400 font-normal">${r.email}</span></p>
+            ${r.reply_summary ? `<p class="text-xs text-gray-500 truncate">${r.reply_summary}</p>` : ''}
+          </div>
+          <div class="text-right shrink-0">
+            <span class="px-2 py-0.5 rounded text-xs font-medium
+              ${r.reply_urgency === 'high' ? 'bg-red-100 text-red-700' : r.reply_urgency === 'low' ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}">
+              ${(r.reply_category || '').replace(/_/g, ' ')}
+            </span>
+            <p class="text-xs text-gray-400 mt-1">${new Date(r.reply_classified_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+          </div>
+        </a>`).join('')}
+      </div>
+    </div>` : ''}
 
     <!-- Salesperson Leaderboard -->
     <div class="bg-white rounded-xl shadow-sm mb-8 overflow-hidden">
