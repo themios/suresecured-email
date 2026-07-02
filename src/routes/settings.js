@@ -344,7 +344,7 @@ router.get('/email', requireAuth, async (req, res) => {
 
   <script>
     const PRESETS = ${JSON.stringify(PROVIDERS)};
-    function selectProvider(key) {
+    function selectProvider(key, fillFields = true) {
       document.getElementById('provider-value').value = key;
       document.querySelectorAll('.provider-btn').forEach(btn => {
         const active = btn.dataset.provider === key;
@@ -352,16 +352,19 @@ router.get('/email', requireAuth, async (req, res) => {
           (active ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300');
       });
       const p = PRESETS[key]; if (!p) return;
-      if (p.smtp_host !== undefined) document.querySelector('[name=smtp_host]').value = p.smtp_host;
-      if (p.smtp_port) document.querySelector('[name=smtp_port]').value = p.smtp_port;
-      if (p.imap_host !== undefined) document.querySelector('[name=imap_host]').value = p.imap_host;
-      if (p.imap_port) document.querySelector('[name=imap_port]').value = p.imap_port;
+      if (fillFields) {
+        if (p.smtp_host !== undefined) document.querySelector('[name=smtp_host]').value = p.smtp_host;
+        if (p.smtp_port) document.querySelector('[name=smtp_port]').value = p.smtp_port;
+        if (p.imap_host !== undefined) document.querySelector('[name=imap_host]').value = p.imap_host;
+        if (p.imap_port) document.querySelector('[name=imap_port]').value = p.imap_port;
+      }
       document.getElementById('imap-section').style.display = key === 'ses' ? 'none' : '';
       const noteEl = document.getElementById('provider-note');
       noteEl.textContent = p.note || '';
       noteEl.classList.toggle('hidden', !p.note);
     }
-    selectProvider(document.getElementById('provider-value').value);
+    // On load: highlight active provider button only — don't overwrite saved field values
+    selectProvider(document.getElementById('provider-value').value, false);
 
     async function disconnectGmail() {
       await fetch('/gmail/disconnect/${esc(String(req.user?.id || ''))}', { method: 'POST' });
