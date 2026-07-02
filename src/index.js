@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cookieParser = require('cookie-parser');
+const cron = require('node-cron');
 const { initDb } = require('./db');
 
 const { requireAuth, requireRole } = require('./middleware/auth');
@@ -96,6 +97,19 @@ async function start() {
   await initDb();
   app.listen(PORT, () => {
     console.log(`Sales Tracker running on port ${PORT}`);
+  });
+
+  // Run email cron every 15 minutes
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      const res = await fetch(`http://localhost:${PORT}/cron/send-sequences`, {
+        headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
+      });
+      const data = await res.json();
+      console.log('[cron] send-sequences:', JSON.stringify(data));
+    } catch (err) {
+      console.error('[cron] send-sequences failed:', err.message);
+    }
   });
 }
 
