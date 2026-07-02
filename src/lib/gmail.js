@@ -334,10 +334,13 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
       );
     } else {
       // ── Gmail API path ────────────────────────────────────────────────────
+      // Use configured from_email (Send As alias) if set, otherwise fall back to OAuth account email
+      const gmailFrom = clientCfg?.from_email || account.email;
+      const gmailName = clientCfg?.from_name  || fromName;
       const gmail = google.gmail({ version: 'v1', auth: client });
       const raw   = await buildRawMessage({
-        fromName,
-        fromAddress: account.email,
+        fromName:    gmailName,
+        fromAddress: gmailFrom,
         to,
         subject:     resolvedSubject,
         textBody:    rewrittenBody,
