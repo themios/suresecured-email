@@ -815,15 +815,28 @@ router.post('/score-leads', cronAuth, async (req, res) => {
 });
 
 router.get('/test-telegram', cronAuth, async (req, res) => {
-  const { sendTelegram } = require('../lib/telegram');
-  try {
-    await sendTelegram(
-      `✅ <b>SureSecured Bot Connected!</b>\n\nTelegram notifications are working. You'll receive alerts for:\n🆕 New inbound leads\n🔥 Hot replies\n📊 Daily AI summary`
-    );
-    res.json({ ok: true, message: 'Test message sent to Telegram' });
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
+  const token  = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) {
+    return res.json({ ok: false, error: 'TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set in Railway env vars' });
   }
+  const https = require('https');
+  const body  = JSON.stringify({ chat_id: chatId, text: '✅ SureSecured Bot Connected! Notifications are working.', parse_mode: 'HTML' });
+  const result = await new Promise((resolve) => {
+    const r = https.request({
+      hostname: 'api.telegram.org',
+      path:     `/bot${token}/sendMessage`,
+      method:   'POST',
+      headers:  { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    }, res2 => {
+      let data = '';
+      res2.on('data', c => data += c);
+      res2.on('end', () => resolve(JSON.parse(data)));
+    });
+    r.on('error', err => resolve({ ok: false, description: err.message }));
+    r.write(body); r.end();
+  });
+  res.json({ telegramResponse: result, token_prefix: token.slice(0, 10) + '...', chat_id: chatId });
 });
 
 module.exports = router;
