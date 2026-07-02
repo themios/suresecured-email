@@ -13,8 +13,9 @@ async function setup() {
 
   const hash = await bcrypt.hash(ADMIN_PASSWORD, 12);
   await pool.query(
-    `INSERT INTO admin_users (email, password_hash) VALUES ($1, $2)
-     ON CONFLICT (email) DO UPDATE SET password_hash = $2`,
+    `INSERT INTO users (email, password_hash, role, active)
+     VALUES ($1, $2, 'admin', true)
+     ON CONFLICT (email) DO UPDATE SET password_hash = $2, role = 'admin', active = true`,
     [ADMIN_EMAIL, hash]
   );
 
