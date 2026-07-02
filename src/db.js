@@ -208,6 +208,44 @@ async function initDb() {
     ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS send_service VARCHAR(20) DEFAULT 'gmail';
   `);
 
+  // Full reply text storage on lead
+  await pool.query(`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS reply_text TEXT;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS reply_subject VARCHAR(500);
+  `);
+
+  // Per-tenant email provider config (SMTP + IMAP, encrypted credentials)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS client_email_config (
+      id               SERIAL PRIMARY KEY,
+      client_id        INTEGER REFERENCES clients(id) ON DELETE CASCADE UNIQUE,
+      provider         VARCHAR(30) NOT NULL DEFAULT 'smtp',
+      smtp_host        VARCHAR(255),
+      smtp_port        INTEGER DEFAULT 587,
+      smtp_secure      BOOLEAN DEFAULT false,
+      smtp_user        VARCHAR(255),
+      smtp_pass_enc    TEXT,
+      from_name        VARCHAR(255),
+      from_email       VARCHAR(255),
+      reply_to         VARCHAR(255),
+      imap_host        VARCHAR(255),
+      imap_port        INTEGER DEFAULT 993,
+      imap_user        VARCHAR(255),
+      imap_pass_enc    TEXT,
+      enabled          BOOLEAN DEFAULT true,
+      last_error       TEXT,
+      last_tested_at   TIMESTAMPTZ,
+      created_at       TIMESTAMPTZ DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Permanent unsubscribe flag — survives suppression list cleanup
+  await pool.query(`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS unsubscribed BOOLEAN DEFAULT false;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS unsubscribed_at TIMESTAMPTZ;
+  `);
+
   // CRM notes / activity log
   await pool.query(`
     CREATE TABLE IF NOT EXISTS lead_notes (

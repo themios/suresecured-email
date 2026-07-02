@@ -20,6 +20,7 @@ const leadsRouter     = require('./routes/leads');
 const gmailOAuthRouter = require('./routes/gmail-oauth');
 const cronRouter        = require('./routes/cron');
 const unsubscribeRouter = require('./routes/unsubscribe');
+const settingsRouter    = require('./routes/settings');
 const retellRouter      = require('./routes/retell');
 const telnyxRouter      = require('./routes/telnyx');
 const pixelRouter       = require('./routes/pixel');
@@ -86,6 +87,9 @@ app.use('/telnyx-hooks', telnyxRouter);
 
 // Unsubscribe (no auth — must be publicly accessible)
 app.use('/unsubscribe', unsubscribeRouter);
+
+// Tenant settings
+app.use('/settings', settingsRouter);
 
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));

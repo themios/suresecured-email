@@ -19,6 +19,12 @@ router.get('/', async (req, res) => {
       [email]
     );
 
+    // Permanently flag the lead record
+    await pool.query(
+      `UPDATE leads SET unsubscribed = true, unsubscribed_at = NOW() WHERE LOWER(email) = LOWER($1)`,
+      [email]
+    );
+
     // Pause all active enrollments for this email address
     await pool.query(
       `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'unsubscribed'

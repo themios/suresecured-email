@@ -25,6 +25,7 @@ function navHtml(activePage) {
           ${tab('Leads',     '/leads',      'leads')}
           ${tab('Sequences', '/sequences',  'sequences')}
           ${tab('Admin',     '/admin',      'admin')}
+          ${tab('Settings',  '/settings',   'settings')}
         </div>
       </div>
       <a href="/logout" class="text-sm text-gray-500 hover:text-red-600 transition">Sign out</a>

@@ -101,6 +101,7 @@ router.post('/api/sequences/:id/auto-enroll', requireAuth, async (req, res) => {
       WHERE l.audience_type = $1
         ${clientId ? 'AND l.client_id = $2' : ''}
         AND l.email NOT IN (SELECT email FROM suppression_list)
+        AND (l.unsubscribed IS NULL OR l.unsubscribed = false)
         AND NOT EXISTS (
           SELECT 1 FROM contact_enrollments ce
           WHERE ce.lead_id = l.id AND ce.sequence_id = $${clientId ? 3 : 2}
@@ -144,6 +145,18 @@ router.post('/api/sequences/:id/enroll', requireAuth, async (req, res) => {
   let enrolled = 0, skipped = 0;
   for (const leadId of lead_ids) {
     try {
+      // Block suppressed or unsubscribed leads
+      const { rows: check } = await pool.query(
+        `SELECT unsubscribed, email FROM leads WHERE id = $1`, [leadId]
+      );
+      const lead = check[0];
+      if (!lead) { skipped++; continue; }
+      if (lead.unsubscribed) { skipped++; continue; }
+      const { rows: sup } = await pool.query(
+        `SELECT 1 FROM suppression_list WHERE LOWER(email) = LOWER($1)`, [lead.email]
+      );
+      if (sup.length) { skipped++; continue; }
+
       await pool.query(
         `INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, next_send_at)
          VALUES ($1,$2,$3,$4)

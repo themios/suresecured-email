@@ -241,6 +241,7 @@ router.get('/', requireAuth, async (req, res) => {
       <div class="flex items-center gap-6">
         <div class="text-3xl font-bold text-gray-700">${parseInt(suppressionCount.rows[0].count).toLocaleString()}</div>
         <div class="text-sm text-gray-500">emails suppressed</div>
+        <a href="/admin/suppression" class="ml-auto text-sm text-blue-600 hover:underline">View &amp; manage &#x2192;</a>
       </div>
       <form method="POST" action="/admin/suppression" enctype="multipart/form-data" class="mt-4 flex items-end gap-4 flex-wrap">
         <div>
@@ -657,6 +658,125 @@ router.post('/suppression', express.urlencoded({ extended: true }), requireAuth,
       res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Upload failed. Please try again.'));
     }
   });
+});
+
+// ─── Suppression List Management ──────────────────────────────────────────
+
+router.get('/suppression', requireAuth, async (req, res) => {
+  const search = req.query.search || '';
+  const page   = Math.max(1, parseInt(req.query.page) || 1);
+  const size   = 50;
+  const offset = (page - 1) * size;
+
+  const params = search ? [`%${search}%`] : [];
+  const where  = search ? `WHERE LOWER(email) LIKE LOWER($1)` : '';
+
+  const [rows, countRow] = await Promise.all([
+    pool.query(`SELECT * FROM suppression_list ${where} ORDER BY added_at DESC LIMIT ${size} OFFSET ${offset}`, params),
+    pool.query(`SELECT COUNT(*) FROM suppression_list ${where}`, params),
+  ]);
+
+  const total      = parseInt(countRow.rows[0].count);
+  const totalPages = Math.ceil(total / size);
+  const msg        = req.query.msg || '';
+  const ok         = req.query.ok;
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Suppression List – Sales Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  ${navHtml('admin')}
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <a href="/admin" class="text-sm text-gray-400 hover:text-gray-600">&#x2190; Admin</a>
+        <h1 class="text-2xl font-bold text-gray-800 mt-1">Suppression List</h1>
+      </div>
+      <span class="text-sm text-gray-500">${total.toLocaleString()} suppressed emails</span>
+    </div>
+
+    ${msg ? `<div class="mb-4 px-4 py-3 rounded-lg text-sm ${ok === '1' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}">${escapeHtml(msg)}</div>` : ''}
+
+    <!-- Search -->
+    <form method="GET" action="/admin/suppression" class="mb-4 flex gap-2">
+      <input type="text" name="search" value="${escapeHtml(search)}" placeholder="Search email…"
+        class="border rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <button class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">Search</button>
+      ${search ? `<a href="/admin/suppression" class="text-sm text-gray-400 hover:text-gray-600 py-2">Clear</a>` : ''}
+    </form>
+
+    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b text-xs uppercase tracking-wide text-gray-500">
+          <tr>
+            <th class="px-4 py-3 text-left">Email</th>
+            <th class="px-4 py-3 text-left">Reason</th>
+            <th class="px-4 py-3 text-left">Added</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          ${rows.rows.length === 0
+            ? `<tr><td colspan="4" class="px-4 py-10 text-center text-gray-400">No suppressed emails${search ? ' matching your search' : ''}.</td></tr>`
+            : rows.rows.map(r => `
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-gray-800">${escapeHtml(r.email)}</td>
+            <td class="px-4 py-3">
+              <span class="px-2 py-0.5 rounded text-xs ${r.reason === 'bounced' ? 'bg-red-100 text-red-700' : r.reason === 'unsubscribed' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}">
+                ${escapeHtml(r.reason || 'manual')}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-gray-400">${new Date(r.added_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
+            <td class="px-4 py-3 text-right">
+              <button onclick="removeEmail('${escapeHtml(r.email)}')"
+                class="text-xs text-red-500 hover:text-red-700 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 transition">
+                Remove
+              </button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+
+      ${totalPages > 1 ? `
+      <div class="px-4 py-3 border-t flex justify-between items-center text-sm text-gray-500">
+        <span>Page ${page} of ${totalPages}</span>
+        <div class="flex gap-2">
+          ${page > 1 ? `<a href="?${new URLSearchParams({ ...(search ? { search } : {}), page: page - 1 })}class="px-3 py-1 border rounded hover:bg-gray-50">&#x2190; Prev</a>` : ''}
+          ${page < totalPages ? `<a href="?${new URLSearchParams({ ...(search ? { search } : {}), page: page + 1 })}" class="px-3 py-1 border rounded hover:bg-gray-50">Next &#x2192;</a>` : ''}
+        </div>
+      </div>` : ''}
+    </div>
+  </div>
+
+  <script>
+    async function removeEmail(email) {
+      if (!confirm('Remove ' + email + ' from suppression list?\\nThis will allow emails to this address again.')) return;
+      const res = await fetch('/admin/suppression/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        window.location.href = '/admin/suppression?ok=1&msg=' + encodeURIComponent(email + ' removed from suppression list.');
+      } else {
+        alert('Failed: ' + (data.error || 'unknown error'));
+      }
+    }
+  </script>
+</body>
+</html>`);
+});
+
+router.post('/suppression/remove', requireAuth, async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  await pool.query('DELETE FROM suppression_list WHERE LOWER(email) = LOWER($1)', [email]);
+  res.json({ ok: true });
 });
 
 // ─── Set Goal ─────────────────────────────────────────────────────────────

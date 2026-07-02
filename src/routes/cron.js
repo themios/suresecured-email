@@ -8,7 +8,8 @@ const express  = require('express');
 const router   = express.Router();
 const { google } = require('googleapis');
 const { pool } = require('../db');
-const { sendSequenceEmail, checkForRepliesByAddress, sendReplyNotification, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
+const { sendSequenceEmail, checkForRepliesByAddress, sendReplyNotification, buildDigestHtml, getAuthedClient, buildRawMessage, getClientEmailConfig } = require('../lib/gmail');
+const { imapEnabled, checkForRepliesViaImap } = require('../lib/imap');
 const { callOpenRouter, buildDigestPrompt, classifyReply } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
@@ -25,6 +26,9 @@ function cronAuth(req, res, next) {
 router.get('/send-sequences', cronAuth, async (req, res) => {
   const now = new Date().toISOString();
   let sent = 0, skipped = 0, errors = 0, replies = 0;
+
+  // Cache client email configs for this cron run (avoid per-enrollment DB hits)
+  const clientEmailConfigs = new Map();
 
   // ── Pass 1: reply check on ALL active enrollments with at least one send ────
   // Uses address-based Gmail search so it works for both Gmail and SES sends.
@@ -52,16 +56,24 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
 
     for (const row of replyRows) {
       try {
-        const replyCheck = await checkForRepliesByAddress(
-          row.salesperson_id,
-          row.lead_email,
-          row.enrolled_at
-        );
+        // Load + cache client email config
+        if (row.client_id && !clientEmailConfigs.has(row.client_id)) {
+          clientEmailConfigs.set(row.client_id, await getClientEmailConfig(row.client_id));
+        }
+        const clientCfg = row.client_id ? clientEmailConfigs.get(row.client_id) : null;
+
+        const replyCheck = imapEnabled(clientCfg)
+          ? await checkForRepliesViaImap(row.lead_email, row.enrolled_at, clientCfg)
+          : await checkForRepliesByAddress(row.salesperson_id, row.lead_email, row.enrolled_at);
         if (!replyCheck.replied) continue;
 
         await pool.query(
           `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'replied', replied_at = NOW() WHERE id = $1`,
           [row.enrollment_id]
+        );
+        await pool.query(
+          `UPDATE leads SET reply_text = $1, reply_subject = $2 WHERE id = $3`,
+          [replyCheck.replyText?.slice(0, 2000) || null, replyCheck.replySubject || null, row.lead_id]
         );
         replies++;
 
@@ -195,15 +207,21 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         }
       }
 
-      // Check suppression list
+      // Check suppression list and unsubscribed flag
       const { rows: suppressed } = await client.query(
-        'SELECT 1 FROM suppression_list WHERE LOWER(email) = LOWER($1)',
-        [row.lead_email]
+        `SELECT 1 FROM suppression_list WHERE LOWER(email) = LOWER($1)
+         UNION ALL
+         SELECT 1 FROM leads WHERE id = $2 AND unsubscribed = true`,
+        [row.lead_email, row.lead_id]
       );
       if (suppressed.length) {
+        const reason = await client.query(
+          `SELECT unsubscribed FROM leads WHERE id = $1`, [row.lead_id]
+        );
+        const pauseReason = reason.rows[0]?.unsubscribed ? 'unsubscribed' : 'suppressed';
         await client.query(
-          `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'suppressed' WHERE id = $1`,
-          [row.enrollment_id]
+          `UPDATE contact_enrollments SET status = 'paused', paused_reason = $1 WHERE id = $2`,
+          [pauseReason, row.enrollment_id]
         );
         skipped++;
         continue;
@@ -310,8 +328,13 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         }
       } else {
         // Email path (unchanged)
+        // Load client cfg for send (may already be cached from reply-check pass)
+        if (row.client_id && !clientEmailConfigs.has(row.client_id)) {
+          clientEmailConfigs.set(row.client_id, await getClientEmailConfig(row.client_id));
+        }
         sendResult = await sendSequenceEmail({
           salespersonId: row.salesperson_id,
+          clientId:      row.client_id,
           to:            row.lead_email,
           subject:       step.subject,
           body:          step.body,

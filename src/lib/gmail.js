@@ -3,6 +3,41 @@ const nodemailer  = require('nodemailer');
 const { pool }    = require('../db');
 const { generateToken } = require('./unsubscribe');
 const { rewriteLinks, isPermanentBounce }  = require('./email-tracking');
+const { decrypt } = require('./crypto');
+
+/**
+ * Load and decrypt a client's email config from DB.
+ * Falls back to env vars so existing single-tenant setup keeps working.
+ */
+async function getClientEmailConfig(clientId) {
+  if (!clientId) return null;
+  try {
+    const { rows } = await pool.query(
+      'SELECT * FROM client_email_config WHERE client_id = $1 AND enabled = true',
+      [clientId]
+    );
+    if (!rows[0]) return null;
+    const r = rows[0];
+    return {
+      provider:    r.provider,
+      smtp_host:   r.smtp_host,
+      smtp_port:   r.smtp_port || 587,
+      smtp_secure: r.smtp_secure || false,
+      smtp_user:   r.smtp_user,
+      smtp_pass:   r.smtp_pass_enc ? decrypt(r.smtp_pass_enc) : null,
+      from_name:   r.from_name,
+      from_email:  r.from_email,
+      reply_to:    r.reply_to,
+      imap_host:   r.imap_host,
+      imap_port:   r.imap_port || 993,
+      imap_user:   r.imap_user,
+      imap_pass:   r.imap_pass_enc ? decrypt(r.imap_pass_enc) : null,
+    };
+  } catch (err) {
+    console.error('[email-config] failed to load for client', clientId, err.message);
+    return null;
+  }
+}
 
 function oauthClient() {
   return new google.auth.OAuth2(
@@ -217,7 +252,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
 </html>`;
 }
 
-async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrollmentId, stepId, leadId }, brandConfig = {}) {
+async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, vars, enrollmentId, stepId, leadId }, brandConfig = {}) {
   // Always need Gmail auth — for reply-to address even when sending via SES
   const auth = await getAuthedClient(salespersonId);
   if (!auth) return { ok: false, error: 'no_account' };
@@ -258,15 +293,36 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
 
   const html = buildHtml(rewrittenBody, fromName, unsubscribeUrl, brandConfig, pixelUrl);
 
+  // Load client SMTP config (DB takes priority over env vars)
+  const clientCfg = await getClientEmailConfig(clientId);
+
   try {
-    if (sesEnabled()) {
-      // ── SES path ─────────────────────────────────────────────────────────
+    if (clientCfg?.smtp_host && clientCfg?.smtp_user && clientCfg?.smtp_pass) {
+      // ── Client DB config path ─────────────────────────────────────────────
+      const sendFrom  = clientCfg.from_email || account?.email;
+      const sendName  = clientCfg.from_name  || fromName;
+      const replyToAddr = clientCfg.reply_to || account?.email || sendFrom;
+      await sendViaClientSmtp(clientCfg, {
+        fromName:    sendName,
+        fromAddress: sendFrom,
+        replyTo:     replyToAddr,
+        to,
+        subject:     resolvedSubject,
+        textBody:    rewrittenBody,
+        htmlBody:    html,
+      });
+      await pool.query(
+        `UPDATE email_sends SET status = 'sent', send_service = $1 WHERE id = $2`,
+        [clientCfg.provider || 'smtp', emailSendId]
+      );
+    } else if (sesEnabled()) {
+      // ── Global env-var SES/SMTP fallback ─────────────────────────────────
       const sesFrom = process.env.SES_FROM_EMAIL || account.email;
       const sesName = process.env.SES_FROM_NAME  || fromName;
       await sendViaSes({
         fromName:    sesName,
         fromAddress: sesFrom,
-        replyTo:     account.email,   // replies go back to salesperson's Gmail
+        replyTo:     account?.email,
         to,
         subject:     resolvedSubject,
         textBody:    rewrittenBody,
@@ -555,6 +611,27 @@ async function sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBod
   });
 }
 
+/**
+ * Send via a client's saved SMTP config (from client_email_config table).
+ * clientCfg comes from getClientEmailConfig().
+ */
+async function sendViaClientSmtp(clientCfg, { fromName, fromAddress, replyTo, to, subject, textBody, htmlBody }) {
+  const transport = nodemailer.createTransport({
+    host:   clientCfg.smtp_host,
+    port:   clientCfg.smtp_port || 587,
+    secure: clientCfg.smtp_secure || false,
+    auth:   { user: clientCfg.smtp_user, pass: clientCfg.smtp_pass },
+  });
+  await transport.sendMail({
+    from:    `"${fromName || clientCfg.from_name}" <${fromAddress || clientCfg.from_email}>`,
+    replyTo: replyTo || clientCfg.reply_to || fromAddress || clientCfg.from_email,
+    to,
+    subject,
+    text:    textBody,
+    html:    htmlBody,
+  });
+}
+
 // ── Reply detection by lead email address (works for SES + Gmail sends) ─────
 
 async function checkForRepliesByAddress(salespersonId, leadEmail, afterDate) {
@@ -598,11 +675,24 @@ async function checkForRepliesByAddress(salespersonId, leadEmail, afterDate) {
   }
 }
 
+/**
+ * Send a direct (non-sequence) email via IONOS SMTP.
+ * Used by the lead CRM reply composer.
+ */
+async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody }) {
+  if (sesEnabled()) {
+    await sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody });
+    return { ok: true };
+  }
+  throw new Error('SMTP not configured');
+}
+
 module.exports = {
   oauthClient, getAuthUrl, exchangeCode,
   buildHtml, buildDigestHtml,
-  sendSequenceEmail, sendViaSes, sesEnabled,
+  sendSequenceEmail, sendViaSes, sendViaClientSmtp, sesEnabled, sendDirectEmail,
   checkForReplies, checkForRepliesByAddress,
   sendReplyNotification,
   getAuthedClient, buildRawMessage,
+  getClientEmailConfig,
 };
