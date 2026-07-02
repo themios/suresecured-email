@@ -211,7 +211,11 @@ router.get('/email', requireAuth, async (req, res) => {
     <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 flex items-center justify-between">
       <div>
         <p class="text-sm font-semibold text-green-800">✓ Gmail Connected — outbound email active</p>
-        <p class="text-xs text-green-700 mt-0.5">Sending as <strong>${esc(gmailAccount.email)}</strong>. SMTP settings below are ignored for outbound.</p>
+        <p class="text-xs text-green-700 mt-0.5">
+          Sending as <strong>${esc(cfg.from_email || gmailAccount.email)}</strong> via Gmail OAuth
+          ${cfg.from_email && cfg.from_email !== gmailAccount.email ? `<span class="text-green-600">(Send As alias — Gmail account: ${esc(gmailAccount.email)})</span>` : ''}.
+          SMTP settings below are ignored for outbound.
+        </p>
       </div>
       <form method="POST" action="/gmail/disconnect/${esc(String(req.user?.id || ''))}">
         <button class="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50">Disconnect</button>
@@ -291,11 +295,12 @@ router.get('/email', requireAuth, async (req, res) => {
         <input name="reply_to" type="email" value="${esc(cfg.reply_to)}" placeholder="Leave blank to use From Email"
           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
+      ${gmailAccount ? `<p class="text-xs text-gray-400 italic">SMTP not used — Gmail OAuth is active for outbound.</p>` : `
       <button type="button" onclick="testSmtp()"
         class="text-sm text-blue-600 border border-blue-200 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100">
         Test SMTP Connection
       </button>
-      <span id="smtp-test-result" class="text-sm ml-3 hidden"></span>
+      <span id="smtp-test-result" class="text-sm ml-3 hidden"></span>`}
     </div>
 
     <!-- IMAP -->
