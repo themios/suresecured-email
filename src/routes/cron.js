@@ -13,6 +13,7 @@ const { imapEnabled, checkForRepliesViaImap } = require('../lib/imap');
 const { callOpenRouter, buildDigestPrompt, classifyReply } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
+const { sendTelegram, notifyNewLead, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -96,6 +97,9 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
               `INSERT INTO lead_notes (lead_id, author_name, content) VALUES ($1, $2, $3)`,
               [leadId, 'Inbound', `[Inbound email] ${subject}\n\nFrom: ${fromHeader}`]
             );
+
+            // Notify via Telegram
+            notifyNewLead({ firstName, lastName, email: senderEmail, source: 'email' }).catch(() => {});
 
             // Auto-enroll if sequence configured
             if (acct.inbound_sequence_id) {
@@ -192,11 +196,22 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
               replyCheck.classification = classification;
             } catch {}
             sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+            notifyHotReply({
+              firstName: row.first_name, lastName: row.last_name, email: row.lead_email,
+              category: classification.category, urgency: classification.urgency,
+              summary: classification.summary, leadId: row.lead_id,
+              appUrl: process.env.TRACKER_URL,
+            }).catch(() => {});
           }).catch(() => {
             sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
           });
         } else {
           sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+          notifyHotReply({
+            firstName: row.first_name, lastName: row.last_name, email: row.lead_email,
+            category: 'reply', urgency: 'medium', leadId: row.lead_id,
+            appUrl: process.env.TRACKER_URL,
+          }).catch(() => {});
         }
       } catch (err) {
         console.error('[reply-check] enrollment', row.enrollment_id, err.message);
@@ -628,6 +643,7 @@ router.post('/daily-digest', cronAuth, async (req, res) => {
               AND ce.replied_at >= NOW() - INTERVAL '24 hours'
           )                                                                                      AS replies_24h,
           COUNT(es.id) FILTER (WHERE es.bounced = true AND es.sent_at >= NOW() - INTERVAL '24 hours') AS bounces_24h,
+          COUNT(DISTINCT l.id) FILTER (WHERE l.reply_urgency = 'high' AND l.reply_classified_at >= NOW() - INTERVAL '24 hours') AS hot_leads_24h,
           ROUND(
             COUNT(ce.id) FILTER (
               WHERE ce.status = 'paused'
@@ -719,6 +735,16 @@ router.post('/daily-digest', cronAuth, async (req, res) => {
 
       const gmail = google.gmail({ version: 'v1', auth: gmailAuth });
       await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+
+      // Also send AI summary to Telegram
+      notifyDailySummary({
+        newLeads:   metrics.new_leads_24h  || 0,
+        replies:    metrics.replies_24h    || 0,
+        hotLeads:   metrics.hot_leads_24h  || 0,
+        emailsSent: metrics.emails_sent_24h || 0,
+        appUrl:     process.env.TRACKER_URL,
+      }).catch(() => {});
+      sendTelegram(`📝 <b>AI Summary</b>\n${aiSummary}`).catch(() => {});
 
       processed++;
     } catch (clientErr) {
