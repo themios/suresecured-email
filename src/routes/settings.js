@@ -4,7 +4,7 @@ const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
 const { pool }   = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { navHtml } = require('./analytics');
+const { shell } = require('../lib/layout');
 const { encrypt, decrypt } = require('../lib/crypto');
 
 const PROVIDERS = {
@@ -47,12 +47,12 @@ function settingsNav(active) {
     { key: 'theme',    label: 'Theme & Branding' },
   ];
   return `
-  <div class="bg-white border-b mb-6">
+  <div class="bg-white border-b border-slate-100 mb-6">
     <div class="max-w-3xl mx-auto px-4 flex gap-1">
       ${tabs.map(t => `
       <a href="/settings/${t.key}"
-        class="px-4 py-3 text-sm font-medium border-b-2 transition
-          ${active === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}">
+        class="px-4 py-3 text-sm font-medium border-b-2 transition-colors
+          ${active === t.key ? 'border-sky-600 text-sky-600' : 'border-transparent text-slate-500 hover:text-slate-700'}">
         ${t.label}
       </a>`).join('')}
     </div>
@@ -60,23 +60,14 @@ function settingsNav(active) {
 }
 
 function pageShell(title, active, body, msg, ok) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>${esc(title)} – Sales Tracker</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen">
-  ${navHtml('settings')}
+  const content = `
   ${settingsNav(active)}
-  <div class="max-w-3xl mx-auto px-4 pb-12">
-    <h1 class="text-xl font-bold text-gray-800 mb-1">${esc(title)}</h1>
-    ${msg ? `<div class="my-4 px-4 py-3 rounded-lg text-sm ${ok === '1' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}">${esc(msg)}</div>` : '<div class="mb-4"></div>'}
+  <div class="max-w-3xl mx-auto px-6 pb-12">
+    <h1 class="text-xl font-bold text-slate-900 mb-1">${esc(title)}</h1>
+    ${msg ? `<div class="my-4 px-4 py-3 rounded-lg text-sm ${ok === '1' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}">${esc(msg)}</div>` : '<div class="mb-4"></div>'}
     ${body}
-  </div>
-</body>
-</html>`;
+  </div>`;
+  return shell(title, 'settings', content, {});
 }
 
 // ─── Business Info ────────────────────────────────────────────────────────────
@@ -88,83 +79,83 @@ router.get('/business', requireAuth, async (req, res) => {
   const body = `
   <form method="POST" action="/settings/business">
     <div class="bg-white rounded-xl shadow-sm p-6 space-y-4">
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide">Business Identity</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">Business Identity</h2>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Business Name</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Business Name</label>
           <input name="name" value="${esc(bc.name)}" placeholder="SureSecured"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Website</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Website</label>
           <input name="website" value="${esc(bc.website)}" placeholder="suresecured.com"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
 
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide pt-2">Contact Information</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Contact Information</h2>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Phone</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Phone</label>
           <input name="phone" value="${esc(bc.phone)}" placeholder="(747) 688-9992"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Support Email</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Support Email</label>
           <input name="support_email" type="email" value="${esc(bc.support_email)}" placeholder="info@suresecured.com"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
 
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide pt-2">Address</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Address</h2>
       <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Street Address</label>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Street Address</label>
         <input name="address_street" value="${esc(bc.address_street)}" placeholder="1234 Main St"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
       </div>
       <div class="grid grid-cols-3 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">City</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">City</label>
           <input name="address_city" value="${esc(bc.address_city)}" placeholder="Simi Valley"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">State</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">State</label>
           <input name="address_state" value="${esc(bc.address_state)}" placeholder="CA"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">ZIP</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">ZIP</label>
           <input name="address_zip" value="${esc(bc.address_zip)}" placeholder="93063"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
 
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide pt-2">Email Footer</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Email Footer</h2>
       <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Footer Address Line (shown in email footers)</label>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Footer Address Line (shown in email footers)</label>
         <input name="address" value="${esc(bc.address)}" placeholder="SureSecured Security Products • Simi Valley, CA 93063"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-xs text-gray-400 mt-1">Auto-generated from fields above if left blank on next save.</p>
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <p class="text-xs text-slate-400 mt-1">Auto-generated from fields above if left blank on next save.</p>
       </div>
 
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide pt-2">Email CTA</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Email CTA</h2>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">CTA Button Label</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">CTA Button Label</label>
           <input name="cta_label" value="${esc(bc.cta_label)}" placeholder="Request a Quote"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">CTA URL</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">CTA URL</label>
           <input name="cta_url" value="${esc(bc.cta_url)}" placeholder="https://suresecured.com/pages/request-a-quote"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
     </div>
 
     <div class="flex justify-end mt-4">
-      <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Business Info</button>
+      <button type="submit" class="bg-sky-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-sky-700">Save Business Info</button>
     </div>
   </form>`;
 
@@ -222,21 +213,21 @@ router.get('/email', requireAuth, async (req, res) => {
 
     <!-- Provider selector -->
     <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide mb-3">Email Provider</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide mb-3">Email Provider</h2>
       <div class="grid grid-cols-2 gap-2 mb-3">
         ${Object.entries(PROVIDERS).map(([key, p]) => key === 'google' ? `
         <a href="/gmail/connect/${esc(String(req.user?.id || ''))}" data-provider="google"
           class="provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition
             ${(cfg.provider || 'smtp') === 'google'
               ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
-              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}">
+              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-200'}">
           ${esc(p.label)} →
         </a>` : `
         <button type="button" onclick="selectProvider('${key}')" data-provider="${key}"
           class="provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition
             ${(cfg.provider || 'smtp') === key
               ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
-              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}">
+              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-200'}">
           ${esc(p.label)}
         </button>`).join('')}
       </div>
@@ -246,54 +237,54 @@ router.get('/email', requireAuth, async (req, res) => {
 
     <!-- SMTP -->
     <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide mb-3">Outgoing Mail (SMTP)</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide mb-3">Outgoing Mail (SMTP)</h2>
       <div class="grid grid-cols-3 gap-3 mb-3">
         <div class="col-span-2">
-          <label class="block text-xs font-medium text-gray-500 mb-1">SMTP Host</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">SMTP Host</label>
           <input name="smtp_host" id="smtp_host" value="${esc(cfg.smtp_host)}" placeholder="smtp.example.com"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Port</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Port</label>
           <input name="smtp_port" id="smtp_port" type="number" value="${cfg.smtp_port || 587}"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3 mb-3">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Username / Email</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Username / Email</label>
           <input name="smtp_user" value="${esc(cfg.smtp_user)}" placeholder="you@domain.com"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Password / App Password</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Password / App Password</label>
           <input type="password" name="smtp_pass" placeholder="${cfg.smtp_pass_enc ? '••••••••••••  (saved)' : 'Enter password'}"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          ${cfg.smtp_pass_enc ? '<p class="text-xs text-gray-400 mt-1">Leave blank to keep existing</p>' : ''}
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          ${cfg.smtp_pass_enc ? '<p class="text-xs text-slate-400 mt-1">Leave blank to keep existing</p>' : ''}
         </div>
       </div>
-      <label class="flex items-center gap-2 mb-3 text-sm text-gray-600 cursor-pointer">
+      <label class="flex items-center gap-2 mb-3 text-sm text-slate-600 cursor-pointer">
         <input type="checkbox" name="smtp_secure" value="1" ${cfg.smtp_secure ? 'checked' : ''} class="rounded">
         Use SSL on port 465 (leave unchecked for STARTTLS on 587)
       </label>
       <div class="grid grid-cols-2 gap-3 mb-3">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">From Name</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">From Name</label>
           <input name="from_name" value="${esc(cfg.from_name)}" placeholder="SureSecured Sales"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">From Email</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">From Email</label>
           <input name="from_email" type="email" value="${esc(cfg.from_email)}" placeholder="sales@domain.com"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
       <div class="mb-4">
-        <label class="block text-xs font-medium text-gray-500 mb-1">Reply-To (optional)</label>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Reply-To (optional)</label>
         <input name="reply_to" type="email" value="${esc(cfg.reply_to)}" placeholder="Leave blank to use From Email"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
       </div>
-      ${gmailAccount ? `<p class="text-xs text-gray-400 italic">SMTP not used — Gmail OAuth is active for outbound.</p>` : `
+      ${gmailAccount ? `<p class="text-xs text-slate-400 italic">SMTP not used — Gmail OAuth is active for outbound.</p>` : `
       <button type="button" onclick="testSmtp()"
         class="text-sm text-blue-600 border border-blue-200 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100">
         Test SMTP Connection
@@ -303,31 +294,31 @@ router.get('/email', requireAuth, async (req, res) => {
 
     <!-- IMAP -->
     <div class="bg-white rounded-xl shadow-sm p-6 mb-4" id="imap-section">
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide mb-1">Incoming Mail (IMAP)</h2>
-      <p class="text-xs text-gray-400 mb-3">Used to detect when leads reply to your emails.</p>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide mb-1">Incoming Mail (IMAP)</h2>
+      <p class="text-xs text-slate-400 mb-3">Used to detect when leads reply to your emails.</p>
       <div class="grid grid-cols-3 gap-3 mb-3">
         <div class="col-span-2">
-          <label class="block text-xs font-medium text-gray-500 mb-1">IMAP Host</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">IMAP Host</label>
           <input name="imap_host" id="imap_host" value="${esc(cfg.imap_host)}" placeholder="imap.example.com"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Port</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Port</label>
           <input name="imap_port" id="imap_port" type="number" value="${cfg.imap_port || 993}"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
       <div class="grid grid-cols-2 gap-3 mb-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Username / Email</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Username / Email</label>
           <input name="imap_user" value="${esc(cfg.imap_user)}" placeholder="Same as SMTP username"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Password / App Password</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Password / App Password</label>
           <input type="password" name="imap_pass" placeholder="${cfg.imap_pass_enc ? '••••••••••••  (saved)' : 'Enter password'}"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-          ${cfg.imap_pass_enc ? '<p class="text-xs text-gray-400 mt-1">Leave blank to keep existing</p>' : ''}
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          ${cfg.imap_pass_enc ? '<p class="text-xs text-slate-400 mt-1">Leave blank to keep existing</p>' : ''}
         </div>
       </div>
       <button type="button" onclick="testImap()"
@@ -338,7 +329,7 @@ router.get('/email', requireAuth, async (req, res) => {
     </div>
 
     <div class="flex justify-end">
-      <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Email Settings</button>
+      <button type="submit" class="bg-sky-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-sky-700">Save Email Settings</button>
     </div>
   </form>
 
@@ -349,7 +340,7 @@ router.get('/email', requireAuth, async (req, res) => {
       document.querySelectorAll('.provider-btn').forEach(btn => {
         const active = btn.dataset.provider === key;
         btn.className = 'provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition ' +
-          (active ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300');
+          (active ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-200');
       });
       const p = PRESETS[key]; if (!p) return;
       if (fillFields) {
@@ -489,37 +480,37 @@ router.get('/phone', requireAuth, async (req, res) => {
   const body = `
   <form method="POST" action="/settings/phone">
     <div class="bg-white rounded-xl shadow-sm p-6 space-y-4">
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide">SMS Provider (Telnyx)</h2>
-      <p class="text-xs text-gray-400">Used for outbound SMS sequences. Get your credentials from telnyx.com.</p>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">SMS Provider (Telnyx)</h2>
+      <p class="text-xs text-slate-400">Used for outbound SMS sequences. Get your credentials from telnyx.com.</p>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Telnyx API Key</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Telnyx API Key</label>
           <input name="telnyx_api_key" value="${esc(bc.telnyx_api_key)}" placeholder="KEY0..."
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Telnyx Phone Number</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Telnyx Phone Number</label>
           <input name="telnyx_phone" value="${esc(bc.telnyx_phone)}" placeholder="+17476889992"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
 
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide pt-2">Business Phone</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Business Phone</h2>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Primary Phone (shown in emails)</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Primary Phone (shown in emails)</label>
           <input name="phone" value="${esc(bc.phone)}" placeholder="(747) 688-9992"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">10DLC Campaign ID (optional)</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">10DLC Campaign ID (optional)</label>
           <input name="telnyx_campaign_id" value="${esc(bc.telnyx_campaign_id)}" placeholder="Campaign registered ID"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
     </div>
     <div class="flex justify-end mt-4">
-      <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Phone & SMS</button>
+      <button type="submit" class="bg-sky-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-sky-700">Save Phone & SMS</button>
     </div>
   </form>`;
 
@@ -545,69 +536,69 @@ router.get('/theme', requireAuth, async (req, res) => {
   const body = `
   <form method="POST" action="/settings/theme">
     <div class="bg-white rounded-xl shadow-sm p-6 space-y-4">
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide">Email Colors</h2>
-      <p class="text-xs text-gray-400">These colors are used in your outgoing email templates.</p>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">Email Colors</h2>
+      <p class="text-xs text-slate-400">These colors are used in your outgoing email templates.</p>
       <div class="grid grid-cols-3 gap-4">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Primary Color</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Primary Color</label>
           <div class="flex gap-2">
             <input type="color" name="primary_color" value="${esc(bc.primary_color || '#030302')}"
               class="h-9 w-12 rounded border cursor-pointer p-0.5">
             <input type="text" id="primary_color_hex" value="${esc(bc.primary_color || '#030302')}"
               oninput="document.querySelector('[name=primary_color]').value=this.value"
-              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Accent Color</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Accent Color</label>
           <div class="flex gap-2">
             <input type="color" name="accent_color" value="${esc(bc.accent_color || '#E91111')}"
               class="h-9 w-12 rounded border cursor-pointer p-0.5"
               oninput="document.getElementById('accent_hex').value=this.value">
             <input type="text" id="accent_hex" value="${esc(bc.accent_color || '#E91111')}"
               oninput="document.querySelector('[name=accent_color]').value=this.value"
-              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Background Color</label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Background Color</label>
           <div class="flex gap-2">
             <input type="color" name="bg_color" value="${esc(bc.bg_color || '#EDEBE7')}"
               class="h-9 w-12 rounded border cursor-pointer p-0.5"
               oninput="document.getElementById('bg_hex').value=this.value">
             <input type="text" id="bg_hex" value="${esc(bc.bg_color || '#EDEBE7')}"
               oninput="document.querySelector('[name=bg_color]').value=this.value"
-              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500">
+              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
           </div>
         </div>
       </div>
 
       <!-- Live preview -->
       <div>
-        <label class="block text-xs font-medium text-gray-500 mb-2">Preview</label>
+        <label class="block text-xs font-medium text-slate-500 mb-2">Preview</label>
         <div id="preview-bar" class="rounded-lg p-4 flex items-center gap-3" style="background:${esc(bc.primary_color || '#030302')}">
           <span style="color:#fff;font-size:16px;font-weight:700">${esc(bc.name || 'Your Business')}</span>
           <span id="preview-btn" class="ml-auto px-4 py-1.5 rounded text-white text-sm font-semibold" style="background:${esc(bc.accent_color || '#E91111')}">${esc(bc.cta_label || 'Request a Quote')}</span>
         </div>
       </div>
 
-      <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide pt-2">Logo</h2>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Logo</h2>
       <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Logo URL</label>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Logo URL</label>
         <input name="logo_url" value="${esc(bc.logo_url)}" placeholder="https://yoursite.com/logo.png"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-xs text-gray-400 mt-1">Hosted image URL. Used in email headers and the app.</p>
-        ${bc.logo_url ? `<img src="${esc(bc.logo_url)}" class="mt-2 h-10 object-contain rounded border bg-gray-50 p-1" onerror="this.style.display='none'">` : ''}
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <p class="text-xs text-slate-400 mt-1">Hosted image URL. Used in email headers and the app.</p>
+        ${bc.logo_url ? `<img src="${esc(bc.logo_url)}" class="mt-2 h-10 object-contain rounded border bg-slate-50 p-1" onerror="this.style.display='none'">` : ''}
       </div>
       <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Favicon URL (optional)</label>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Favicon URL (optional)</label>
         <input name="favicon_url" value="${esc(bc.favicon_url)}" placeholder="https://yoursite.com/favicon.ico"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
       </div>
     </div>
 
     <div class="flex justify-end mt-4">
-      <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Theme</button>
+      <button type="submit" class="bg-sky-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-sky-700">Save Theme</button>
     </div>
   </form>
 

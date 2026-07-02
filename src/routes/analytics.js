@@ -2,34 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
-
-// Shared nav HTML — same tabs on both pages
-function navHtml(activePage) {
-  const tab = (label, href, page) => `
-    <a href="${href}" class="px-4 py-2 text-sm font-medium rounded-lg transition ${
-      activePage === page
-        ? 'bg-blue-600 text-white'
-        : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100'
-    }">${label}</a>`;
-
-  return `
-    <nav class="bg-white border-b px-6 py-3 flex justify-between items-center shadow-sm">
-      <div class="flex items-center gap-6">
-        <div>
-          <span class="font-bold text-gray-800 text-lg">SureSecured</span>
-          <span class="text-gray-400 text-sm ml-2">Sales Tracker</span>
-        </div>
-        <div class="flex gap-1">
-          ${tab('Overview',  '/dashboard',  'dashboard')}
-          ${tab('Analytics', '/analytics',  'analytics')}
-          ${tab('Leads',     '/leads',      'leads')}
-          ${tab('Sequences', '/sequences',  'sequences')}
-          ${tab('Admin',     '/admin',      'admin')}
-          ${tab('Settings',  '/settings',   'settings')}
-        </div>
-      </div>
-      <a href="/logout" class="text-sm text-gray-500 hover:text-red-600 transition">Sign out</a>
-    </nav>`;
+const { shell, navHtml } = require('../lib/layout');
 }
 
 // Data endpoint — returns all chart data as JSON
@@ -154,122 +127,97 @@ router.get('/data', requireAuth, async (req, res) => {
 
 // Analytics page
 router.get('/', requireAuth, async (req, res) => {
-  res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <title>SureSecured — Analytics</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-</head>
-<body class="bg-gray-100 min-h-screen">
+  const content = `
+  <div class="px-6 py-8 max-w-7xl mx-auto">
 
-  ${navHtml('analytics')}
-
-  <div class="max-w-7xl mx-auto px-6 py-8">
-
-    <!-- Filters -->
+    <!-- Page header + Filters -->
     <div class="flex flex-wrap justify-between items-center gap-3 mb-6">
-      <h1 class="text-xl font-bold text-gray-800">Analytics</h1>
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900">Analytics</h1>
+        <p class="text-sm text-slate-500 mt-0.5">Engagement, revenue, and conversion trends</p>
+      </div>
       <div class="flex flex-wrap gap-2 items-center">
         <select id="sp-filter" onchange="loadData(activeDays)"
-          class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400">
+          class="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 shadow-sm cursor-pointer">
           <option value="">All Salespeople</option>
         </select>
-        <button onclick="loadData(7)"  id="btn-7"  class="period-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white transition">7d</button>
-        <button onclick="loadData(30)" id="btn-30" class="period-btn px-3 py-1.5 text-sm rounded-lg border border-blue-500 bg-blue-600 text-white transition">30d</button>
-        <button onclick="loadData(60)" id="btn-60" class="period-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white transition">60d</button>
-        <button onclick="loadData(90)" id="btn-90" class="period-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white transition">90d</button>
+        <div class="flex gap-1 bg-white border border-slate-200 rounded-lg p-1 shadow-sm">
+          <button onclick="loadData(7)"  id="btn-7"  class="period-btn px-3 py-1.5 text-xs font-semibold rounded-md text-slate-500 hover:bg-slate-100 transition-all">7d</button>
+          <button onclick="loadData(30)" id="btn-30" class="period-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-sky-600 text-white shadow-sm transition-all">30d</button>
+          <button onclick="loadData(60)" id="btn-60" class="period-btn px-3 py-1.5 text-xs font-semibold rounded-md text-slate-500 hover:bg-slate-100 transition-all">60d</button>
+          <button onclick="loadData(90)" id="btn-90" class="period-btn px-3 py-1.5 text-xs font-semibold rounded-md text-slate-500 hover:bg-slate-100 transition-all">90d</button>
+        </div>
       </div>
     </div>
 
-    <!-- Funnel Row -->
-    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
-      <h2 class="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Conversion Funnel</h2>
-      <div class="flex items-center justify-around" id="funnel-row">
-        <div class="text-center">
-          <p class="text-3xl font-bold text-gray-800" id="f-leads">—</p>
-          <p class="text-xs text-gray-500 mt-1">Leads</p>
-        </div>
-        <div class="text-gray-300 text-2xl">→</div>
-        <div class="text-center">
-          <p class="text-3xl font-bold text-blue-600" id="f-clicks">—</p>
-          <p class="text-xs text-gray-500 mt-1">Email Clicks</p>
-          <p class="text-xs text-blue-400 mt-0.5" id="f-clicks-rate"></p>
-        </div>
-        <div class="text-gray-300 text-2xl">→</div>
-        <div class="text-center">
-          <p class="text-3xl font-bold text-indigo-600" id="f-forms">—</p>
-          <p class="text-xs text-gray-500 mt-1">Quote Requests</p>
-          <p class="text-xs text-indigo-400 mt-0.5" id="f-forms-rate"></p>
-        </div>
-        <div class="text-gray-300 text-2xl">→</div>
-        <div class="text-center">
-          <p class="text-3xl font-bold text-purple-600" id="f-calls">—</p>
-          <p class="text-xs text-gray-500 mt-1">Phone Calls</p>
-          <p class="text-xs text-purple-400 mt-0.5" id="f-calls-rate"></p>
-        </div>
-        <div class="text-gray-300 text-2xl">→</div>
-        <div class="text-center">
-          <p class="text-3xl font-bold text-green-600" id="f-orders">—</p>
-          <p class="text-xs text-gray-500 mt-1">Orders</p>
-          <p class="text-xs text-green-400 mt-0.5" id="f-orders-rate"></p>
-        </div>
+    <!-- Conversion Funnel -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
+      <h2 class="font-semibold text-slate-700 mb-5 text-xs uppercase tracking-widest">Conversion Funnel</h2>
+      <div class="grid grid-cols-5 gap-0" id="funnel-row">
+        ${[
+          { id: 'f-leads',  label: 'Leads',         rateId: '',              color: 'text-slate-800',  bg: 'bg-slate-100',  border: 'border-slate-200' },
+          { id: 'f-clicks', label: 'Email Clicks',   rateId: 'f-clicks-rate', color: 'text-sky-700',    bg: 'bg-sky-50',     border: 'border-sky-200' },
+          { id: 'f-forms',  label: 'Quote Requests', rateId: 'f-forms-rate',  color: 'text-indigo-700', bg: 'bg-indigo-50',  border: 'border-indigo-200' },
+          { id: 'f-calls',  label: 'Phone Calls',    rateId: 'f-calls-rate',  color: 'text-violet-700', bg: 'bg-violet-50',  border: 'border-violet-200' },
+          { id: 'f-orders', label: 'Orders',          rateId: 'f-orders-rate', color: 'text-emerald-700',bg: 'bg-emerald-50', border: 'border-emerald-200' },
+        ].map((s, i) => `
+        <div class="relative flex flex-col items-center text-center px-2">
+          ${i > 0 ? `<div class="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-px bg-slate-200 hidden lg:block" style="left:-8px"></div>` : ''}
+          <div class="w-full ${s.bg} border ${s.border} rounded-xl px-3 py-4">
+            <p class="text-2xl font-extrabold ${s.color}" id="${s.id}">—</p>
+            <p class="text-xs font-semibold text-slate-500 mt-1">${s.label}</p>
+            ${s.rateId ? `<p class="text-xs ${s.color} opacity-70 mt-0.5 font-medium" id="${s.rateId}"></p>` : ''}
+          </div>
+        </div>`).join('')}
       </div>
     </div>
 
     <!-- Revenue + Engagement Charts -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-
-      <div class="bg-white rounded-xl shadow-sm p-6">
-        <h2 class="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Revenue Over Time</h2>
-        <canvas id="revenueChart" height="200"></canvas>
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <h2 class="font-semibold text-slate-700 mb-4 text-xs uppercase tracking-widest">Revenue Over Time</h2>
+        <div class="skeleton h-48 mb-2" id="rev-skeleton"></div>
+        <canvas id="revenueChart" height="200" style="display:none"></canvas>
       </div>
-
-      <div class="bg-white rounded-xl shadow-sm p-6">
-        <h2 class="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Email Clicks, Forms & Calls</h2>
-        <canvas id="engagementChart" height="200"></canvas>
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <h2 class="font-semibold text-slate-700 mb-4 text-xs uppercase tracking-widest">Email Clicks, Forms &amp; Calls</h2>
+        <div class="skeleton h-48 mb-2" id="eng-skeleton"></div>
+        <canvas id="engagementChart" height="200" style="display:none"></canvas>
       </div>
-
     </div>
 
     <!-- Salesperson + Audience Charts -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-
-      <div class="bg-white rounded-xl shadow-sm p-6 lg:col-span-2">
-        <h2 class="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Revenue by Salesperson</h2>
-        <canvas id="salespersonChart" height="180"></canvas>
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 lg:col-span-2">
+        <h2 class="font-semibold text-slate-700 mb-4 text-xs uppercase tracking-widest">Revenue by Salesperson</h2>
+        <div class="skeleton h-44 mb-2" id="sp-skeleton"></div>
+        <canvas id="salespersonChart" height="180" style="display:none"></canvas>
       </div>
-
-      <div class="bg-white rounded-xl shadow-sm p-6">
-        <h2 class="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">B2C vs B2B</h2>
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <h2 class="font-semibold text-slate-700 mb-4 text-xs uppercase tracking-widest">B2C vs B2B</h2>
         <canvas id="audienceChart" height="180"></canvas>
         <div id="audience-legend" class="mt-4 flex flex-col gap-2 text-sm"></div>
       </div>
-
     </div>
 
     <!-- Goal vs Actual -->
-    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
-      <h2 class="font-semibold text-gray-700 mb-1 text-sm uppercase tracking-wide">Goal vs Actual — This Month</h2>
-      <p class="text-xs text-gray-400 mb-4">Revenue target set in Admin vs actual revenue this month per salesperson</p>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6 mb-6">
+      <h2 class="font-semibold text-slate-700 mb-1 text-xs uppercase tracking-widest">Goal vs Actual — This Month</h2>
+      <p class="text-xs text-slate-400 mb-4">Revenue target set in Admin vs actual revenue this month per salesperson</p>
       <canvas id="goalChart" height="100"></canvas>
-      <div id="goal-no-data" class="hidden text-center text-gray-400 text-sm py-6">No goals set yet. Set goals in the Admin tab.</div>
+      <div id="goal-no-data" class="hidden text-center text-slate-400 text-sm py-6">No goals set yet. Set goals in the Admin tab.</div>
     </div>
 
-    <!-- Commission vs Revenue + Product Interest -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-      <div class="bg-white rounded-xl shadow-sm p-6">
-        <h2 class="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Commission Earned by Salesperson</h2>
+    <!-- Commission + Product Interest -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-8">
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <h2 class="font-semibold text-slate-700 mb-4 text-xs uppercase tracking-widest">Commission Earned by Salesperson</h2>
         <canvas id="commissionChart" height="200"></canvas>
       </div>
-
-      <div class="bg-white rounded-xl shadow-sm p-6">
-        <h2 class="font-semibold text-gray-700 mb-4 text-sm uppercase tracking-wide">Lead Interest Breakdown</h2>
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <h2 class="font-semibold text-slate-700 mb-4 text-xs uppercase tracking-widest">Lead Interest Breakdown</h2>
         <canvas id="productChart" height="200"></canvas>
       </div>
-
     </div>
 
   </div>
@@ -313,12 +261,12 @@ router.get('/', requireAuth, async (req, res) => {
 
   function loadData(days) {
     if (days) activeDays = days;
-    // Update active button
+    // Update active period button
     document.querySelectorAll('.period-btn').forEach(function(b) {
-      b.className = 'period-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:bg-white transition';
+      b.className = 'period-btn px-3 py-1.5 text-xs font-semibold rounded-md text-slate-500 hover:bg-slate-100 transition-all';
     });
     var active = document.getElementById('btn-'+activeDays);
-    if (active) active.className = 'period-btn px-3 py-1.5 text-sm rounded-lg border border-blue-500 bg-blue-600 text-white transition';
+    if (active) active.className = 'period-btn px-3 py-1.5 text-xs font-semibold rounded-md bg-sky-600 text-white shadow-sm transition-all';
 
     var spId = document.getElementById('sp-filter').value;
     var url  = '/analytics/data?days=' + activeDays + (spId ? '&sp=' + spId : '');
@@ -414,7 +362,13 @@ router.get('/', requireAuth, async (req, res) => {
     document.getElementById('f-orders-rate').textContent = pct(f.total_orders, f.total_leads) + ' of leads';
   }
 
+  function showChart(id, skeletonId) {
+    if (skeletonId) { var sk = document.getElementById(skeletonId); if (sk) sk.style.display = 'none'; }
+    var el = document.getElementById(id); if (el) el.style.display = '';
+  }
+
   function renderRevenue(rows, days) {
+    showChart('revenueChart', 'rev-skeleton');
     const {labels, values} = fillDates(rows, 'date', 'revenue', days);
     makeChart('revenueChart', {
       type: 'line',
@@ -423,20 +377,21 @@ router.get('/', requireAuth, async (req, res) => {
         datasets: [{
           label: 'Revenue',
           data: values,
-          borderColor: COLORS.green,
-          backgroundColor: 'rgba(16,185,129,0.08)',
+          borderColor: '#059669',
+          backgroundColor: 'rgba(5,150,105,0.07)',
           fill: true,
-          tension: 0.3,
+          tension: 0.35,
           pointRadius: 2,
           pointHoverRadius: 5,
+          borderWidth: 2,
         }]
       },
       options: {
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx){ return ' $'+parseFloat(ctx.raw||0).toLocaleString(); } } } },
         scales: {
-          y: { ticks: { callback: v => '$'+v.toLocaleString() }, beginAtZero: true },
-          x: { ticks: { maxTicksLimit: 10 } }
+          y: { ticks: { callback: v => '$'+v.toLocaleString() }, beginAtZero: true, grid: { color: 'rgba(226,232,240,.6)' } },
+          x: { ticks: { maxTicksLimit: 10, color: '#94a3b8' }, grid: { display: false } }
         }
       }
     });
@@ -469,6 +424,7 @@ router.get('/', requireAuth, async (req, res) => {
 
   function renderSalesperson(rows) {
     if (!rows?.length) return;
+    showChart('salespersonChart', 'sp-skeleton');
     makeChart('salespersonChart', {
       type: 'bar',
       data: {
@@ -546,11 +502,11 @@ router.get('/', requireAuth, async (req, res) => {
     legend.innerHTML = rows.map(function(r,i) {
       return '<div class="flex justify-between items-center">'
         + '<div class="flex items-center gap-2">'
-        + '<span class="w-3 h-3 rounded-full inline-block" style="background:' + PALETTE[i] + '"></span>'
-        + '<span class="text-gray-700">' + (r.audience_type || 'Unknown') + '</span>'
+        + '<span class="w-3 h-3 rounded-full inline-block flex-shrink-0" style="background:' + PALETTE[i] + '"></span>'
+        + '<span class="text-slate-700 text-sm">' + (r.audience_type || 'Unknown') + '</span>'
         + '</div>'
-        + '<span class="font-semibold text-gray-800">' + parseInt(r.count).toLocaleString()
-        + ' <span class="text-gray-400 font-normal">(' + pct(r.count,total) + ')</span></span>'
+        + '<span class="font-semibold text-slate-900 text-sm">' + parseInt(r.count).toLocaleString()
+        + ' <span class="text-slate-400 font-normal">(' + pct(r.count,total) + ')</span></span>'
         + '</div>';
     }).join('');
   }
@@ -573,10 +529,12 @@ router.get('/', requireAuth, async (req, res) => {
 
   // Load on page open
   loadData(30);
-</script>
+</script>`;
 
-</body>
-</html>`);
+  res.send(shell('Analytics', 'analytics', content, {
+    user: req.user,
+    extraHead: `<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>`,
+  }));
 });
 
 module.exports = { router, navHtml };

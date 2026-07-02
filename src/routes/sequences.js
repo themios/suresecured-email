@@ -2,7 +2,7 @@ const express  = require('express');
 const router   = express.Router();
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { navHtml } = require('./analytics');
+const { shell, ICONS, esc } = require('../lib/layout');
 
 // -- API endpoints ----------------------------------------------------------
 
@@ -476,46 +476,46 @@ router.get('/', requireAuth, async (req, res) => {
   const sequences  = seqRows.rows;
   const salespeople = spRows.rows;
 
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Sequences - SureSecured</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen">
-  ${navHtml('sequences')}
+  const content = `
+  <div class="px-6 py-8 max-w-7xl mx-auto">
 
-  <div class="max-w-7xl mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-slate-900">Sequences</h1>
+      <p class="text-sm text-slate-500 mt-0.5">Manage email sequences, Gmail connections, and contact enrollment</p>
+    </div>
 
     <!-- Gmail Connections -->
-    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="font-semibold text-gray-700">Gmail Connections</h2>
-        <span class="text-xs text-gray-400">Each salesperson sends from their own Google Workspace inbox</span>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-6">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h2 class="font-semibold text-slate-800">Gmail Connections</h2>
+        <span class="text-xs text-slate-400">Each salesperson sends from their own Google Workspace inbox</span>
       </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead><tr class="text-left text-gray-500 border-b">
-            <th class="pb-2">Salesperson</th><th class="pb-2">Gmail Account</th>
-            <th class="pb-2">Status</th><th class="pb-2">Action</th>
-          </tr></thead>
+        <table class="w-full text-sm data-table">
+          <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+            <tr>
+              <th class="px-4 py-3 text-left">Salesperson</th>
+              <th class="px-4 py-3 text-left">Gmail Account</th>
+              <th class="px-4 py-3 text-left">Status</th>
+              <th class="px-4 py-3 text-left">Action</th>
+            </tr>
+          </thead>
           <tbody>
             ${salespeople.map(sp => `
-            <tr class="border-b last:border-0">
-              <td class="py-2 font-medium">${sp.name}</td>
-              <td class="py-2 text-gray-600">${sp.gmail_email || '<span class="text-gray-400 italic">Not connected</span>'}</td>
-              <td class="py-2">
+            <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+              <td class="px-4 py-3 font-semibold text-slate-900">${esc(sp.name)}</td>
+              <td class="px-4 py-3 text-slate-600">${sp.gmail_email ? esc(sp.gmail_email) : '<span class="text-slate-400 italic">Not connected</span>'}</td>
+              <td class="px-4 py-3">
                 ${sp.gmail_email && sp.enabled
-                  ? '<span class="text-green-600 font-medium">* Connected</span>'
+                  ? `<span class="inline-flex items-center gap-1.5 text-emerald-600 font-medium text-xs">${ICONS.check} Connected</span>`
                   : sp.last_error
-                    ? '<span class="text-red-500 text-xs">* Error</span>'
-                    : '<span class="text-gray-400">o Not connected</span>'}
+                    ? `<span class="inline-flex items-center gap-1.5 text-red-500 text-xs">${ICONS.warning} Error</span>`
+                    : `<span class="text-slate-400 text-xs">Not connected</span>`}
               </td>
-              <td class="py-2">
+              <td class="px-4 py-3">
                 ${sp.gmail_email
-                  ? '<button onclick="disconnectGmail(' + sp.id + ')" class="text-xs text-red-500 hover:underline">Disconnect</button>'
-                  : '<a href="/gmail/connect/' + sp.id + '" class="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">Connect Gmail</a>'}
+                  ? `<button onclick="disconnectGmail(${sp.id})" class="text-xs px-3 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Disconnect</button>`
+                  : `<a href="/gmail/connect/${sp.id}" class="text-xs px-3 py-1.5 rounded-lg bg-sky-600 text-white hover:bg-sky-700 transition-colors">Connect Gmail</a>`}
               </td>
             </tr>`).join('')}
           </tbody>
@@ -524,36 +524,51 @@ router.get('/', requireAuth, async (req, res) => {
     </div>
 
     <!-- Sequences -->
-    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="font-semibold text-gray-700">Email Sequences</h2>
-        <button onclick="showCreateSeq()" class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">+ New Sequence</button>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-6">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h2 class="font-semibold text-slate-800">Email Sequences</h2>
+        <button onclick="showCreateSeq()" class="inline-flex items-center gap-1.5 bg-sky-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-sky-700 transition-colors">
+          ${ICONS.plus} New Sequence
+        </button>
       </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead><tr class="text-left text-gray-500 border-b">
-            <th class="pb-2">Name</th><th class="pb-2">Audience</th>
-            <th class="pb-2">Steps</th><th class="pb-2">Active Contacts</th>
-            <th class="pb-2">Status</th><th class="pb-2">Actions</th>
-          </tr></thead>
+        <table class="w-full text-sm data-table">
+          <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+            <tr>
+              <th class="px-4 py-3 text-left">Name</th>
+              <th class="px-4 py-3 text-left">Audience</th>
+              <th class="px-4 py-3 text-center">Steps</th>
+              <th class="px-4 py-3 text-center">Active Contacts</th>
+              <th class="px-4 py-3 text-left">Status</th>
+              <th class="px-4 py-3 text-left">Actions</th>
+            </tr>
+          </thead>
           <tbody id="seq-table">
             ${sequences.map(s => `
-            <tr class="border-b last:border-0" id="seq-row-${s.id}">
-              <td class="py-2">
-                <div class="font-medium">${s.name}</div>
-                <div class="text-xs text-gray-400">${s.description || ''}</div>
+            <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors" id="seq-row-${s.id}">
+              <td class="px-4 py-3">
+                <div class="font-semibold text-slate-900">${esc(s.name)}</div>
+                <div class="text-xs text-slate-400">${esc(s.description || '')}</div>
               </td>
-              <td class="py-2"><span class="px-2 py-0.5 rounded text-xs ${s.audience_type === 'B2B' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}">${s.audience_type}</span></td>
-              <td class="py-2">${s.step_count} steps</td>
-              <td class="py-2">${s.active_enrollments} contacts</td>
-              <td class="py-2"><span class="${s.active ? 'text-green-600' : 'text-gray-400'}">${s.active ? '* Active' : 'o Inactive'}</span></td>
-              <td class="py-2 flex gap-3">
-                <button onclick="editSequence(${s.id})" class="text-blue-600 hover:underline text-xs">Edit Steps</button>
-                <button onclick="enrollContacts(${s.id}, '${s.name}')" class="text-green-600 hover:underline text-xs">Enroll</button>
-                <button onclick="autoEnroll(${s.id}, '${s.name}', '${s.audience_type}')" class="text-purple-600 hover:underline text-xs">Auto-Enroll</button>
-                <button onclick="previewSequence(${s.id})" class="text-orange-500 hover:underline text-xs">Preview All</button>
-                <button onclick="viewEnrollments(${s.id}, '${s.name}')" class="text-gray-500 hover:underline text-xs">View</button>
-                <button onclick="deleteSeq(${s.id})" class="text-red-400 hover:underline text-xs">Delete</button>
+              <td class="px-4 py-3">
+                <span class="px-2 py-0.5 rounded-full text-xs font-medium ${s.audience_type === 'B2B' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}">${esc(s.audience_type)}</span>
+              </td>
+              <td class="px-4 py-3 text-center text-slate-700">${s.step_count}</td>
+              <td class="px-4 py-3 text-center text-slate-700">${s.active_enrollments}</td>
+              <td class="px-4 py-3">
+                ${s.active
+                  ? `<span class="inline-flex items-center gap-1 text-emerald-600 font-medium text-xs">${ICONS.check} Active</span>`
+                  : `<span class="text-slate-400 text-xs">Inactive</span>`}
+              </td>
+              <td class="px-4 py-3">
+                <div class="flex gap-2 flex-wrap">
+                  <button onclick="editSequence(${s.id})" class="text-xs px-2.5 py-1 rounded-lg border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors">Edit Steps</button>
+                  <button onclick="enrollContacts(${s.id}, '${esc(s.name)}')" class="text-xs px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors">Enroll</button>
+                  <button onclick="autoEnroll(${s.id}, '${esc(s.name)}', '${esc(s.audience_type)}')" class="text-xs px-2.5 py-1 rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors">Auto-Enroll</button>
+                  <button onclick="previewSequence(${s.id})" class="text-xs px-2.5 py-1 rounded-lg border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">Preview</button>
+                  <button onclick="viewEnrollments(${s.id}, '${esc(s.name)}')" class="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">View</button>
+                  <button onclick="deleteSeq(${s.id})" class="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Delete</button>
+                </div>
               </td>
             </tr>`).join('')}
           </tbody>
@@ -562,85 +577,86 @@ router.get('/', requireAuth, async (req, res) => {
     </div>
 
     <!-- Deliverability Report -->
-    <div class="bg-white rounded-xl shadow-sm p-6 mb-6">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="font-semibold text-gray-700">Deliverability Report</h2>
-        <span class="text-xs text-gray-400">Open, click, and bounce rates per sequence</span>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-6">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h2 class="font-semibold text-slate-800">Deliverability Report</h2>
+        <span class="text-xs text-slate-400">Open, click, and bounce rates per sequence</span>
       </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm" id="report-table">
-          <thead><tr class="text-left text-gray-500 border-b">
-            <th class="pb-2">Sequence</th>
-            <th class="pb-2 text-right">Total Sends</th>
-            <th class="pb-2 text-right">Open Rate</th>
-            <th class="pb-2 text-right">Click Rate</th>
-            <th class="pb-2 text-right">Bounce Rate</th>
-          </tr></thead>
+        <table class="w-full text-sm data-table" id="report-table">
+          <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+            <tr>
+              <th class="px-4 py-3 text-left">Sequence</th>
+              <th class="px-4 py-3 text-right">Total Sends</th>
+              <th class="px-4 py-3 text-right">Open Rate</th>
+              <th class="px-4 py-3 text-right">Click Rate</th>
+              <th class="px-4 py-3 text-right">Bounce Rate</th>
+            </tr>
+          </thead>
           <tbody id="report-body">
-            <tr><td colspan="5" class="py-4 text-center text-gray-400">Loading...</td></tr>
+            <tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">Loading…</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
     <!-- Contact Import & Verification -->
-    <div class="bg-white rounded-xl shadow-sm p-6">
-      <h2 class="font-semibold text-gray-700 mb-1">Import Contacts (CSV)</h2>
-      <p class="text-sm text-gray-500 mb-3">Required column: <code>email</code>. Optional: <code>first_name, last_name, phone, city, audience_type, product_interest</code></p>
+    <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+      <h2 class="font-semibold text-slate-800 mb-1">Import Contacts (CSV)</h2>
+      <p class="text-sm text-slate-500 mb-4">Required column: <code class="bg-slate-100 px-1 rounded text-xs">email</code>. Optional: <code class="bg-slate-100 px-1 rounded text-xs">first_name, last_name, phone, city, audience_type, product_interest</code></p>
       <div class="flex gap-3 items-center flex-wrap mb-5">
-        <input type="file" id="csv-file" accept=".csv" class="text-sm border border-gray-300 rounded p-2">
-        <button onclick="importCsv()" class="bg-green-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-700">Upload & Import</button>
-        <span id="import-status" class="text-sm text-gray-500"></span>
+        <input type="file" id="csv-file" accept=".csv" class="text-sm border border-slate-200 rounded-lg p-2 text-slate-600">
+        <button onclick="importCsv()" class="bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors">Upload &amp; Import</button>
+        <span id="import-status" class="text-sm text-slate-500"></span>
       </div>
-      <div class="border-t pt-4">
-        <div class="flex items-center justify-between flex-wrap gap-3">
+      <div class="border-t border-slate-100 pt-4">
+        <div class="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <p class="text-sm font-medium text-gray-700">Email Verification (ZeroBounce)</p>
-            <p class="text-xs text-gray-400 mt-0.5">Verifies 50 unverified leads per run. Invalid/spam-trap addresses are auto-suppressed. Requires ZEROBOUNCE_API_KEY in environment.</p>
+            <p class="text-sm font-semibold text-slate-700">Email Verification (ZeroBounce)</p>
+            <p class="text-xs text-slate-400 mt-0.5">Verifies 50 unverified leads per run. Invalid/spam-trap addresses are auto-suppressed. Requires <code class="bg-slate-100 px-1 rounded">ZEROBOUNCE_API_KEY</code> in environment.</p>
           </div>
-          <button onclick="verifyBatch()" class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">
+          <button onclick="verifyBatch()" class="bg-sky-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-sky-700 transition-colors flex-shrink-0">
             Verify Emails (50)
           </button>
         </div>
-        <p id="verify-status" class="text-sm text-gray-500 mt-2"></p>
+        <p id="verify-status" class="text-sm text-slate-500 mt-2"></p>
       </div>
     </div>
   </div>
 
   <!-- Create/Edit Sequence Modal -->
-  <div id="seq-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
-      <div class="flex justify-between items-center mb-4">
-        <h3 id="seq-modal-title" class="font-semibold text-lg">New Sequence</h3>
-        <button onclick="closeSeqModal()" class="text-gray-400 hover:text-gray-600 text-xl">x</button>
+  <div id="seq-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6">
+      <div class="flex justify-between items-center mb-5">
+        <h3 id="seq-modal-title" class="font-bold text-lg text-slate-900">New Sequence</h3>
+        <button onclick="closeSeqModal()" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">${ICONS.x}</button>
       </div>
 
       <input type="hidden" id="seq-id">
       <div class="grid grid-cols-2 gap-4 mb-4">
         <div class="col-span-2">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Sequence Name</label>
-          <input id="seq-name" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="e.g. B2C Door Interest - 20 Email">
+          <label class="block text-sm font-medium text-slate-700 mb-1">Sequence Name</label>
+          <input id="seq-name" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="e.g. B2C Door Interest - 20 Email">
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Audience</label>
-          <select id="seq-audience" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          <label class="block text-sm font-medium text-slate-700 mb-1">Audience</label>
+          <select id="seq-audience" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
             <option value="B2C">B2C</option>
             <option value="B2B">B2B</option>
           </select>
         </div>
         <div class="col-span-2">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Description (optional)</label>
-          <input id="seq-desc" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="Short description">
+          <label class="block text-sm font-medium text-slate-700 mb-1">Description (optional)</label>
+          <input id="seq-desc" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="Short description">
         </div>
       </div>
 
-      <button onclick="saveSequence()" class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 mb-6">Save Sequence</button>
+      <button onclick="saveSequence()" class="bg-sky-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-sky-700 transition-colors mb-6">Save Sequence</button>
 
-      <!-- Steps editor - only shown when editing existing -->
       <div id="steps-section" class="hidden">
         <div class="flex justify-between items-center mb-3">
-          <h4 class="font-semibold text-gray-700">Email Steps</h4>
-          <button onclick="addStep()" class="text-sm bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-lg">+ Add Step</button>
+          <h4 class="font-semibold text-slate-700">Email Steps</h4>
+          <button onclick="addStep()" class="text-sm inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors">${ICONS.plus} Add Step</button>
         </div>
         <div id="steps-list" class="space-y-4"></div>
       </div>
@@ -648,33 +664,40 @@ router.get('/', requireAuth, async (req, res) => {
   </div>
 
   <!-- Enroll Modal -->
-  <div id="enroll-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-lg">Enroll Contacts - <span id="enroll-seq-name"></span></h3>
-        <button onclick="closeEnroll()" class="text-gray-400 hover:text-gray-600 text-xl">x</button>
+  <div id="enroll-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
+      <div class="flex justify-between items-center mb-5">
+        <h3 class="font-bold text-lg text-slate-900">Enroll Contacts &mdash; <span id="enroll-seq-name" class="text-sky-600"></span></h3>
+        <button onclick="closeEnroll()" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">${ICONS.x}</button>
       </div>
 
       <div class="flex gap-3 flex-wrap mb-4">
-        <select id="enroll-sp" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+        <select id="enroll-sp" class="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
           <option value="">Select Salesperson</option>
-          ${salespeople.filter(s => s.gmail_email && s.enabled).map(s => `<option value="${s.id}">${s.name} (${s.gmail_email})</option>`).join('')}
+          ${salespeople.filter(s => s.gmail_email && s.enabled).map(s => `<option value="${s.id}">${esc(s.name)} (${esc(s.gmail_email)})</option>`).join('')}
         </select>
-        <input id="enroll-search" oninput="filterLeads()" placeholder="Search email or name..." class="border border-gray-300 rounded-lg px-3 py-2 text-sm flex-1">
-        <label class="flex items-center gap-2 text-sm">
-          <input type="checkbox" id="enroll-hide-enrolled" onchange="filterLeads()"> Hide already enrolled
+        <div class="relative flex-1">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4">${ICONS.search}</span>
+          <input id="enroll-search" oninput="filterLeads()" placeholder="Search email or name…" class="w-full border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+        </div>
+        <label class="flex items-center gap-2 text-sm text-slate-600">
+          <input type="checkbox" id="enroll-hide-enrolled" onchange="filterLeads()"> Hide enrolled
         </label>
-        <button onclick="enrollSelected()" class="bg-green-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-green-700">Enroll Selected</button>
+        <button onclick="enrollSelected()" class="bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors">Enroll Selected</button>
       </div>
 
-      <div class="text-sm text-gray-500 mb-2"><span id="enroll-count">0</span> selected</div>
-      <div class="overflow-x-auto max-h-96 overflow-y-auto">
+      <div class="text-sm text-slate-500 mb-2"><span id="enroll-count">0</span> selected</div>
+      <div class="overflow-x-auto max-h-96 overflow-y-auto border border-slate-100 rounded-lg">
         <table class="w-full text-sm">
-          <thead class="sticky top-0 bg-white"><tr class="text-left text-gray-500 border-b">
-            <th class="pb-2 pr-3"><input type="checkbox" onchange="toggleAllLeads(this)"></th>
-            <th class="pb-2">Email</th><th class="pb-2">Name</th>
-            <th class="pb-2">Type</th><th class="pb-2">Status</th>
-          </tr></thead>
+          <thead class="sticky top-0 bg-white border-b border-slate-100">
+            <tr class="text-left text-slate-500 text-xs uppercase tracking-wider">
+              <th class="px-3 py-2.5"><input type="checkbox" onchange="toggleAllLeads(this)"></th>
+              <th class="px-3 py-2.5">Email</th>
+              <th class="px-3 py-2.5">Name</th>
+              <th class="px-3 py-2.5">Type</th>
+              <th class="px-3 py-2.5">Status</th>
+            </tr>
+          </thead>
           <tbody id="leads-table"></tbody>
         </table>
       </div>
@@ -682,406 +705,415 @@ router.get('/', requireAuth, async (req, res) => {
   </div>
 
   <!-- Enrollment View Modal -->
-  <div id="view-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-    <div class="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-lg">Enrollments - <span id="view-seq-name"></span></h3>
-        <button onclick="document.getElementById('view-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl">x</button>
+  <div id="view-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
+      <div class="flex justify-between items-center mb-5">
+        <h3 class="font-bold text-lg text-slate-900">Enrollments &mdash; <span id="view-seq-name" class="text-sky-600"></span></h3>
+        <button onclick="document.getElementById('view-modal').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">${ICONS.x}</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
-          <thead><tr class="text-left text-gray-500 border-b">
-            <th class="pb-2">Contact</th><th class="pb-2">Salesperson</th>
-            <th class="pb-2">Step</th><th class="pb-2">Emails Sent</th>
-            <th class="pb-2">Status</th><th class="pb-2">Next Send</th><th class="pb-2">Actions</th>
-          </tr></thead>
+          <thead class="text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+            <tr>
+              <th class="pb-2 text-left px-2">Contact</th>
+              <th class="pb-2 text-left px-2">Salesperson</th>
+              <th class="pb-2 text-center px-2">Step</th>
+              <th class="pb-2 text-center px-2">Sent</th>
+              <th class="pb-2 text-left px-2">Status</th>
+              <th class="pb-2 text-left px-2">Next Send</th>
+              <th class="pb-2 px-2">Actions</th>
+            </tr>
+          </thead>
           <tbody id="view-table"></tbody>
         </table>
       </div>
     </div>
   </div>
 
-<script>
-var activeSeqId = null;
-var allLeads    = [];
+  <script>
+  var activeSeqId = null;
+  var allLeads    = [];
 
-function disconnectGmail(spId) {
-  if (!confirm('Disconnect this Gmail account?')) return;
-  fetch('/gmail/disconnect/' + spId, { method: 'POST' })
-    .then(function() { location.reload(); });
-}
+  async function disconnectGmail(spId) {
+    if (!await showConfirm('Disconnect this Gmail account?', 'Disconnect Gmail')) return;
+    fetch('/gmail/disconnect/' + spId, { method: 'POST' })
+      .then(function() { location.reload(); });
+  }
 
-function showCreateSeq() {
-  document.getElementById('seq-id').value = '';
-  document.getElementById('seq-name').value = '';
-  document.getElementById('seq-desc').value = '';
-  document.getElementById('seq-audience').value = 'B2C';
-  document.getElementById('steps-section').classList.add('hidden');
-  document.getElementById('seq-modal-title').textContent = 'New Sequence';
-  document.getElementById('seq-modal').classList.remove('hidden');
-}
+  function showCreateSeq() {
+    document.getElementById('seq-id').value = '';
+    document.getElementById('seq-name').value = '';
+    document.getElementById('seq-desc').value = '';
+    document.getElementById('seq-audience').value = 'B2C';
+    document.getElementById('steps-section').classList.add('hidden');
+    document.getElementById('seq-modal-title').textContent = 'New Sequence';
+    document.getElementById('seq-modal').classList.remove('hidden');
+  }
 
-function closeSeqModal() { document.getElementById('seq-modal').classList.add('hidden'); }
+  function closeSeqModal() { document.getElementById('seq-modal').classList.add('hidden'); }
 
-function saveSequence() {
-  var id       = document.getElementById('seq-id').value;
-  var name     = document.getElementById('seq-name').value.trim();
-  var desc     = document.getElementById('seq-desc').value.trim();
-  var audience = document.getElementById('seq-audience').value;
+  function saveSequence() {
+    var id       = document.getElementById('seq-id').value;
+    var name     = document.getElementById('seq-name').value.trim();
+    var desc     = document.getElementById('seq-desc').value.trim();
+    var audience = document.getElementById('seq-audience').value;
 
-  if (!name) { alert('Name is required'); return; }
+    if (!name) { showToast('Sequence name is required', 'error'); return; }
 
-  var url    = id ? '/sequences/api/sequences/' + id : '/sequences/api/sequences';
-  var method = id ? 'PUT' : 'POST';
+    var url    = id ? '/sequences/api/sequences/' + id : '/sequences/api/sequences';
+    var method = id ? 'PUT' : 'POST';
 
-  fetch(url, {
-    method: method,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: name, description: desc, audience_type: audience, active: true }),
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(seq) {
-    if (!id) {
-      activeSeqId = seq.id;
-      document.getElementById('seq-id').value = seq.id;
-      document.getElementById('seq-modal-title').textContent = 'Edit Steps - ' + seq.name;
-      document.getElementById('steps-section').classList.remove('hidden');
-    }
-    location.reload();
-  });
-}
-
-function editSequence(id) {
-  fetch('/sequences/api/sequences/' + id)
+    fetch(url, {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, description: desc, audience_type: audience, active: true }),
+    })
     .then(function(r) { return r.json(); })
     .then(function(seq) {
-      activeSeqId = id;
-      document.getElementById('seq-id').value = id;
-      document.getElementById('seq-name').value = seq.name;
-      document.getElementById('seq-desc').value = seq.description || '';
-      document.getElementById('seq-audience').value = seq.audience_type;
-      document.getElementById('seq-modal-title').textContent = 'Edit - ' + seq.name;
-      document.getElementById('steps-section').classList.remove('hidden');
-      renderSteps(seq.steps || []);
-      document.getElementById('seq-modal').classList.remove('hidden');
-    });
-}
-
-function renderSteps(steps) {
-  var list = document.getElementById('steps-list');
-  list.innerHTML = '';
-  steps.forEach(function(step) {
-    list.innerHTML += buildStepHtml(step.step_number, step.delay_days, step.subject, step.body, step.id);
-  });
-}
-
-function buildStepHtml(stepNum, delayDays, subject, body, stepId) {
-  return '<div class="border border-gray-200 rounded-lg p-4" id="step-block-' + stepNum + '">' +
-    '<div class="flex justify-between items-center mb-3">' +
-      '<span class="font-medium text-sm">Step ' + stepNum + '</span>' +
-      '<button onclick="deleteStep(' + (stepId || 0) + ', ' + stepNum + ')" class="text-red-400 text-xs hover:underline">Remove</button>' +
-    '</div>' +
-    '<div class="grid grid-cols-4 gap-3 mb-3">' +
-      '<div>' +
-        '<label class="block text-xs text-gray-500 mb-1">Send after (days)</label>' +
-        '<input type="number" min="0" value="' + delayDays + '" id="step-delay-' + stepNum + '" class="w-full border border-gray-300 rounded px-2 py-1 text-sm">' +
-      '</div>' +
-      '<div class="col-span-3">' +
-        '<label class="block text-xs text-gray-500 mb-1">Subject line</label>' +
-        '<input type="text" value="' + (subject || '').replace(/"/g,'&quot;') + '" id="step-subject-' + stepNum + '" class="w-full border border-gray-300 rounded px-2 py-1 text-sm" placeholder="e.g. Quick question about your security concerns">' +
-      '</div>' +
-    '</div>' +
-    '<label class="block text-xs text-gray-500 mb-1">Email body (use {first_name}, {city}, {product_interest})</label>' +
-    '<textarea id="step-body-' + stepNum + '" rows="5" class="w-full border border-gray-300 rounded px-2 py-1.5 text-sm font-mono">' + (body || '') + '</textarea>' +
-    '<button onclick="saveStep(' + stepNum + (stepId ? ', ' + stepId : '') + ')" class="mt-2 text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700">Save Step</button>' +
-  '</div>';
-}
-
-var stepCount = 0;
-function addStep() {
-  var list = document.getElementById('steps-list');
-  stepCount = list.children.length + 1;
-  list.innerHTML += buildStepHtml(stepCount, stepCount === 1 ? 0 : 3, '', '', null);
-  list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
-}
-
-function saveStep(stepNum, stepId) {
-  if (!activeSeqId) { alert('Save the sequence first'); return; }
-  var delay   = document.getElementById('step-delay-' + stepNum).value;
-  var subject = document.getElementById('step-subject-' + stepNum).value.trim();
-  var body    = document.getElementById('step-body-' + stepNum).value;
-  if (!subject || !body) { alert('Subject and body are required'); return; }
-
-  fetch('/sequences/api/sequences/' + activeSeqId + '/steps', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ step_number: stepNum, delay_days: parseInt(delay), subject: subject, body: body }),
-  })
-  .then(function(r) { return r.json(); })
-  .then(function() {
-    var btn = document.querySelector('#step-block-' + stepNum + ' button:last-child');
-    if (btn) { btn.textContent = '(ok) Saved'; btn.style.background = '#16a34a'; }
-  });
-}
-
-function deleteStep(stepId, stepNum) {
-  if (!confirm('Remove step ' + stepNum + '?')) return;
-  if (stepId && activeSeqId) {
-    fetch('/sequences/api/sequences/' + activeSeqId + '/steps/' + stepId, { method: 'DELETE' })
-      .then(function() { document.getElementById('step-block-' + stepNum).remove(); });
-  } else {
-    var el = document.getElementById('step-block-' + stepNum);
-    if (el) el.remove();
-  }
-}
-
-function deleteSeq(id) {
-  if (!confirm('Delete this sequence? This cannot be undone.')) return;
-  fetch('/sequences/api/sequences/' + id, { method: 'DELETE' })
-    .then(function() { document.getElementById('seq-row-' + id).remove(); });
-}
-
-// -- Preview all steps --
-function previewSequence(seqId) {
-  var email = prompt('Email address to send all sequence steps to:');
-  if (!email) return;
-  fetch('/sequences/api/sequences/' + seqId + '/preview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: email })
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.ok) {
-      alert('Sent ' + data.sent + ' of ' + data.total + ' steps to ' + email);
-    } else {
-      alert('Error: ' + (data.error || 'Unknown'));
-    }
-  })
-  .catch(function() { alert('Request failed'); });
-}
-
-
-// -- Email verification --
-function verifyBatch() {
-  var status = document.getElementById('verify-status');
-  status.textContent = 'Verifying... (this takes ~20 seconds for 50 emails)';
-  fetch('/sequences/api/leads/verify-batch', { method: 'POST' })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.error) { status.textContent = 'Error: ' + d.error; return; }
-      status.textContent = '(ok) Verified ' + d.verified + ' emails. Suppressed ' + d.suppressed + ' bad addresses. '
-        + (d.remaining > 0 ? d.remaining + ' unverified remaining - click again to continue.' : 'All leads verified!');
-    })
-    .catch(function() { status.textContent = 'Request failed. Check connection.'; });
-}
-
-// -- Auto-Enroll flow --
-function autoEnroll(seqId, seqName, audienceType) {
-  if (!confirm(
-    'Auto-enroll all un-enrolled ' + audienceType + ' leads into "' + seqName + '"?\\n\\n' +
-    'Already enrolled and suppressed contacts are skipped automatically.'
-  )) return;
-
-  fetch('/sequences/api/sequences/' + seqId + '/auto-enroll', { method: 'POST' })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.ok) {
-        alert('Auto-enrolled ' + d.enrolled + ' ' + audienceType + ' leads. ' + d.skipped + ' skipped (already enrolled or suppressed).');
-        location.reload();
-      } else {
-        alert('Error: ' + (d.error || 'Unknown error'));
+      if (!id) {
+        activeSeqId = seq.id;
+        document.getElementById('seq-id').value = seq.id;
+        document.getElementById('seq-modal-title').textContent = 'Edit Steps — ' + seq.name;
+        document.getElementById('steps-section').classList.remove('hidden');
       }
-    })
-    .catch(function() { alert('Request failed. Check your connection.'); });
-}
-
-// -- Enroll flow --
-var enrollSeqId = null;
-
-function enrollContacts(seqId, seqName) {
-  enrollSeqId = seqId;
-  document.getElementById('enroll-seq-name').textContent = seqName;
-  document.getElementById('enroll-modal').classList.remove('hidden');
-  document.getElementById('leads-table').innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">Loading...</td></tr>';
-
-  fetch('/sequences/api/leads/enrollable?sequence_id=' + seqId)
-    .then(function(r) { return r.json(); })
-    .then(function(leads) {
-      allLeads = leads;
-      renderLeads(leads);
+      location.reload();
     });
-}
-
-function closeEnroll() {
-  document.getElementById('enroll-modal').classList.add('hidden');
-  allLeads = [];
-}
-
-function renderLeads(leads) {
-  var hideEnrolled = document.getElementById('enroll-hide-enrolled').checked;
-  var filtered = hideEnrolled ? leads.filter(function(l) { return !l.already_enrolled; }) : leads;
-  var tbody = document.getElementById('leads-table');
-  if (!filtered.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">No contacts found</td></tr>';
-    return;
   }
-  tbody.innerHTML = filtered.map(function(l) {
-    var disabled = l.already_enrolled || l.suppressed;
-    return '<tr class="border-b last:border-0 ' + (disabled ? 'opacity-50' : '') + '">' +
-      '<td class="py-1.5 pr-3"><input type="checkbox" class="lead-check" value="' + l.id + '"' +
-        (disabled ? ' disabled' : '') + ' onchange="updateCount()"></td>' +
-      '<td class="py-1.5">' + l.email + '</td>' +
-      '<td class="py-1.5">' + (l.first_name || '') + ' ' + (l.last_name || '') + '</td>' +
-      '<td class="py-1.5"><span class="px-1.5 py-0.5 text-xs rounded ' +
-        (l.audience_type === 'B2B' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700') + '">' +
-        l.audience_type + '</span></td>' +
-      '<td class="py-1.5 text-xs">' +
-        (l.suppressed ? '<span class="text-red-400">Suppressed</span>' :
-         l.already_enrolled ? '<span class="text-gray-400">Enrolled</span>' :
-         '<span class="text-green-500">Ready</span>') +
-      '</td></tr>';
-  }).join('');
-}
 
-function filterLeads() {
-  var q = document.getElementById('enroll-search').value.toLowerCase();
-  var filtered = allLeads.filter(function(l) {
-    return !q || l.email.toLowerCase().includes(q) ||
-      (l.first_name || '').toLowerCase().includes(q) ||
-      (l.last_name  || '').toLowerCase().includes(q);
-  });
-  renderLeads(filtered);
-}
+  function editSequence(id) {
+    fetch('/sequences/api/sequences/' + id)
+      .then(function(r) { return r.json(); })
+      .then(function(seq) {
+        activeSeqId = id;
+        document.getElementById('seq-id').value = id;
+        document.getElementById('seq-name').value = seq.name;
+        document.getElementById('seq-desc').value = seq.description || '';
+        document.getElementById('seq-audience').value = seq.audience_type;
+        document.getElementById('seq-modal-title').textContent = 'Edit — ' + seq.name;
+        document.getElementById('steps-section').classList.remove('hidden');
+        renderSteps(seq.steps || []);
+        document.getElementById('seq-modal').classList.remove('hidden');
+      });
+  }
 
-function toggleAllLeads(cb) {
-  document.querySelectorAll('.lead-check:not(:disabled)').forEach(function(c) { c.checked = cb.checked; });
-  updateCount();
-}
-
-function updateCount() {
-  var n = document.querySelectorAll('.lead-check:checked').length;
-  document.getElementById('enroll-count').textContent = n;
-}
-
-function enrollSelected() {
-  var spId = document.getElementById('enroll-sp').value;
-  if (!spId) { alert('Select a salesperson first'); return; }
-  var ids = Array.from(document.querySelectorAll('.lead-check:checked')).map(function(c) { return parseInt(c.value); });
-  if (!ids.length) { alert('Select at least one contact'); return; }
-
-  fetch('/sequences/api/sequences/' + enrollSeqId + '/enroll', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ salesperson_id: parseInt(spId), lead_ids: ids }),
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(d) {
-    alert('Enrolled ' + d.enrolled + ' contacts. Skipped: ' + d.skipped);
-    closeEnroll();
-    location.reload();
-  });
-}
-
-function viewEnrollments(seqId, seqName) {
-  document.getElementById('view-seq-name').textContent = seqName;
-  document.getElementById('view-modal').classList.remove('hidden');
-  document.getElementById('view-table').innerHTML = '<tr><td colspan="7" class="py-4 text-center text-gray-400">Loading...</td></tr>';
-
-  fetch('/sequences/api/sequences/' + seqId + '/enrollments')
-    .then(function(r) { return r.json(); })
-    .then(function(rows) {
-      if (!rows.length) {
-        document.getElementById('view-table').innerHTML = '<tr><td colspan="7" class="py-4 text-center text-gray-400">No enrollments yet</td></tr>';
-        return;
-      }
-      document.getElementById('view-table').innerHTML = rows.map(function(r) {
-        var nextSend = r.next_send_at ? new Date(r.next_send_at).toLocaleDateString() : '-';
-        var statusColor = r.status === 'active' ? 'text-green-600' : r.status === 'completed' ? 'text-gray-400' : 'text-yellow-600';
-        return '<tr class="border-b last:border-0">' +
-          '<td class="py-1.5">' + r.email + (r.first_name ? '<br><span class="text-xs text-gray-400">' + r.first_name + ' ' + (r.last_name||'') + '</span>' : '') + '</td>' +
-          '<td class="py-1.5 text-xs">' + (r.salesperson_name || '-') + '</td>' +
-          '<td class="py-1.5 text-center">' + r.current_step + '</td>' +
-          '<td class="py-1.5 text-center">' + r.emails_sent + '</td>' +
-          '<td class="py-1.5 ' + statusColor + ' capitalize">' + r.status + (r.paused_reason ? ' (' + r.paused_reason + ')' : '') + '</td>' +
-          '<td class="py-1.5 text-xs">' + nextSend + '</td>' +
-          '<td class="py-1.5">' +
-            (r.status === 'active'
-              ? '<button onclick="pauseEnrollment(' + r.id + ', this)" class="text-xs text-yellow-600 hover:underline">Pause</button>'
-              : r.status === 'paused'
-                ? '<button onclick="resumeEnrollment(' + r.id + ', this)" class="text-xs text-green-600 hover:underline">Resume</button>'
-                : '') +
-          '</td></tr>';
-      }).join('');
+  function renderSteps(steps) {
+    var list = document.getElementById('steps-list');
+    list.innerHTML = '';
+    steps.forEach(function(step) {
+      list.innerHTML += buildStepHtml(step.step_number, step.delay_days, step.subject, step.body, step.id);
     });
-}
+  }
 
-function pauseEnrollment(id, btn) {
-  fetch('/sequences/api/enrollments/' + id + '/pause', { method: 'POST' })
-    .then(function() { btn.closest('tr').querySelector('td:nth-child(5)').textContent = 'paused'; btn.remove(); });
-}
-function resumeEnrollment(id, btn) {
-  fetch('/sequences/api/enrollments/' + id + '/resume', { method: 'POST' })
-    .then(function() { btn.closest('tr').querySelector('td:nth-child(5)').textContent = 'active'; btn.remove(); });
-}
+  function buildStepHtml(stepNum, delayDays, subject, body, stepId) {
+    return '<div class="border border-slate-200 rounded-xl p-4" id="step-block-' + stepNum + '">' +
+      '<div class="flex justify-between items-center mb-3">' +
+        '<span class="font-semibold text-sm text-slate-800">Step ' + stepNum + '</span>' +
+        '<button onclick="deleteStep(' + (stepId || 0) + ', ' + stepNum + ')" class="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Remove</button>' +
+      '</div>' +
+      '<div class="grid grid-cols-4 gap-3 mb-3">' +
+        '<div>' +
+          '<label class="block text-xs text-slate-500 mb-1 font-medium">Send after (days)</label>' +
+          '<input type="number" min="0" value="' + delayDays + '" id="step-delay-' + stepNum + '" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">' +
+        '</div>' +
+        '<div class="col-span-3">' +
+          '<label class="block text-xs text-slate-500 mb-1 font-medium">Subject line</label>' +
+          '<input type="text" value="' + (subject || '').replace(/"/g,'&quot;') + '" id="step-subject-' + stepNum + '" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="e.g. Quick question about your security concerns">' +
+        '</div>' +
+      '</div>' +
+      '<label class="block text-xs text-slate-500 mb-1 font-medium">Email body (use {first_name}, {city}, {product_interest})</label>' +
+      '<textarea id="step-body-' + stepNum + '" rows="5" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">' + (body || '') + '</textarea>' +
+      '<button onclick="saveStep(' + stepNum + (stepId ? ', ' + stepId : '') + ')" class="mt-2 text-xs bg-sky-600 text-white px-3 py-1.5 rounded-lg hover:bg-sky-700 transition-colors">Save Step</button>' +
+    '</div>';
+  }
 
-function importCsv() {
-  var file = document.getElementById('csv-file').files[0];
-  if (!file) { alert('Select a CSV file first'); return; }
-  var status = document.getElementById('import-status');
-  status.textContent = 'Importing...';
+  var stepCount = 0;
+  function addStep() {
+    var list = document.getElementById('steps-list');
+    stepCount = list.children.length + 1;
+    list.innerHTML += buildStepHtml(stepCount, stepCount === 1 ? 0 : 3, '', '', null);
+    list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
+  }
 
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    fetch('/sequences/api/leads/import', {
+  function saveStep(stepNum, stepId) {
+    if (!activeSeqId) { showToast('Save the sequence first', 'warn'); return; }
+    var delay   = document.getElementById('step-delay-' + stepNum).value;
+    var subject = document.getElementById('step-subject-' + stepNum).value.trim();
+    var body    = document.getElementById('step-body-' + stepNum).value;
+    if (!subject || !body) { showToast('Subject and body are required', 'error'); return; }
+
+    fetch('/sequences/api/sequences/' + activeSeqId + '/steps', {
       method: 'POST',
-      headers: { 'Content-Type': 'text/csv' },
-      body: e.target.result,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ step_number: stepNum, delay_days: parseInt(delay), subject: subject, body: body }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+      showToast('Step ' + stepNum + ' saved', 'success', 2000);
+    });
+  }
+
+  async function deleteStep(stepId, stepNum) {
+    if (!await showConfirm('Remove step ' + stepNum + '?', 'Delete Step')) return;
+    if (stepId && activeSeqId) {
+      fetch('/sequences/api/sequences/' + activeSeqId + '/steps/' + stepId, { method: 'DELETE' })
+        .then(function() { document.getElementById('step-block-' + stepNum).remove(); });
+    } else {
+      var el = document.getElementById('step-block-' + stepNum);
+      if (el) el.remove();
+    }
+  }
+
+  async function deleteSeq(id) {
+    if (!await showDestruct('Delete this sequence? This cannot be undone.', 'Delete Sequence', 'Delete')) return;
+    fetch('/sequences/api/sequences/' + id, { method: 'DELETE' })
+      .then(function() {
+        var row = document.getElementById('seq-row-' + id);
+        if (row) row.remove();
+        showToast('Sequence deleted', 'success');
+      });
+  }
+
+  async function previewSequence(seqId) {
+    var email = await showPrompt('Email address to send all sequence steps to:', '', 'Preview Sequence');
+    if (!email) return;
+    showToast('Sending preview emails… this may take a moment', 'info', 8000);
+    fetch('/sequences/api/sequences/' + seqId + '/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        showToast('Sent ' + data.sent + ' of ' + data.total + ' steps to ' + email, 'success');
+      } else {
+        showToast('Error: ' + (data.error || 'Unknown'), 'error');
+      }
+    })
+    .catch(function() { showToast('Request failed', 'error'); });
+  }
+
+  function verifyBatch() {
+    var status = document.getElementById('verify-status');
+    status.textContent = 'Verifying… (~20 seconds for 50 emails)';
+    fetch('/sequences/api/leads/verify-batch', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.error) { status.textContent = 'Error: ' + d.error; showToast('Verification error: ' + d.error, 'error'); return; }
+        var msg = 'Verified ' + d.verified + ' emails. Suppressed ' + d.suppressed + ' bad addresses. '
+          + (d.remaining > 0 ? d.remaining + ' remaining.' : 'All verified!');
+        status.textContent = msg;
+        showToast(msg, 'success');
+      })
+      .catch(function() { status.textContent = 'Request failed.'; showToast('Request failed', 'error'); });
+  }
+
+  async function autoEnroll(seqId, seqName, audienceType) {
+    var ok = await showConfirm(
+      'Auto-enroll all un-enrolled ' + audienceType + ' leads into "' + seqName + '"? Already enrolled and suppressed contacts are skipped.',
+      'Auto-Enroll ' + audienceType
+    );
+    if (!ok) return;
+
+    fetch('/sequences/api/sequences/' + seqId + '/auto-enroll', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) {
+          showToast('Auto-enrolled ' + d.enrolled + ' leads. ' + d.skipped + ' skipped.', 'success');
+          setTimeout(function() { location.reload(); }, 1500);
+        } else {
+          showToast('Error: ' + (d.error || 'Unknown error'), 'error');
+        }
+      })
+      .catch(function() { showToast('Request failed', 'error'); });
+  }
+
+  var enrollSeqId = null;
+
+  function enrollContacts(seqId, seqName) {
+    enrollSeqId = seqId;
+    document.getElementById('enroll-seq-name').textContent = seqName;
+    document.getElementById('enroll-modal').classList.remove('hidden');
+    document.getElementById('leads-table').innerHTML = '<tr><td colspan="5" class="px-3 py-8 text-center text-slate-400">Loading…</td></tr>';
+
+    fetch('/sequences/api/leads/enrollable?sequence_id=' + seqId)
+      .then(function(r) { return r.json(); })
+      .then(function(leads) {
+        allLeads = leads;
+        renderLeads(leads);
+      });
+  }
+
+  function closeEnroll() {
+    document.getElementById('enroll-modal').classList.add('hidden');
+    allLeads = [];
+  }
+
+  function renderLeads(leads) {
+    var hideEnrolled = document.getElementById('enroll-hide-enrolled').checked;
+    var filtered = hideEnrolled ? leads.filter(function(l) { return !l.already_enrolled; }) : leads;
+    var tbody = document.getElementById('leads-table');
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="px-3 py-8 text-center text-slate-400">No contacts found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = filtered.map(function(l) {
+      var disabled = l.already_enrolled || l.suppressed;
+      return '<tr class="border-t border-slate-100 ' + (disabled ? 'opacity-40' : 'hover:bg-slate-50') + '">' +
+        '<td class="px-3 py-2"><input type="checkbox" class="lead-check" value="' + l.id + '"' +
+          (disabled ? ' disabled' : '') + ' onchange="updateCount()"></td>' +
+        '<td class="px-3 py-2 text-slate-700">' + l.email + '</td>' +
+        '<td class="px-3 py-2 text-slate-700">' + (l.first_name || '') + ' ' + (l.last_name || '') + '</td>' +
+        '<td class="px-3 py-2"><span class="px-1.5 py-0.5 text-xs rounded-full font-medium ' +
+          (l.audience_type === 'B2B' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700') + '">' +
+          l.audience_type + '</span></td>' +
+        '<td class="px-3 py-2 text-xs">' +
+          (l.suppressed ? '<span class="text-red-500 font-medium">Suppressed</span>' :
+           l.already_enrolled ? '<span class="text-slate-400">Enrolled</span>' :
+           '<span class="text-emerald-600 font-medium">Ready</span>') +
+        '</td></tr>';
+    }).join('');
+  }
+
+  function filterLeads() {
+    var q = document.getElementById('enroll-search').value.toLowerCase();
+    var filtered = allLeads.filter(function(l) {
+      return !q || l.email.toLowerCase().includes(q) ||
+        (l.first_name || '').toLowerCase().includes(q) ||
+        (l.last_name  || '').toLowerCase().includes(q);
+    });
+    renderLeads(filtered);
+  }
+
+  function toggleAllLeads(cb) {
+    document.querySelectorAll('.lead-check:not(:disabled)').forEach(function(c) { c.checked = cb.checked; });
+    updateCount();
+  }
+
+  function updateCount() {
+    var n = document.querySelectorAll('.lead-check:checked').length;
+    document.getElementById('enroll-count').textContent = n;
+  }
+
+  async function enrollSelected() {
+    var spId = document.getElementById('enroll-sp').value;
+    if (!spId) { showToast('Select a salesperson first', 'warn'); return; }
+    var ids = Array.from(document.querySelectorAll('.lead-check:checked')).map(function(c) { return parseInt(c.value); });
+    if (!ids.length) { showToast('Select at least one contact', 'warn'); return; }
+
+    fetch('/sequences/api/sequences/' + enrollSeqId + '/enroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ salesperson_id: parseInt(spId), lead_ids: ids }),
     })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      status.textContent = '(ok) Imported ' + d.imported + ' contacts. Skipped: ' + d.skipped;
-      status.style.color = '#16a34a';
-    })
-    .catch(function() { status.textContent = 'Import failed'; status.style.color = '#dc2626'; });
-  };
-  reader.readAsText(file);
-}
-
-function loadReport() {
-  fetch('/sequences/api/sequences/report')
-    .then(function(r) { return r.json(); })
-    .then(function(rows) {
-      var tbody = document.getElementById('report-body');
-      if (!rows || !rows.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-400">No data yet - send some emails first</td></tr>';
-        return;
-      }
-      tbody.innerHTML = rows.map(function(r) {
-        var openRate   = r.open_rate_pct   != null ? r.open_rate_pct   + '%' : '0.0%';
-        var clickRate  = r.click_rate_pct  != null ? r.click_rate_pct  + '%' : '0.0%';
-        var bounceRate = r.bounce_rate_pct != null ? r.bounce_rate_pct + '%' : '0.0%';
-        var bounceClass = parseFloat(r.bounce_rate_pct) > 5 ? 'text-red-600 font-semibold' : 'text-gray-700';
-        return '<tr class="border-b last:border-0">' +
-          '<td class="py-2 font-medium">' + r.sequence_name + '</td>' +
-          '<td class="py-2 text-right text-gray-600">' + (r.total_sends || 0) + '</td>' +
-          '<td class="py-2 text-right text-green-700 font-medium">' + openRate + '</td>' +
-          '<td class="py-2 text-right text-blue-700 font-medium">'  + clickRate + '</td>' +
-          '<td class="py-2 text-right ' + bounceClass + '">' + bounceRate + '</td>' +
-        '</tr>';
-      }).join('');
-    })
-    .catch(function(err) {
-      document.getElementById('report-body').innerHTML =
-        '<tr><td colspan="5" class="py-4 text-center text-red-400">Failed to load report</td></tr>';
+      showToast('Enrolled ' + d.enrolled + ' contacts. Skipped: ' + d.skipped, 'success');
+      closeEnroll();
+      setTimeout(function() { location.reload(); }, 1500);
     });
-}
+  }
 
-// Load report on page load
-loadReport();
-</script>
-</body>
-</html>`);
+  function viewEnrollments(seqId, seqName) {
+    document.getElementById('view-seq-name').textContent = seqName;
+    document.getElementById('view-modal').classList.remove('hidden');
+    document.getElementById('view-table').innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-400">Loading…</td></tr>';
+
+    fetch('/sequences/api/sequences/' + seqId + '/enrollments')
+      .then(function(r) { return r.json(); })
+      .then(function(rows) {
+        if (!rows.length) {
+          document.getElementById('view-table').innerHTML = '<tr><td colspan="7" class="py-8 text-center text-slate-400">No enrollments yet</td></tr>';
+          return;
+        }
+        document.getElementById('view-table').innerHTML = rows.map(function(r) {
+          var nextSend    = r.next_send_at ? new Date(r.next_send_at).toLocaleDateString() : '—';
+          var statusColor = r.status === 'active' ? 'text-emerald-600' : r.status === 'completed' ? 'text-slate-400' : 'text-amber-600';
+          return '<tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">' +
+            '<td class="px-2 py-2 text-sm text-slate-700">' + r.email + (r.first_name ? '<br><span class="text-xs text-slate-400">' + r.first_name + ' ' + (r.last_name||'') + '</span>' : '') + '</td>' +
+            '<td class="px-2 py-2 text-xs text-slate-600">' + (r.salesperson_name || '—') + '</td>' +
+            '<td class="px-2 py-2 text-center text-slate-700">' + r.current_step + '</td>' +
+            '<td class="px-2 py-2 text-center text-slate-700">' + r.emails_sent + '</td>' +
+            '<td class="px-2 py-2 ' + statusColor + ' capitalize text-sm font-medium">' + r.status + (r.paused_reason ? ' <span class="text-slate-400 font-normal text-xs">(' + r.paused_reason + ')</span>' : '') + '</td>' +
+            '<td class="px-2 py-2 text-xs text-slate-500">' + nextSend + '</td>' +
+            '<td class="px-2 py-2">' +
+              (r.status === 'active'
+                ? '<button onclick="pauseEnrollment(' + r.id + ', this)" class="text-xs px-2.5 py-1 rounded-lg border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">Pause</button>'
+                : r.status === 'paused'
+                  ? '<button onclick="resumeEnrollment(' + r.id + ', this)" class="text-xs px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors">Resume</button>'
+                  : '') +
+            '</td></tr>';
+        }).join('');
+      });
+  }
+
+  function pauseEnrollment(id, btn) {
+    fetch('/sequences/api/enrollments/' + id + '/pause', { method: 'POST' })
+      .then(function() { btn.closest('tr').querySelector('td:nth-child(5)').textContent = 'paused'; btn.remove(); });
+  }
+  function resumeEnrollment(id, btn) {
+    fetch('/sequences/api/enrollments/' + id + '/resume', { method: 'POST' })
+      .then(function() { btn.closest('tr').querySelector('td:nth-child(5)').textContent = 'active'; btn.remove(); });
+  }
+
+  function importCsv() {
+    var file = document.getElementById('csv-file').files[0];
+    if (!file) { showToast('Select a CSV file first', 'warn'); return; }
+    var status = document.getElementById('import-status');
+    status.textContent = 'Importing…';
+
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      fetch('/sequences/api/leads/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: e.target.result,
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var msg = 'Imported ' + d.imported + ' contacts. Skipped: ' + d.skipped;
+        status.textContent = msg;
+        status.style.color = '#059669';
+        showToast(msg, 'success');
+      })
+      .catch(function() { status.textContent = 'Import failed'; status.style.color = '#dc2626'; showToast('Import failed', 'error'); });
+    };
+    reader.readAsText(file);
+  }
+
+  function loadReport() {
+    fetch('/sequences/api/sequences/report')
+      .then(function(r) { return r.json(); })
+      .then(function(rows) {
+        var tbody = document.getElementById('report-body');
+        if (!rows || !rows.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No data yet — send some emails first</td></tr>';
+          return;
+        }
+        tbody.innerHTML = rows.map(function(r) {
+          var openRate   = r.open_rate_pct   != null ? r.open_rate_pct   + '%' : '0.0%';
+          var clickRate  = r.click_rate_pct  != null ? r.click_rate_pct  + '%' : '0.0%';
+          var bounceRate = r.bounce_rate_pct != null ? r.bounce_rate_pct + '%' : '0.0%';
+          var bounceClass = parseFloat(r.bounce_rate_pct) > 5 ? 'text-red-600 font-semibold' : 'text-slate-700';
+          return '<tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">' +
+            '<td class="px-4 py-2.5 font-semibold text-slate-800">' + r.sequence_name + '</td>' +
+            '<td class="px-4 py-2.5 text-right text-slate-600">' + (r.total_sends || 0) + '</td>' +
+            '<td class="px-4 py-2.5 text-right text-emerald-700 font-semibold">' + openRate + '</td>' +
+            '<td class="px-4 py-2.5 text-right text-sky-700 font-semibold">'  + clickRate + '</td>' +
+            '<td class="px-4 py-2.5 text-right ' + bounceClass + '">' + bounceRate + '</td>' +
+          '</tr>';
+        }).join('');
+      })
+      .catch(function() {
+        document.getElementById('report-body').innerHTML =
+          '<tr><td colspan="5" class="px-4 py-8 text-center text-red-400">Failed to load report</td></tr>';
+      });
+  }
+
+  loadReport();
+  </script>`;
+
+  res.send(shell('Sequences', 'sequences', content, { user: req.user }));
 });
 
 module.exports = router;

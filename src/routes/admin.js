@@ -2,14 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { navHtml } = require('./analytics');
+const { shell, ICONS, esc } = require('../lib/layout');
 const { createLlm, createAgent } = require('../lib/retell');
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function escapeHtml(str) {
-  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+const escapeHtml = esc;
 
 function parseJsonField(value, fallback) {
   if (!value) return fallback;
@@ -62,57 +60,57 @@ router.get('/', requireAuth, async (req, res) => {
       const ordGoal   = parseInt(sp.target_orders || 0);
       const ordActual = parseInt(sp.actual_orders || 0);
       const revPct    = revGoal > 0 ? Math.min(100, revActual / revGoal * 100).toFixed(0) : null;
-      const barColor  = !revPct ? 'bg-gray-200' : parseFloat(revPct) >= 100 ? 'bg-green-500' : parseFloat(revPct) >= 70 ? 'bg-yellow-400' : 'bg-blue-500';
+      const barColor  = !revPct ? 'bg-slate-200' : parseFloat(revPct) >= 100 ? 'bg-emerald-500' : parseFloat(revPct) >= 70 ? 'bg-yellow-400' : 'bg-sky-500';
       return `
-        <tr class="border-t hover:bg-gray-50">
+        <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
           <td class="px-4 py-3">
-            <div class="font-medium text-gray-900">${sp.name}</div>
-            <div class="text-xs text-gray-400">${sp.commission_rate}% commission · ${sp.has_portal ? '<span class="text-green-500">Portal active</span>' : '<span class="text-red-300">No portal access</span>'}</div>
+            <div class="font-medium text-slate-900">${sp.name}</div>
+            <div class="text-xs text-slate-400">${sp.commission_rate}% commission · ${sp.has_portal ? '<span class="text-emerald-500">Portal active</span>' : '<span class="text-red-300">No portal access</span>'}</div>
           </td>
           <td class="px-4 py-3">
             <div class="flex items-center gap-3">
               <div class="flex-1">
                 <div class="flex justify-between text-xs mb-1">
-                  <span class="text-gray-600">${fmt(revActual)}</span>
-                  <span class="text-gray-400">${revGoal > 0 ? 'Goal: ' + fmt(revGoal) : 'No goal set'}</span>
+                  <span class="text-slate-600">${fmt(revActual)}</span>
+                  <span class="text-slate-400">${revGoal > 0 ? 'Goal: ' + fmt(revGoal) : 'No goal set'}</span>
                 </div>
-                <div class="h-2.5 bg-gray-100 rounded-full overflow-hidden w-full">
-                  <div class="h-2.5 rounded-full ${barColor}" style="width:${revPct || 0}%"></div>
+                <div class="h-2 bg-slate-100 rounded-full overflow-hidden w-full">
+                  <div class="h-2 rounded-full ${barColor} transition-all" style="width:${revPct || 0}%"></div>
                 </div>
-                ${revPct ? '<p class="text-xs text-gray-400 mt-0.5">' + revPct + '% to goal</p>' : ''}
+                ${revPct ? '<p class="text-xs text-slate-400 mt-0.5">' + revPct + '% to goal</p>' : ''}
               </div>
             </div>
           </td>
           <td class="px-4 py-3 text-center text-sm">
-            <span class="font-semibold ${ordGoal > 0 && ordActual >= ordGoal ? 'text-green-600' : 'text-gray-700'}">${ordActual}</span>
-            ${ordGoal > 0 ? '<span class="text-gray-400"> / ' + ordGoal + '</span>' : ''}
+            <span class="font-semibold ${ordGoal > 0 && ordActual >= ordGoal ? 'text-emerald-600' : 'text-slate-700'}">${ordActual}</span>
+            ${ordGoal > 0 ? '<span class="text-slate-400"> / ' + ordGoal + '</span>' : ''}
           </td>
-          <td class="px-4 py-3 text-right font-semibold text-blue-700">${fmt(sp.commission_earned)}</td>
+          <td class="px-4 py-3 text-right font-semibold text-sky-700">${fmt(sp.commission_earned)}</td>
           <td class="px-4 py-3 text-right">
             <button onclick="openGoalModal(${sp.id}, '${sp.name}', ${revGoal}, ${ordGoal})"
-              class="text-xs text-blue-600 hover:underline mr-3">Set Goal</button>
+              class="text-xs text-sky-600 hover:text-sky-800 mr-3 font-medium">Set Goal</button>
             <button onclick="openPortalModal(${sp.id}, '${sp.name}')"
-              class="text-xs text-purple-600 hover:underline">Set Password</button>
+              class="text-xs text-violet-600 hover:text-violet-800 font-medium">Set Password</button>
           </td>
         </tr>`;
     }).join('');
 
     const spRows = salespeople.rows.map(sp => `
-      <tr class="border-t hover:bg-gray-50" id="row-${sp.id}">
+      <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors" id="row-${sp.id}">
         <td class="px-4 py-3">
-          <div class="font-medium text-gray-900">${sp.name}</div>
-          <div class="text-xs text-gray-400">${sp.email}</div>
+          <div class="font-medium text-slate-900">${sp.name}</div>
+          <div class="text-xs text-slate-400">${sp.email}</div>
         </td>
         <td class="px-4 py-3 text-center">
-          <span class="px-2 py-0.5 rounded text-xs ${sp.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${sp.active ? 'Active' : 'Inactive'}</span>
+          <span class="px-2 py-0.5 rounded-full text-xs font-medium ${sp.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${sp.active ? 'Active' : 'Inactive'}</span>
         </td>
         <td class="px-4 py-3 text-center text-sm">${sp.commission_rate}%</td>
-        <td class="px-4 py-3 text-center text-sm text-purple-600">${sp.tracking_phone_number || '<span class="text-gray-300">—</span>'}</td>
+        <td class="px-4 py-3 text-center text-sm text-violet-600">${sp.tracking_phone_number || '<span class="text-slate-300">—</span>'}</td>
         <td class="px-4 py-3 text-right">
           <button onclick="openEditModal(${JSON.stringify(sp).replace(/"/g,'&quot;')})"
-            class="text-xs text-blue-600 hover:underline mr-3">Edit</button>
+            class="text-xs text-sky-600 hover:text-sky-800 font-medium mr-3">Edit</button>
           <form method="POST" action="/admin/salespeople/${sp.id}/toggle" class="inline">
-            <button type="submit" class="text-xs ${sp.active ? 'text-red-500 hover:underline' : 'text-green-600 hover:underline'}">
+            <button type="submit" class="text-xs ${sp.active ? 'text-red-500 hover:text-red-700' : 'text-emerald-600 hover:text-emerald-800'} font-medium">
               ${sp.active ? 'Deactivate' : 'Reactivate'}
             </button>
           </form>
@@ -120,429 +118,382 @@ router.get('/', requireAuth, async (req, res) => {
       </tr>`).join('');
 
     const matrixRows = matrix.rows.map(m => `
-      <tr class="border-t hover:bg-gray-50">
-        <td class="px-3 py-2 text-xs text-gray-600">${m.label || '—'}</td>
-        <td class="px-3 py-2 text-center"><span class="px-1.5 py-0.5 rounded text-xs ${m.audience_type === 'B2C' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}">${m.audience_type || '—'}</span></td>
-        <td class="px-3 py-2 text-xs text-center text-gray-600">${m.product_interest || '—'}</td>
-        <td class="px-3 py-2 text-xs text-center text-gray-600">${m.intent_level || '—'}</td>
-        <td class="px-3 py-2 text-xs text-gray-500 max-w-xs truncate" title="${m.destination_url}">${m.destination_url}</td>
-        <td class="px-3 py-2 text-center"><span class="w-2 h-2 rounded-full inline-block ${m.active ? 'bg-green-400' : 'bg-gray-300'}"></span></td>
+      <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+        <td class="px-3 py-2 text-xs text-slate-600 font-medium">${m.label || '—'}</td>
+        <td class="px-3 py-2 text-center"><span class="px-1.5 py-0.5 rounded-full text-xs font-medium ${m.audience_type === 'B2C' ? 'bg-sky-100 text-sky-700' : 'bg-orange-100 text-orange-700'}">${m.audience_type || '—'}</span></td>
+        <td class="px-3 py-2 text-xs text-center text-slate-500">${m.product_interest || '—'}</td>
+        <td class="px-3 py-2 text-xs text-center text-slate-500">${m.intent_level || '—'}</td>
+        <td class="px-3 py-2 text-xs text-slate-500 max-w-xs truncate" title="${m.destination_url}">${m.destination_url}</td>
+        <td class="px-3 py-2 text-center"><span class="w-2 h-2 rounded-full inline-block ${m.active ? 'bg-emerald-400' : 'bg-slate-300'}"></span></td>
         <td class="px-3 py-2 text-right">
           <button onclick="openMatrixModal(${JSON.stringify(m).replace(/"/g,'&quot;')})"
-            class="text-xs text-blue-600 hover:underline">Edit</button>
+            class="text-xs text-sky-600 hover:text-sky-800 font-medium">Edit</button>
         </td>
       </tr>`).join('');
 
-    res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <title>SureSecured — Admin</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 min-h-screen">
+    const adminContent = `
+    <div class="px-6 py-8 max-w-7xl mx-auto">
+      ${flash}
 
-  ${navHtml('admin')}
-
-  <div class="max-w-7xl mx-auto px-6 py-8">
-    ${flash}
-
-    <div class="mb-4">
-      <a href="/admin/agency" class="inline-block px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 transition">
-        View Agency Dashboard (All Clients) &rarr;
-      </a>
-    </div>
-
-    <!-- ── Salespeople ─────────────────────────────── -->
-    <div class="bg-white rounded-xl shadow-sm mb-6 overflow-hidden">
-      <div class="px-6 py-4 border-b flex justify-between items-center">
-        <h2 class="font-semibold text-gray-800">Salespeople</h2>
-        <button onclick="document.getElementById('add-sp-modal').classList.remove('hidden')"
-          class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">
-          + Add Salesperson
-        </button>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
-            <tr>
-              <th class="px-4 py-3 text-left">Name / Email</th>
-              <th class="px-4 py-3 text-center">Status</th>
-              <th class="px-4 py-3 text-center">Commission</th>
-              <th class="px-4 py-3 text-center">Tracking Number</th>
-              <th class="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${spRows || '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No salespeople yet. Add one above.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── Goals & Portal Access ──────────────────── -->
-    <div class="bg-white rounded-xl shadow-sm mb-6 overflow-hidden">
-      <div class="px-6 py-4 border-b flex justify-between items-center">
+      <div class="flex items-center justify-between mb-6">
         <div>
-          <h2 class="font-semibold text-gray-800">Goals &amp; Performance — ${monthLabel}</h2>
-          <p class="text-xs text-gray-400 mt-0.5">Set monthly revenue and order targets. Enable portal access per salesperson.</p>
+          <h1 class="text-2xl font-bold text-slate-900">Admin</h1>
+          <p class="text-sm text-slate-500 mt-0.5">Manage salespeople, goals, and system configuration</p>
         </div>
+        <a href="/admin/agency" class="inline-flex items-center gap-1.5 px-4 py-2 bg-violet-600 text-white text-sm rounded-lg hover:bg-violet-700 transition-colors">
+          Agency Dashboard &rarr;
+        </a>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
-            <tr>
-              <th class="px-4 py-3 text-left">Salesperson</th>
-              <th class="px-4 py-3 text-left">Revenue vs Goal</th>
-              <th class="px-4 py-3 text-center">Orders vs Goal</th>
-              <th class="px-4 py-3 text-right">Commission</th>
-              <th class="px-4 py-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${goalRows || '<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No active salespeople yet.</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
 
-    <!-- ── Landing Page Matrix ─────────────────────── -->
-    <div class="bg-white rounded-xl shadow-sm mb-6 overflow-hidden">
-      <div class="px-6 py-4 border-b flex justify-between items-center">
-        <div>
-          <h2 class="font-semibold text-gray-800">Landing Page Matrix</h2>
-          <p class="text-xs text-gray-400 mt-0.5">Controls which page each email CTA links to based on lead segment</p>
-        </div>
-      </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
-            <tr>
-              <th class="px-3 py-2 text-left">Label</th>
-              <th class="px-3 py-2 text-center">Audience</th>
-              <th class="px-3 py-2 text-center">Product</th>
-              <th class="px-3 py-2 text-center">Intent</th>
-              <th class="px-3 py-2 text-left">Destination URL</th>
-              <th class="px-3 py-2 text-center">Active</th>
-              <th class="px-3 py-2 text-right">Edit</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${matrixRows || '<tr><td colspan="7" class="px-4 py-4 text-center text-gray-400">No matrix entries yet</td></tr>'}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- ── Suppression List ────────────────────────── -->
-    <div class="bg-white rounded-xl shadow-sm mb-6 p-6">
-      <h2 class="font-semibold text-gray-800 mb-1">Suppression List</h2>
-      <p class="text-xs text-gray-400 mb-4">Upload your Shopify customer list so they never receive the dormant lead reconnect sequence.</p>
-      <div class="flex items-center gap-6">
-        <div class="text-3xl font-bold text-gray-700">${parseInt(suppressionCount.rows[0].count).toLocaleString()}</div>
-        <div class="text-sm text-gray-500">emails suppressed</div>
-        <a href="/admin/suppression" class="ml-auto text-sm text-blue-600 hover:underline">View &amp; manage &#x2192;</a>
-      </div>
-      <form method="POST" action="/admin/suppression" enctype="multipart/form-data" class="mt-4 flex items-end gap-4 flex-wrap">
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Upload CSV (one email per row, or column named "email")</label>
-          <input type="file" name="csv" accept=".csv,.txt" required
-            class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Reason</label>
-          <select name="reason" class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white">
-            <option value="existing_customer">Existing Customer</option>
-            <option value="unsubscribed">Unsubscribed</option>
-            <option value="manual">Manual</option>
-          </select>
-        </div>
-        <button type="submit" class="px-4 py-2 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-900 transition">
-          Upload & Suppress
-        </button>
-      </form>
-    </div>
-
-    <!-- ── Danger Zone ─────────────────────────────── -->
-    <div class="bg-white rounded-xl shadow-sm p-6 border border-red-100">
-      <h2 class="font-semibold text-red-700 mb-3">Admin Password</h2>
-      <form method="POST" action="/admin/change-password" class="flex items-end gap-4 flex-wrap">
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Current Password</label>
-          <input type="password" name="current_password" required
-            class="text-sm border border-gray-300 rounded-lg px-3 py-2 w-48">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">New Password</label>
-          <input type="password" name="new_password" required minlength="8"
-            class="text-sm border border-gray-300 rounded-lg px-3 py-2 w-48">
-        </div>
-        <button type="submit" class="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition">
-          Change Password
-        </button>
-      </form>
-    </div>
-
-  </div>
-
-  <!-- ── Add Salesperson Modal ────────────────────── -->
-  <div id="add-sp-modal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-gray-800">Add Salesperson</h3>
-        <button onclick="document.getElementById('add-sp-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
-      </div>
-      <form method="POST" action="/admin/salespeople" class="space-y-4">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">First Name</label>
-            <input type="text" name="first_name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Last Name</label>
-            <input type="text" name="last_name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Email Address</label>
-          <input type="email" name="email" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Direct Phone</label>
-            <input type="text" name="phone" placeholder="(818) 555-0101"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Title</label>
-            <input type="text" name="title" placeholder="Sales Representative"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Voice Extension</label>
-            <input type="text" name="voice_extension" placeholder="101"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Commission Rate (%)</label>
-            <input type="number" name="commission_rate" value="100" min="0" max="100" step="0.5" required
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-        </div>
-        <div class="flex gap-3 pt-2">
-          <button type="submit" class="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-blue-700 transition">
-            Add Salesperson
-          </button>
-          <button type="button" onclick="document.getElementById('add-sp-modal').classList.add('hidden')"
-            class="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2 text-sm hover:bg-gray-50 transition">
-            Cancel
+      <!-- Salespeople -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 mb-6 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h2 class="font-semibold text-slate-800">Salespeople</h2>
+          <button onclick="document.getElementById('add-sp-modal').classList.remove('hidden')"
+            class="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-600 text-white text-sm rounded-lg hover:bg-sky-700 transition-colors">
+            ${ICONS.plus} Add Salesperson
           </button>
         </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- ── Edit Salesperson Modal ───────────────────── -->
-  <div id="edit-sp-modal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-gray-800">Edit Salesperson</h3>
-        <button onclick="document.getElementById('edit-sp-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm data-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+              <tr>
+                <th class="px-4 py-3 text-left">Name / Email</th>
+                <th class="px-4 py-3 text-center">Status</th>
+                <th class="px-4 py-3 text-center">Commission</th>
+                <th class="px-4 py-3 text-center">Tracking Number</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${spRows || '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No salespeople yet. Add one above.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <form method="POST" id="edit-sp-form" action="" class="space-y-4">
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">First Name</label>
-            <input type="text" name="first_name" id="edit-first" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Last Name</label>
-            <input type="text" name="last_name" id="edit-last" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Email Address</label>
-          <input type="email" name="email" id="edit-email" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Direct Phone</label>
-            <input type="text" name="phone" id="edit-phone" placeholder="(818) 555-0101"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Title</label>
-            <input type="text" name="title" id="edit-title" placeholder="Sales Representative"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Voice Extension</label>
-            <input type="text" name="voice_extension" id="edit-extension" placeholder="101"
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Commission Rate (%)</label>
-            <input type="number" name="commission_rate" id="edit-commission" min="0" max="100" step="0.5" required
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-          </div>
-        </div>
-        <div class="flex gap-3 pt-2">
-          <button type="submit" class="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-blue-700 transition">
-            Save Changes
-          </button>
-          <button type="button" onclick="document.getElementById('edit-sp-modal').classList.add('hidden')"
-            class="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2 text-sm hover:bg-gray-50 transition">
-            Cancel
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
 
-  <!-- ── Edit Matrix Modal ─────────────────────────── -->
-  <div id="matrix-modal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-gray-800">Edit Landing Page Entry</h3>
-        <button onclick="document.getElementById('matrix-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+      <!-- Goals & Performance -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 mb-6 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100">
+          <h2 class="font-semibold text-slate-800">Goals &amp; Performance — ${monthLabel}</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Set monthly revenue and order targets. Enable portal access per salesperson.</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm data-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+              <tr>
+                <th class="px-4 py-3 text-left">Salesperson</th>
+                <th class="px-4 py-3 text-left">Revenue vs Goal</th>
+                <th class="px-4 py-3 text-center">Orders vs Goal</th>
+                <th class="px-4 py-3 text-right">Commission</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${goalRows || '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No active salespeople yet.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <form method="POST" id="matrix-form" action="" class="space-y-4">
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Label</label>
-          <input type="text" name="label" id="m-label" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" readonly>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Destination URL <span class="text-gray-400 font-normal">(e.g. /pages/request-a-quote)</span></label>
-          <input type="text" name="destination_url" id="m-url" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-        </div>
-        <div class="flex items-center gap-2">
-          <input type="checkbox" name="active" id="m-active" value="true" class="rounded">
-          <label for="m-active" class="text-sm text-gray-700">Active</label>
-        </div>
-        <div class="flex gap-3 pt-2">
-          <button type="submit" class="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-blue-700 transition">
-            Save URL
-          </button>
-          <button type="button" onclick="document.getElementById('matrix-modal').classList.add('hidden')"
-            class="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2 text-sm hover:bg-gray-50 transition">
-            Cancel
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
 
-  <!-- ── Set Goal Modal ───────────────────────────── -->
-  <div id="goal-modal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-md mx-4">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-gray-800">Set Monthly Goal — <span id="goal-sp-name"></span></h3>
-        <button onclick="document.getElementById('goal-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
-      </div>
-      <form method="POST" id="goal-form" action="" class="space-y-4">
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Month <span class="text-gray-400 font-normal">(first day of month)</span></label>
-          <input type="month" name="period_month" id="goal-month" required
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+      <!-- Landing Page Matrix -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 mb-6 overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100">
+          <h2 class="font-semibold text-slate-800">Landing Page Matrix</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Controls which page each email CTA links to based on lead segment</p>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm data-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+              <tr>
+                <th class="px-3 py-2 text-left">Label</th>
+                <th class="px-3 py-2 text-center">Audience</th>
+                <th class="px-3 py-2 text-center">Product</th>
+                <th class="px-3 py-2 text-center">Intent</th>
+                <th class="px-3 py-2 text-left">Destination URL</th>
+                <th class="px-3 py-2 text-center">Active</th>
+                <th class="px-3 py-2 text-right">Edit</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${matrixRows || '<tr><td colspan="7" class="px-4 py-6 text-center text-slate-400">No matrix entries yet</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Suppression List -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 mb-6 p-6">
+        <h2 class="font-semibold text-slate-800 mb-1">Suppression List</h2>
+        <p class="text-xs text-slate-400 mb-4">Upload your Shopify customer list so they never receive the dormant lead reconnect sequence.</p>
+        <div class="flex items-center gap-6 mb-4">
+          <div class="text-3xl font-bold text-slate-700">${parseInt(suppressionCount.rows[0].count).toLocaleString()}</div>
+          <div class="text-sm text-slate-500">emails suppressed</div>
+          <a href="/admin/suppression" class="ml-auto text-sm text-sky-600 hover:text-sky-700 font-medium transition-colors">View &amp; manage &rarr;</a>
+        </div>
+        <form method="POST" action="/admin/suppression" enctype="multipart/form-data" class="flex items-end gap-4 flex-wrap">
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Revenue Target ($)</label>
-            <input type="number" name="target_revenue" id="goal-revenue" min="0" step="100" required
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <label class="block text-xs font-medium text-slate-600 mb-1">Upload CSV (one email per row, or column named "email")</label>
+            <input type="file" name="csv" accept=".csv,.txt" required
+              class="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600">
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">Orders Target</label>
-            <input type="number" name="target_orders" id="goal-orders" min="0" step="1" required
-              class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <label class="block text-xs font-medium text-slate-600 mb-1">Reason</label>
+            <select name="reason" class="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-700">
+              <option value="existing_customer">Existing Customer</option>
+              <option value="unsubscribed">Unsubscribed</option>
+              <option value="manual">Manual</option>
+            </select>
           </div>
-        </div>
-        <div class="flex gap-3 pt-2">
-          <button type="submit" class="flex-1 bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-blue-700 transition">Save Goal</button>
-          <button type="button" onclick="document.getElementById('goal-modal').classList.add('hidden')"
-            class="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2 text-sm hover:bg-gray-50 transition">Cancel</button>
-        </div>
-      </form>
-    </div>
-  </div>
-
-  <!-- ── Set Portal Password Modal ─────────────────── -->
-  <div id="portal-modal" class="hidden fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
-    <div class="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-gray-800">Portal Access — <span id="portal-sp-name"></span></h3>
-        <button onclick="document.getElementById('portal-modal').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+          <button type="submit" class="px-4 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-900 transition-colors">
+            Upload &amp; Suppress
+          </button>
+        </form>
       </div>
-      <p class="text-xs text-gray-500 mb-4">Set a password so this salesperson can log in at <strong>/portal/login</strong> with their email.</p>
-      <form method="POST" id="portal-form" action="" class="space-y-4">
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">New Password</label>
-          <input type="password" name="password" required minlength="6"
-            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-        </div>
-        <div class="flex gap-3 pt-2">
-          <button type="submit" class="flex-1 bg-purple-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-purple-700 transition">Set Password</button>
-          <button type="button" onclick="document.getElementById('portal-modal').classList.add('hidden')"
-            class="flex-1 border border-gray-300 text-gray-600 rounded-lg py-2 text-sm hover:bg-gray-50 transition">Cancel</button>
-        </div>
-      </form>
+
+      <!-- Admin Password -->
+      <div class="bg-white rounded-xl shadow-sm p-6 border border-red-100">
+        <h2 class="font-semibold text-red-700 mb-3">Admin Password</h2>
+        <form method="POST" action="/admin/change-password" class="flex items-end gap-4 flex-wrap">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Current Password</label>
+            <input type="password" name="current_password" required
+              class="text-sm border border-slate-200 rounded-lg px-3 py-2 w-48 focus:outline-none focus:ring-2 focus:ring-red-400">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">New Password</label>
+            <input type="password" name="new_password" required minlength="8"
+              class="text-sm border border-slate-200 rounded-lg px-3 py-2 w-48 focus:outline-none focus:ring-2 focus:ring-red-400">
+          </div>
+          <button type="submit" class="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors">
+            Change Password
+          </button>
+        </form>
+      </div>
     </div>
-  </div>
 
-<script>
-  function openEditModal(sp) {
-    const names = sp.name.split(' ');
-    document.getElementById('edit-first').value = names[0] || '';
-    document.getElementById('edit-last').value  = names.slice(1).join(' ') || '';
-    document.getElementById('edit-email').value = sp.email || '';
-    document.getElementById('edit-commission').value = sp.commission_rate || 100;
-    document.getElementById('edit-phone').value = sp.phone || '';
-    document.getElementById('edit-title').value = sp.title || '';
-    document.getElementById('edit-extension').value = sp.voice_extension || '';
-    document.getElementById('edit-sp-form').action = '/admin/salespeople/' + sp.id;
-    document.getElementById('edit-sp-modal').classList.remove('hidden');
-  }
+    <!-- Add Salesperson Modal -->
+    <div id="add-sp-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-bold text-slate-900">Add Salesperson</h3>
+          <button onclick="document.getElementById('add-sp-modal').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">${ICONS.x}</button>
+        </div>
+        <form method="POST" action="/admin/salespeople" class="space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">First Name</label>
+              <input type="text" name="first_name" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Last Name</label>
+              <input type="text" name="last_name" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Email Address</label>
+            <input type="email" name="email" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Direct Phone</label>
+              <input type="text" name="phone" placeholder="(818) 555-0101" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Title</label>
+              <input type="text" name="title" placeholder="Sales Representative" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Voice Extension</label>
+              <input type="text" name="voice_extension" placeholder="101" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Commission Rate (%)</label>
+              <input type="number" name="commission_rate" value="100" min="0" max="100" step="0.5" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 bg-sky-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-sky-700 transition-colors">Add Salesperson</button>
+            <button type="button" onclick="document.getElementById('add-sp-modal').classList.add('hidden')" class="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-  function openMatrixModal(m) {
-    document.getElementById('m-label').value = m.label || '';
-    document.getElementById('m-url').value   = m.destination_url || '';
-    document.getElementById('m-active').checked = m.active;
-    document.getElementById('matrix-form').action = '/admin/matrix/' + m.id;
-    document.getElementById('matrix-modal').classList.remove('hidden');
-  }
+    <!-- Edit Salesperson Modal -->
+    <div id="edit-sp-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-bold text-slate-900">Edit Salesperson</h3>
+          <button onclick="document.getElementById('edit-sp-modal').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">${ICONS.x}</button>
+        </div>
+        <form method="POST" id="edit-sp-form" action="" class="space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">First Name</label>
+              <input type="text" name="first_name" id="edit-first" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Last Name</label>
+              <input type="text" name="last_name" id="edit-last" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Email Address</label>
+            <input type="email" name="email" id="edit-email" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Direct Phone</label>
+              <input type="text" name="phone" id="edit-phone" placeholder="(818) 555-0101" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Title</label>
+              <input type="text" name="title" id="edit-title" placeholder="Sales Representative" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Voice Extension</label>
+              <input type="text" name="voice_extension" id="edit-extension" placeholder="101" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Commission Rate (%)</label>
+              <input type="number" name="commission_rate" id="edit-commission" min="0" max="100" step="0.5" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 bg-sky-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-sky-700 transition-colors">Save Changes</button>
+            <button type="button" onclick="document.getElementById('edit-sp-modal').classList.add('hidden')" class="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-  function openGoalModal(id, name, revGoal, ordGoal) {
-    document.getElementById('goal-sp-name').textContent = name;
-    document.getElementById('goal-revenue').value = revGoal || '';
-    document.getElementById('goal-orders').value  = ordGoal || '';
-    // Default to current month
-    var now = new Date();
-    var m = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
-    document.getElementById('goal-month').value = m;
-    document.getElementById('goal-form').action = '/admin/salespeople/' + id + '/goal';
-    document.getElementById('goal-modal').classList.remove('hidden');
-  }
+    <!-- Edit Matrix Modal -->
+    <div id="matrix-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-bold text-slate-900">Edit Landing Page Entry</h3>
+          <button onclick="document.getElementById('matrix-modal').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">${ICONS.x}</button>
+        </div>
+        <form method="POST" id="matrix-form" action="" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Label</label>
+            <input type="text" name="label" id="m-label" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50" readonly>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Destination URL <span class="text-slate-400 font-normal">(e.g. /pages/request-a-quote)</span></label>
+            <input type="text" name="destination_url" id="m-url" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" name="active" id="m-active" value="true" class="rounded">
+            <label for="m-active" class="text-sm text-slate-700">Active</label>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 bg-sky-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-sky-700 transition-colors">Save URL</button>
+            <button type="button" onclick="document.getElementById('matrix-modal').classList.add('hidden')" class="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-  function openPortalModal(id, name) {
-    document.getElementById('portal-sp-name').textContent = name;
-    document.getElementById('portal-form').action = '/admin/salespeople/' + id + '/portal-password';
-    document.getElementById('portal-modal').classList.remove('hidden');
-  }
+    <!-- Set Goal Modal -->
+    <div id="goal-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-bold text-slate-900">Set Monthly Goal — <span id="goal-sp-name" class="text-sky-600"></span></h3>
+          <button onclick="document.getElementById('goal-modal').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">${ICONS.x}</button>
+        </div>
+        <form method="POST" id="goal-form" action="" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Month <span class="text-slate-400 font-normal">(first day of month)</span></label>
+            <input type="month" name="period_month" id="goal-month" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Revenue Target ($)</label>
+              <input type="number" name="target_revenue" id="goal-revenue" min="0" step="100" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Orders Target</label>
+              <input type="number" name="target_orders" id="goal-orders" min="0" step="1" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            </div>
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 bg-sky-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-sky-700 transition-colors">Save Goal</button>
+            <button type="button" onclick="document.getElementById('goal-modal').classList.add('hidden')" class="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
-  // Close modals on backdrop click
-  ['add-sp-modal','edit-sp-modal','matrix-modal','goal-modal','portal-modal'].forEach(function(id) {
-    document.getElementById(id).addEventListener('click', function(e) {
-      if (e.target === this) this.classList.add('hidden');
+    <!-- Set Portal Password Modal -->
+    <div id="portal-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm mx-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-bold text-slate-900">Portal Access — <span id="portal-sp-name" class="text-violet-600"></span></h3>
+          <button onclick="document.getElementById('portal-modal').classList.add('hidden')" class="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg">${ICONS.x}</button>
+        </div>
+        <p class="text-xs text-slate-500 mb-4">Set a password so this salesperson can log in at <strong>/portal/login</strong> with their email.</p>
+        <form method="POST" id="portal-form" action="" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">New Password</label>
+            <input type="password" name="password" required minlength="6" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500">
+          </div>
+          <div class="flex gap-3 pt-2">
+            <button type="submit" class="flex-1 bg-violet-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-violet-700 transition-colors">Set Password</button>
+            <button type="button" onclick="document.getElementById('portal-modal').classList.add('hidden')" class="flex-1 border border-slate-200 text-slate-600 rounded-lg py-2 text-sm hover:bg-slate-50 transition-colors">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+    function openEditModal(sp) {
+      const names = sp.name.split(' ');
+      document.getElementById('edit-first').value = names[0] || '';
+      document.getElementById('edit-last').value  = names.slice(1).join(' ') || '';
+      document.getElementById('edit-email').value = sp.email || '';
+      document.getElementById('edit-commission').value = sp.commission_rate || 100;
+      document.getElementById('edit-phone').value = sp.phone || '';
+      document.getElementById('edit-title').value = sp.title || '';
+      document.getElementById('edit-extension').value = sp.voice_extension || '';
+      document.getElementById('edit-sp-form').action = '/admin/salespeople/' + sp.id;
+      document.getElementById('edit-sp-modal').classList.remove('hidden');
+    }
+    function openMatrixModal(m) {
+      document.getElementById('m-label').value = m.label || '';
+      document.getElementById('m-url').value   = m.destination_url || '';
+      document.getElementById('m-active').checked = m.active;
+      document.getElementById('matrix-form').action = '/admin/matrix/' + m.id;
+      document.getElementById('matrix-modal').classList.remove('hidden');
+    }
+    function openGoalModal(id, name, revGoal, ordGoal) {
+      document.getElementById('goal-sp-name').textContent = name;
+      document.getElementById('goal-revenue').value = revGoal || '';
+      document.getElementById('goal-orders').value  = ordGoal || '';
+      var now = new Date();
+      var m = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+      document.getElementById('goal-month').value = m;
+      document.getElementById('goal-form').action = '/admin/salespeople/' + id + '/goal';
+      document.getElementById('goal-modal').classList.remove('hidden');
+    }
+    function openPortalModal(id, name) {
+      document.getElementById('portal-sp-name').textContent = name;
+      document.getElementById('portal-form').action = '/admin/salespeople/' + id + '/portal-password';
+      document.getElementById('portal-modal').classList.remove('hidden');
+    }
+    ['add-sp-modal','edit-sp-modal','matrix-modal','goal-modal','portal-modal'].forEach(function(id) {
+      document.getElementById(id).addEventListener('click', function(e) {
+        if (e.target === this) this.classList.add('hidden');
+      });
     });
-  });
-</script>
+    </script>`;
 
-</body>
-</html>`);
+    res.send(shell('Admin', 'admin', adminContent, { user: req.user }));
   } catch (err) {
     console.error('Admin page error:', err);
     res.status(500).send('Server error loading admin page');
@@ -681,80 +632,73 @@ router.get('/suppression', requireAuth, async (req, res) => {
   const msg        = req.query.msg || '';
   const ok         = req.query.ok;
 
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Suppression List – Sales Tracker</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen">
-  ${navHtml('admin')}
-  <div class="max-w-4xl mx-auto px-4 py-8">
-    <div class="flex items-center justify-between mb-6">
-      <div>
-        <a href="/admin" class="text-sm text-gray-400 hover:text-gray-600">&#x2190; Admin</a>
-        <h1 class="text-2xl font-bold text-gray-800 mt-1">Suppression List</h1>
-      </div>
-      <span class="text-sm text-gray-500">${total.toLocaleString()} suppressed emails</span>
-    </div>
-
-    ${msg ? `<div class="mb-4 px-4 py-3 rounded-lg text-sm ${ok === '1' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}">${escapeHtml(msg)}</div>` : ''}
-
-    <!-- Search -->
-    <form method="GET" action="/admin/suppression" class="mb-4 flex gap-2">
-      <input type="text" name="search" value="${escapeHtml(search)}" placeholder="Search email…"
-        class="border rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:ring-2 focus:ring-blue-500">
-      <button class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700">Search</button>
-      ${search ? `<a href="/admin/suppression" class="text-sm text-gray-400 hover:text-gray-600 py-2">Clear</a>` : ''}
-    </form>
-
-    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-50 border-b text-xs uppercase tracking-wide text-gray-500">
-          <tr>
-            <th class="px-4 py-3 text-left">Email</th>
-            <th class="px-4 py-3 text-left">Reason</th>
-            <th class="px-4 py-3 text-left">Added</th>
-            <th class="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-100">
-          ${rows.rows.length === 0
-            ? `<tr><td colspan="4" class="px-4 py-10 text-center text-gray-400">No suppressed emails${search ? ' matching your search' : ''}.</td></tr>`
-            : rows.rows.map(r => `
-          <tr class="hover:bg-gray-50">
-            <td class="px-4 py-3 text-gray-800">${escapeHtml(r.email)}</td>
-            <td class="px-4 py-3">
-              <span class="px-2 py-0.5 rounded text-xs ${r.reason === 'bounced' ? 'bg-red-100 text-red-700' : r.reason === 'unsubscribed' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600'}">
-                ${escapeHtml(r.reason || 'manual')}
-              </span>
-            </td>
-            <td class="px-4 py-3 text-gray-400">${new Date(r.added_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
-            <td class="px-4 py-3 text-right">
-              <button onclick="removeEmail('${escapeHtml(r.email)}')"
-                class="text-xs text-red-500 hover:text-red-700 border border-red-200 rounded px-2.5 py-1 hover:bg-red-50 transition">
-                Remove
-              </button>
-            </td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-
-      ${totalPages > 1 ? `
-      <div class="px-4 py-3 border-t flex justify-between items-center text-sm text-gray-500">
-        <span>Page ${page} of ${totalPages}</span>
-        <div class="flex gap-2">
-          ${page > 1 ? `<a href="?${new URLSearchParams({ ...(search ? { search } : {}), page: page - 1 })}class="px-3 py-1 border rounded hover:bg-gray-50">&#x2190; Prev</a>` : ''}
-          ${page < totalPages ? `<a href="?${new URLSearchParams({ ...(search ? { search } : {}), page: page + 1 })}" class="px-3 py-1 border rounded hover:bg-gray-50">Next &#x2192;</a>` : ''}
+  const suppressContent = `
+    <div class="px-6 py-8 max-w-4xl mx-auto">
+      <div class="flex items-center justify-between mb-6">
+        <div>
+          <a href="/admin" class="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-slate-600 transition-colors mb-1">
+            ${ICONS.arrowleft} Admin
+          </a>
+          <h1 class="text-2xl font-bold text-slate-900">Suppression List</h1>
         </div>
-      </div>` : ''}
-    </div>
-  </div>
+        <span class="text-sm text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">${total.toLocaleString()} suppressed</span>
+      </div>
 
-  <script>
+      ${msg ? `<div class="mb-4 px-4 py-3 rounded-lg text-sm ${ok === '1' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}">${escapeHtml(msg)}</div>` : ''}
+
+      <form method="GET" action="/admin/suppression" class="mb-4 flex gap-2">
+        <input type="text" name="search" value="${escapeHtml(search)}" placeholder="Search email…"
+          class="border border-slate-200 rounded-lg px-3 py-2 text-sm w-72 focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <button class="bg-sky-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-sky-700 transition-colors">Search</button>
+        ${search ? `<a href="/admin/suppression" class="text-sm text-slate-400 hover:text-slate-600 py-2 px-2 transition-colors">Clear</a>` : ''}
+      </form>
+
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+        <table class="w-full text-sm data-table">
+          <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+            <tr>
+              <th class="px-4 py-3 text-left">Email</th>
+              <th class="px-4 py-3 text-left">Reason</th>
+              <th class="px-4 py-3 text-left">Added</th>
+              <th class="px-4 py-3"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.rows.length === 0
+              ? `<tr><td colspan="4" class="px-4 py-10 text-center text-slate-400">No suppressed emails${search ? ' matching your search' : ''}.</td></tr>`
+              : rows.rows.map(r => `
+            <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+              <td class="px-4 py-3 text-slate-800 font-mono text-xs">${escapeHtml(r.email)}</td>
+              <td class="px-4 py-3">
+                <span class="px-2 py-0.5 rounded-full text-xs font-medium ${r.reason === 'bounced' ? 'bg-red-100 text-red-700' : r.reason === 'unsubscribed' ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}">
+                  ${escapeHtml(r.reason || 'manual')}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-slate-400 text-xs">${new Date(r.added_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
+              <td class="px-4 py-3 text-right">
+                <button onclick="removeEmail('${escapeHtml(r.email)}')"
+                  class="text-xs text-red-500 hover:text-red-700 border border-red-200 rounded-lg px-2.5 py-1 hover:bg-red-50 transition-colors">
+                  Remove
+                </button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+
+        ${totalPages > 1 ? `
+        <div class="px-4 py-3 border-t border-slate-100 flex justify-between items-center text-sm text-slate-500">
+          <span>Page ${page} of ${totalPages}</span>
+          <div class="flex gap-2">
+            ${page > 1 ? `<a href="?${new URLSearchParams({ ...(search ? { search } : {}), page: page - 1 })}" class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">&larr; Prev</a>` : ''}
+            ${page < totalPages ? `<a href="?${new URLSearchParams({ ...(search ? { search } : {}), page: page + 1 })}" class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Next &rarr;</a>` : ''}
+          </div>
+        </div>` : ''}
+      </div>
+    </div>
+
+    <script>
     async function removeEmail(email) {
-      if (!confirm('Remove ' + email + ' from suppression list?\\nThis will allow emails to this address again.')) return;
+      if (!await showConfirm('Remove <strong>' + email + '</strong> from suppression list?<br><span class="text-slate-500 text-xs">This will allow emails to this address again.</span>', 'Remove')) return;
       const res = await fetch('/admin/suppression/remove', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -762,14 +706,15 @@ router.get('/suppression', requireAuth, async (req, res) => {
       });
       const data = await res.json();
       if (res.ok) {
-        window.location.href = '/admin/suppression?ok=1&msg=' + encodeURIComponent(email + ' removed from suppression list.');
+        showToast(email + ' removed from suppression list.', 'success');
+        setTimeout(() => window.location.href = '/admin/suppression', 1200);
       } else {
-        alert('Failed: ' + (data.error || 'unknown error'));
+        showToast('Failed: ' + (data.error || 'unknown error'), 'error');
       }
     }
-  </script>
-</body>
-</html>`);
+    </script>`;
+
+  res.send(shell('Suppression List', 'admin', suppressContent, { user: req.user }));
 });
 
 router.post('/suppression/remove', requireAuth, async (req, res) => {
@@ -850,51 +795,45 @@ router.get('/clients', requireAuth, async (req, res) => {
       ORDER BY o.name, c.name
     `);
     const rowsHtml = rows.length === 0
-      ? `<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No clients yet. Create one above.</td></tr>`
+      ? `<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No clients yet. Create one above.</td></tr>`
       : rows.map(c => `
-        <tr class="border-t hover:bg-gray-50">
-          <td class="px-4 py-3 font-medium text-gray-900">${c.name}</td>
-          <td class="px-4 py-3 text-sm text-gray-600">${c.org_name}</td>
-          <td class="px-4 py-3 text-sm"><code class="bg-gray-100 px-1 rounded">${c.slug}</code></td>
+        <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3 font-medium text-slate-900">${c.name}</td>
+          <td class="px-4 py-3 text-sm text-slate-500">${c.org_name}</td>
+          <td class="px-4 py-3 text-sm"><code class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-xs">${c.slug}</code></td>
           <td class="px-4 py-3 text-center">
-            <span class="px-2 py-0.5 rounded text-xs ${c.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">${c.active ? 'Yes' : 'No'}</span>
+            <span class="px-2 py-0.5 rounded-full text-xs font-medium ${c.active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${c.active ? 'Active' : 'Inactive'}</span>
           </td>
           <td class="px-4 py-3 text-right">
-            <a href="/admin/clients/${c.id}/edit" class="text-xs text-blue-600 hover:underline">Edit</a>
+            <a href="/admin/clients/${c.id}/edit" class="text-xs text-sky-600 hover:text-sky-800 font-medium">Edit</a>
           </td>
         </tr>`).join('');
 
-    res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <title>SureSecured — Clients</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 min-h-screen">
-  ${navHtml('admin')}
-  <div class="max-w-5xl mx-auto px-6 py-8">
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-xl font-semibold text-gray-800">Clients</h2>
-      <a href="/admin/clients/new" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">+ New Client</a>
-    </div>
-    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
-          <tr>
-            <th class="px-4 py-3 text-left">Name</th>
-            <th class="px-4 py-3 text-left">Org</th>
-            <th class="px-4 py-3 text-left">Slug</th>
-            <th class="px-4 py-3 text-center">Active</th>
-            <th class="px-4 py-3 text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
-    </div>
-  </div>
-</body>
-</html>`);
+    const clientsContent = `
+      <div class="px-6 py-8 max-w-5xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+          <h1 class="text-2xl font-bold text-slate-900">Clients</h1>
+          <a href="/admin/clients/new" class="inline-flex items-center gap-1.5 px-4 py-2 bg-sky-600 text-white text-sm rounded-lg hover:bg-sky-700 transition-colors">
+            ${ICONS.plus} New Client
+          </a>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <table class="w-full text-sm data-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+              <tr>
+                <th class="px-4 py-3 text-left">Name</th>
+                <th class="px-4 py-3 text-left">Org</th>
+                <th class="px-4 py-3 text-left">Slug</th>
+                <th class="px-4 py-3 text-center">Status</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    res.send(shell('Clients', 'admin', clientsContent, { user: req.user }));
   } catch (err) {
     console.error('Clients list error:', err);
     res.status(500).send('Server error loading clients');
@@ -1085,51 +1024,45 @@ router.get('/agency', requireAuth, requireRole('operator', 'owner'), async (req,
     const fmt = n => '$' + parseFloat(n||0).toLocaleString('en-US', { minimumFractionDigits: 0 });
 
     const clientRows = rows.length === 0
-      ? `<tr><td colspan="6" class="px-4 py-6 text-center text-gray-400">No clients yet.</td></tr>`
+      ? `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">No clients yet.</td></tr>`
       : rows.map(c => `
-        <tr class="border-t hover:bg-gray-50">
-          <td class="px-4 py-3 font-medium text-gray-900">${c.client_name}</td>
-          <td class="px-4 py-3 text-center text-sm">${c.salesperson_count}</td>
-          <td class="px-4 py-3 text-center text-sm">${c.units_this_month}</td>
-          <td class="px-4 py-3 text-right text-sm font-semibold text-green-700">${fmt(c.revenue_this_month)}</td>
-          <td class="px-4 py-3 text-right text-sm font-semibold text-blue-700">${fmt(c.commission_owed)}</td>
+        <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3 font-medium text-slate-900">${c.client_name}</td>
+          <td class="px-4 py-3 text-center text-sm text-slate-600">${c.salesperson_count}</td>
+          <td class="px-4 py-3 text-center text-sm text-slate-600">${c.units_this_month}</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-emerald-700">${fmt(c.revenue_this_month)}</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-sky-700">${fmt(c.commission_owed)}</td>
           <td class="px-4 py-3 text-right">
-            <a href="/admin/agency/clients/${c.id}/dashboard" class="text-xs text-blue-600 hover:underline">View &rarr;</a>
+            <a href="/admin/agency/clients/${c.id}/dashboard" class="text-xs text-sky-600 hover:text-sky-800 font-medium">View &rarr;</a>
           </td>
         </tr>`).join('');
 
-    res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <title>SureSecured — Agency Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 min-h-screen">
-  ${navHtml('admin')}
-  <div class="max-w-6xl mx-auto px-6 py-8">
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-xl font-semibold text-gray-800">Agency Dashboard</h2>
-      <p class="text-sm text-gray-400">All clients — current month</p>
-    </div>
-    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
-          <tr>
-            <th class="px-4 py-3 text-left">Client</th>
-            <th class="px-4 py-3 text-center">Salespeople</th>
-            <th class="px-4 py-3 text-center">Units</th>
-            <th class="px-4 py-3 text-right">Revenue</th>
-            <th class="px-4 py-3 text-right">Commission Owed</th>
-            <th class="px-4 py-3 text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>${clientRows}</tbody>
-      </table>
-    </div>
-  </div>
-</body>
-</html>`);
+    const agencyContent = `
+      <div class="px-6 py-8 max-w-6xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+          <div>
+            <h1 class="text-2xl font-bold text-slate-900">Agency Dashboard</h1>
+            <p class="text-sm text-slate-400 mt-0.5">All clients — current month</p>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <table class="w-full text-sm data-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+              <tr>
+                <th class="px-4 py-3 text-left">Client</th>
+                <th class="px-4 py-3 text-center">Salespeople</th>
+                <th class="px-4 py-3 text-center">Units</th>
+                <th class="px-4 py-3 text-right">Revenue</th>
+                <th class="px-4 py-3 text-right">Commission Owed</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>${clientRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    res.send(shell('Agency Dashboard', 'admin', agencyContent, { user: req.user }));
   } catch (err) {
     console.error('Agency dashboard error:', err);
     res.status(500).send('Server error loading agency dashboard');
@@ -1170,57 +1103,50 @@ router.get('/agency/clients/:clientId/dashboard', requireAuth, requireRole('oper
     const fmt = n => '$' + parseFloat(n||0).toLocaleString('en-US', { minimumFractionDigits: 0 });
     const { calculateCommission } = require('../lib/commissions');
 
-    const spRows = rows.length === 0
-      ? `<tr><td colspan="5" class="px-4 py-6 text-center text-gray-400">No active salespeople for this client.</td></tr>`
+    const spRowsClient = rows.length === 0
+      ? `<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No active salespeople for this client.</td></tr>`
       : rows.map(sp => {
           const units = parseInt(sp.units_this_month || 0);
           const { rate } = calculateCommission(0, units, sp.commission_rules || {}, 100);
           return `
-        <tr class="border-t hover:bg-gray-50">
+        <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
           <td class="px-4 py-3">
-            <div class="font-medium text-gray-900">${sp.name}</div>
-            <div class="text-xs text-gray-400">${sp.email}</div>
+            <div class="font-medium text-slate-900">${sp.name}</div>
+            <div class="text-xs text-slate-400">${sp.email}</div>
           </td>
-          <td class="px-4 py-3 text-center text-sm">${units}</td>
-          <td class="px-4 py-3 text-center text-sm">${rate}%</td>
-          <td class="px-4 py-3 text-right text-sm font-semibold text-green-700">${fmt(sp.revenue_this_month)}</td>
-          <td class="px-4 py-3 text-right text-sm font-semibold text-blue-700">${fmt(sp.commission_owed)}</td>
+          <td class="px-4 py-3 text-center text-sm text-slate-600">${units}</td>
+          <td class="px-4 py-3 text-center text-sm text-slate-600">${rate}%</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-emerald-700">${fmt(sp.revenue_this_month)}</td>
+          <td class="px-4 py-3 text-right text-sm font-semibold text-sky-700">${fmt(sp.commission_owed)}</td>
         </tr>`;
         }).join('');
 
-    res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <title>SureSecured — ${client.name} Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 min-h-screen">
-  ${navHtml('admin')}
-  <div class="max-w-6xl mx-auto px-6 py-8">
-    <div class="flex justify-between items-center mb-4">
-      <div>
-        <a href="/admin/agency" class="text-xs text-blue-600 hover:underline">&larr; Back to Agency Dashboard</a>
-        <h2 class="text-xl font-semibold text-gray-800 mt-1">${client.name}</h2>
-      </div>
-    </div>
-    <div class="bg-white rounded-xl shadow-sm overflow-hidden">
-      <table class="w-full text-sm">
-        <thead class="bg-gray-50 text-xs text-gray-500 uppercase">
-          <tr>
-            <th class="px-4 py-3 text-left">Salesperson</th>
-            <th class="px-4 py-3 text-center">Units This Month</th>
-            <th class="px-4 py-3 text-center">Current Tier</th>
-            <th class="px-4 py-3 text-right">Revenue</th>
-            <th class="px-4 py-3 text-right">Commission Owed</th>
-          </tr>
-        </thead>
-        <tbody>${spRows}</tbody>
-      </table>
-    </div>
-  </div>
-</body>
-</html>`);
+    const clientDashContent = `
+      <div class="px-6 py-8 max-w-6xl mx-auto">
+        <div class="mb-6">
+          <a href="/admin/agency" class="inline-flex items-center gap-1 text-xs text-sky-600 hover:text-sky-800 font-medium transition-colors mb-2">
+            ${ICONS.arrowleft} Agency Dashboard
+          </a>
+          <h1 class="text-2xl font-bold text-slate-900">${esc(client.name)}</h1>
+          <p class="text-sm text-slate-400 mt-0.5">Salesperson performance — current month</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <table class="w-full text-sm data-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+              <tr>
+                <th class="px-4 py-3 text-left">Salesperson</th>
+                <th class="px-4 py-3 text-center">Units This Month</th>
+                <th class="px-4 py-3 text-center">Current Tier</th>
+                <th class="px-4 py-3 text-right">Revenue</th>
+                <th class="px-4 py-3 text-right">Commission Owed</th>
+              </tr>
+            </thead>
+            <tbody>${spRowsClient}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    res.send(shell(client.name, 'admin', clientDashContent, { user: req.user }));
   } catch (err) {
     console.error('Client drilldown error:', err);
     res.status(500).send('Server error loading client dashboard');
@@ -1245,66 +1171,63 @@ function clientFormHtml(client, orgOptions, errors, prefill = {}) {
     if (client && client[field] !== undefined) return JSON.stringify(client[field], null, 2);
     return '{}';
   };
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <title>SureSecured — ${title}</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 min-h-screen">
-  ${navHtml('admin')}
-  <div class="max-w-2xl mx-auto px-6 py-8">
-    <h2 class="text-xl font-semibold text-gray-800 mb-4">${title}</h2>
-    ${errHtml}
-    <div class="bg-white rounded-xl shadow-sm p-6">
-      <form method="POST" action="${action}" class="space-y-4">
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Organization</label>
-          <select name="organization_id" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">${orgOptions}</select>
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Client Name</label>
-          <input type="text" name="name" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" value="${val('name')}">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Slug (lowercase, hyphens only)</label>
-          <input type="text" name="slug" required pattern="[a-z0-9-]+" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" value="${val('slug')}">
-        </div>
-
-        <div class="border-t pt-4">
-          <h3 class="text-sm font-semibold text-gray-700 mb-1">Brand Config (JSON)</h3>
-          <p class="text-xs text-gray-400 mb-2">Keys: primary_color, accent_color, bg_color, name, phone, website, address, cta_url, cta_label</p>
-          <textarea name="brand_config" rows="8" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">${jsonVal('brand_config')}</textarea>
-        </div>
-
-        <div class="border-t pt-4">
-          <h3 class="text-sm font-semibold text-gray-700 mb-1">Commission Rules (JSON)</h3>
-          <textarea name="commission_rules" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">${jsonVal('commission_rules')}</textarea>
-        </div>
-
-        <div class="border-t pt-4">
-          <h3 class="text-sm font-semibold text-gray-700 mb-1">Integration Settings (JSON)</h3>
-          <textarea name="integration_settings" rows="4" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono">${jsonVal('integration_settings')}</textarea>
-        </div>
-
-        <div class="border-t pt-4 mt-4">
-          <h3 class="text-sm font-semibold text-gray-700 mb-3">Voice (Retell AI)</h3>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Voice Extension</label>
-              <input type="text" name="voice_extension" value="${escapeHtml(client && client.voice_extension || '')}"
-                     placeholder="e.g. 1"
-                     class="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
-              <p class="text-xs text-gray-400 mt-1">Extension number for IVR routing (optional)</p>
-            </div>
-            <div>
-              <label class="block text-xs font-medium text-gray-600 mb-1">Retell Agent ID</label>
-              <input type="text" value="${escapeHtml(client && client.retell_agent_id || 'Not provisioned')}"
-                     readonly
-                     class="w-full border border-gray-200 rounded px-3 py-2 text-sm bg-gray-50 text-gray-500 cursor-not-allowed">
-            </div>
+  const formContent = `
+    <div class="px-6 py-8 max-w-2xl mx-auto">
+      <div class="mb-6">
+        <a href="/admin/clients" class="inline-flex items-center gap-1 text-xs text-sky-600 hover:text-sky-800 font-medium transition-colors mb-2">
+          ← Clients
+        </a>
+        <h1 class="text-2xl font-bold text-slate-900">${title}</h1>
+      </div>
+      ${errHtml}
+      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
+        <form method="POST" action="${action}" class="space-y-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Organization</label>
+            <select name="organization_id" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">${orgOptions}</select>
           </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Client Name</label>
+            <input type="text" name="name" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" value="${val('name')}">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Slug <span class="font-normal text-slate-400">(lowercase, hyphens only)</span></label>
+            <input type="text" name="slug" required pattern="[a-z0-9-]+" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" value="${val('slug')}">
+          </div>
+
+          <div class="border-t border-slate-100 pt-4">
+            <h3 class="text-sm font-semibold text-slate-700 mb-1">Brand Config <span class="font-normal text-slate-400">(JSON)</span></h3>
+            <p class="text-xs text-slate-400 mb-2">Keys: primary_color, accent_color, bg_color, name, phone, website, address, cta_url, cta_label</p>
+            <textarea name="brand_config" rows="8" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">${jsonVal('brand_config')}</textarea>
+          </div>
+
+          <div class="border-t border-slate-100 pt-4">
+            <h3 class="text-sm font-semibold text-slate-700 mb-1">Commission Rules <span class="font-normal text-slate-400">(JSON)</span></h3>
+            <textarea name="commission_rules" rows="4" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">${jsonVal('commission_rules')}</textarea>
+          </div>
+
+          <div class="border-t border-slate-100 pt-4">
+            <h3 class="text-sm font-semibold text-slate-700 mb-1">Integration Settings <span class="font-normal text-slate-400">(JSON)</span></h3>
+            <textarea name="integration_settings" rows="4" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">${jsonVal('integration_settings')}</textarea>
+          </div>
+
+          <div class="border-t border-slate-100 pt-4 mt-4">
+            <h3 class="text-sm font-semibold text-slate-700 mb-3">Voice (Retell AI)</h3>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Voice Extension</label>
+                <input type="text" name="voice_extension" value="${escapeHtml(client && client.voice_extension || '')}"
+                       placeholder="e.g. 1"
+                       class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+                <p class="text-xs text-slate-400 mt-1">Extension number for IVR routing (optional)</p>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-600 mb-1">Retell Agent ID</label>
+                <input type="text" value="${escapeHtml(client && client.retell_agent_id || 'Not provisioned')}"
+                       readonly
+                       class="w-full border border-slate-100 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-400 cursor-not-allowed">
+              </div>
+            </div>
           ${client && client.id ? `
           <div class="mt-3">
             <button type="button"
@@ -1338,24 +1261,24 @@ function clientFormHtml(client, orgOptions, errors, prefill = {}) {
             }
           }
           </script>
-          ` : '<p class="text-xs text-gray-400 mt-2">Save the client first, then provision voice agent.</p>'}
-        </div>
+          ` : '<p class="text-xs text-slate-400 mt-2">Save the client first, then provision voice agent.</p>'}
+            </div>
 
-        ${client ? `
-        <div class="flex items-center gap-2 pt-2">
-          <input type="checkbox" name="active" id="active" class="rounded" ${client.active ? 'checked' : ''}>
-          <label for="active" class="text-sm text-gray-700">Active</label>
-        </div>` : ''}
+            ${client ? `
+            <div class="flex items-center gap-2 pt-2">
+              <input type="checkbox" name="active" id="active" class="rounded" ${client.active ? 'checked' : ''}>
+              <label for="active" class="text-sm text-slate-700">Active</label>
+            </div>` : ''}
 
-        <div class="flex gap-3 pt-4">
-          <button type="submit" class="px-5 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 transition font-semibold">Save Client</button>
-          <a href="/admin/clients" class="px-5 py-2 border border-gray-300 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition">Cancel</a>
+            <div class="flex gap-3 pt-4 border-t border-slate-100 mt-2">
+              <button type="submit" class="px-5 py-2 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 transition-colors font-semibold">Save Client</button>
+              <a href="/admin/clients" class="px-5 py-2 border border-slate-200 text-slate-600 text-sm rounded-lg hover:bg-slate-50 transition-colors">Cancel</a>
+            </div>
+          </form>
         </div>
-      </form>
-    </div>
-  </div>
-</body>
-</html>`;
+      </div>`;
+
+  return shell(title, 'admin', formContent, {});
 }
 
 module.exports = router;
