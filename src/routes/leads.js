@@ -809,16 +809,15 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
   const lead = leads[0];
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-  if (!sesEnabled()) return res.status(503).json({ error: 'SMTP not configured' });
-
   try {
     await sendDirectEmail({
-      fromName:    process.env.SES_FROM_NAME  || 'Sales',
-      fromAddress: process.env.SES_FROM_EMAIL || process.env.SES_SMTP_USER,
-      to:          lead.email,
-      subject:     subject?.trim() || `Re: Following up`,
-      textBody:    body.trim(),
-      htmlBody:    `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#222">${body.trim().replace(/\n/g,'<br>')}</div>`,
+      fromName:      process.env.SES_FROM_NAME  || 'Sales',
+      fromAddress:   process.env.SES_FROM_EMAIL || process.env.SES_SMTP_USER,
+      to:            lead.email,
+      subject:       subject?.trim() || `Re: Following up`,
+      textBody:      body.trim(),
+      htmlBody:      `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#222">${body.trim().replace(/\n/g,'<br>')}</div>`,
+      salespersonId: req.user?.id,
     });
 
     const user = req.user;

@@ -679,12 +679,22 @@ async function checkForRepliesByAddress(salespersonId, leadEmail, afterDate) {
  * Send a direct (non-sequence) email via IONOS SMTP.
  * Used by the lead CRM reply composer.
  */
-async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody }) {
+async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, salespersonId }) {
+  // Try Gmail OAuth first if a salesperson ID is provided
+  if (salespersonId) {
+    const authed = await getAuthedClient(salespersonId);
+    if (authed) {
+      const raw = await buildRawMessage({ fromName: fromName || authed.account.email, fromAddress: authed.account.email, to, subject, textBody, htmlBody });
+      const gmailApi = google.gmail({ version: 'v1', auth: authed.client });
+      await gmailApi.users.messages.send({ userId: 'me', requestBody: { raw } });
+      return { ok: true, via: 'gmail' };
+    }
+  }
   if (sesEnabled()) {
     await sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody });
-    return { ok: true };
+    return { ok: true, via: 'ses' };
   }
-  throw new Error('SMTP not configured');
+  throw new Error('No email provider configured. Connect Gmail in Settings → Email.');
 }
 
 module.exports = {
