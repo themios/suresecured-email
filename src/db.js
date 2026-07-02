@@ -253,6 +253,13 @@ async function initDb() {
     ALTER TABLE leads ADD COLUMN IF NOT EXISTS replied_at TIMESTAMPTZ;
   `);
 
+  // Inbound lead capture config on client email config
+  await pool.query(`
+    ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_capture_enabled BOOLEAN DEFAULT false;
+    ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_sequence_id INTEGER;
+    ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_last_check_at TIMESTAMPTZ;
+  `);
+
   // CRM notes / activity log
   await pool.query(`
     CREATE TABLE IF NOT EXISTS lead_notes (

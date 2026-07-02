@@ -187,12 +187,14 @@ router.post('/business', requireAuth, async (req, res) => {
 // ─── Email Settings ───────────────────────────────────────────────────────────
 router.get('/email', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const [{ rows }, { rows: gmailRows }] = await Promise.all([
+  const [{ rows }, { rows: gmailRows }, { rows: seqRows }] = await Promise.all([
     pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]),
     pool.query('SELECT email FROM email_accounts WHERE salesperson_id = $1 AND enabled = true', [req.user?.id]),
+    pool.query('SELECT id, name FROM sequences WHERE active = true ORDER BY name'),
   ]);
   const cfg = rows[0] || {};
   const gmailAccount = gmailRows[0] || null;
+  const sequences = seqRows;
 
   const body = `
     ${gmailAccount ? `
@@ -328,6 +330,29 @@ router.get('/email', requireAuth, async (req, res) => {
       <span id="imap-test-result" class="text-sm ml-3 hidden"></span>
     </div>
 
+    <!-- Inbound Lead Capture -->
+    <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">Inbound Lead Capture</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Automatically create a lead when someone emails you who isn't already in your database.</p>
+        </div>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" name="inbound_capture_enabled" value="1" ${cfg.inbound_capture_enabled ? 'checked' : ''}
+            class="w-4 h-4 rounded accent-sky-600">
+          <span class="text-sm text-slate-600">Enabled</span>
+        </label>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Auto-enroll new leads into sequence (optional)</label>
+        <select name="inbound_sequence_id" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="">— Don't auto-enroll —</option>
+          ${sequences.map(s => `<option value="${s.id}" ${cfg.inbound_sequence_id == s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+        </select>
+        <p class="text-xs text-slate-400 mt-1">Requires Gmail to be connected above. Runs every 15 minutes.</p>
+      </div>
+    </div>
+
     <div class="flex justify-end">
       <button type="submit" class="bg-sky-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-sky-700">Save Email Settings</button>
     </div>
@@ -396,7 +421,7 @@ router.get('/email', requireAuth, async (req, res) => {
 
 router.post('/email', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass } = req.body;
+  const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass, inbound_capture_enabled, inbound_sequence_id } = req.body;
   try {
     const { rows } = await pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]);
     const ex = rows[0] || {};
@@ -405,14 +430,17 @@ router.post('/email', requireAuth, async (req, res) => {
     const smtpPassEnc = smtp_pass?.trim() ? encrypt(smtp_pass.trim()) : ex.smtp_pass_enc || null;
     const imapPassEnc = imap_pass?.trim() ? encrypt(imap_pass.trim()) : ex.imap_pass_enc || null;
     await pool.query(`
-      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,inbound_capture_enabled,inbound_sequence_id,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW())
       ON CONFLICT (client_id) DO UPDATE SET
         provider=EXCLUDED.provider, smtp_host=EXCLUDED.smtp_host, smtp_port=EXCLUDED.smtp_port,
         smtp_secure=EXCLUDED.smtp_secure, smtp_user=EXCLUDED.smtp_user, smtp_pass_enc=EXCLUDED.smtp_pass_enc,
         from_name=EXCLUDED.from_name, from_email=EXCLUDED.from_email, reply_to=EXCLUDED.reply_to,
         imap_host=EXCLUDED.imap_host, imap_port=EXCLUDED.imap_port, imap_user=EXCLUDED.imap_user,
-        imap_pass_enc=EXCLUDED.imap_pass_enc, updated_at=NOW()
+        imap_pass_enc=EXCLUDED.imap_pass_enc,
+        inbound_capture_enabled=EXCLUDED.inbound_capture_enabled,
+        inbound_sequence_id=EXCLUDED.inbound_sequence_id,
+        updated_at=NOW()
     `, [
       clientId,
       val(provider, ex.provider) || 'smtp',
@@ -428,6 +456,8 @@ router.post('/email', requireAuth, async (req, res) => {
       parseInt(imap_port) || ex.imap_port || 993,
       val(imap_user, ex.imap_user),
       imapPassEnc,
+      inbound_capture_enabled === '1',
+      inbound_sequence_id ? parseInt(inbound_sequence_id) : null,
     ]);
     res.redirect('/settings/email?ok=1&msg=Email+settings+saved.');
   } catch (err) {

@@ -31,6 +31,98 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
   const clientEmailConfigs = new Map();
   const salespersonGmailAuthed = new Map();
 
+  // ── Pass 0: inbound email capture — new leads from Gmail inbox ──────────────
+  try {
+    const { rows: inboundAccounts } = await pool.query(`
+      SELECT ea.salesperson_id, ea.email AS gmail_email, cec.client_id,
+             cec.inbound_capture_enabled, cec.inbound_sequence_id, cec.inbound_last_check_at
+      FROM email_accounts ea
+      CROSS JOIN (
+        SELECT cec2.* FROM client_email_config cec2
+        WHERE cec2.inbound_capture_enabled = true
+        ORDER BY cec2.client_id LIMIT 1
+      ) cec
+      WHERE ea.enabled = true
+    `);
+
+    for (const acct of inboundAccounts) {
+      try {
+        const auth = await getAuthedClient(acct.salesperson_id);
+        if (!auth) continue;
+
+        const gmail = google.gmail({ version: 'v1', auth: auth.client });
+        // Search inbox for messages received since last check (or 2 hours ago)
+        const since = acct.inbound_last_check_at
+          ? Math.floor(new Date(acct.inbound_last_check_at).getTime() / 1000)
+          : Math.floor((Date.now() - 2 * 60 * 60 * 1000) / 1000);
+        const q = `in:inbox after:${since} -from:me -from:${acct.gmail_email}`;
+        const list = await gmail.users.messages.list({ userId: 'me', q, maxResults: 20 });
+        const msgs = list.data.messages || [];
+
+        for (const m of msgs) {
+          try {
+            const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata', metadataHeaders: ['From', 'Subject'] });
+            const headers = msg.data.payload?.headers || [];
+            const fromHeader = headers.find(h => h.name === 'From')?.value || '';
+            const subject    = headers.find(h => h.name === 'Subject')?.value || '';
+
+            // Parse "Name <email>" or "email"
+            const emailMatch = fromHeader.match(/<([^>]+)>/) || fromHeader.match(/([^\s]+@[^\s]+)/);
+            const senderEmail = emailMatch?.[1]?.toLowerCase().trim();
+            if (!senderEmail) continue;
+
+            const nameMatch = fromHeader.match(/^(.+?)\s*</);
+            const senderName = nameMatch?.[1]?.replace(/"/g, '').trim() || '';
+            const [firstName, ...rest] = senderName.split(' ');
+            const lastName = rest.join(' ');
+
+            // Skip if already a lead
+            const { rows: existing } = await pool.query('SELECT id FROM leads WHERE email = $1', [senderEmail]);
+            if (existing.length) continue;
+
+            // Create new lead
+            const { rows: newLead } = await pool.query(`
+              INSERT INTO leads (email, first_name, last_name, stage, audience_type, client_id, created_at)
+              VALUES ($1, $2, $3, 'new', 'inbound', $4, NOW())
+              ON CONFLICT (email) DO NOTHING
+              RETURNING id
+            `, [senderEmail, firstName || senderEmail, lastName || '', acct.client_id]);
+
+            if (!newLead[0]) continue;
+            const leadId = newLead[0].id;
+
+            // Log the inbound email as a note
+            await pool.query(
+              `INSERT INTO lead_notes (lead_id, author_name, content) VALUES ($1, $2, $3)`,
+              [leadId, 'Inbound', `[Inbound email] ${subject}\n\nFrom: ${fromHeader}`]
+            );
+
+            // Auto-enroll if sequence configured
+            if (acct.inbound_sequence_id) {
+              await pool.query(`
+                INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, client_id, status, enrolled_at)
+                VALUES ($1, $2, $3, $4, 'active', NOW())
+                ON CONFLICT DO NOTHING
+              `, [leadId, acct.inbound_sequence_id, acct.salesperson_id, acct.client_id]);
+            }
+          } catch (err) {
+            console.error('[inbound] message processing error:', err.message);
+          }
+        }
+
+        // Update last check timestamp
+        await pool.query(
+          `UPDATE client_email_config SET inbound_last_check_at = NOW() WHERE client_id = $1`,
+          [acct.client_id]
+        );
+      } catch (err) {
+        console.error('[inbound] account error:', err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[inbound] pass failed:', err.message);
+  }
+
   // ── Pass 1: reply check on ALL active enrollments with at least one send ────
   // Uses address-based Gmail search so it works for both Gmail and SES sends.
   // Capped at 200 per cron run to stay within Gmail API quota at scale.
