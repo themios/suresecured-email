@@ -204,10 +204,8 @@ router.get('/email', requireAuth, async (req, res) => {
   const gmailAccount = gmailRows[0] || null;
 
   const body = `
-  <form method="POST" action="/settings/email" id="email-form">
-
     ${gmailAccount ? `
-    <!-- Gmail connected banner -->
+    <!-- Gmail connected banner — OUTSIDE the settings form to avoid nested form issue -->
     <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 flex items-center justify-between">
       <div>
         <p class="text-sm font-semibold text-green-800">✓ Gmail Connected — outbound email active</p>
@@ -217,10 +215,10 @@ router.get('/email', requireAuth, async (req, res) => {
           SMTP settings below are ignored for outbound.
         </p>
       </div>
-      <form method="POST" action="/gmail/disconnect/${esc(String(req.user?.id || ''))}">
-        <button class="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50">Disconnect</button>
-      </form>
+      <button onclick="disconnectGmail()" class="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50">Disconnect</button>
     </div>` : ''}
+
+  <form method="POST" action="/settings/email" id="email-form">
 
     <!-- Provider selector -->
     <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
@@ -364,6 +362,11 @@ router.get('/email', requireAuth, async (req, res) => {
       noteEl.classList.toggle('hidden', !p.note);
     }
     selectProvider(document.getElementById('provider-value').value);
+
+    async function disconnectGmail() {
+      await fetch('/gmail/disconnect/${esc(String(req.user?.id || ''))}', { method: 'POST' });
+      location.reload();
+    }
 
     async function testSmtp() {
       const btn = event.target; btn.disabled = true; btn.textContent = 'Testing…';
