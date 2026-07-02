@@ -3,7 +3,6 @@ const router = express.Router();
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { shell, navHtml } = require('../lib/layout');
-}
 
 // Data endpoint — returns all chart data as JSON
 router.get('/data', requireAuth, async (req, res) => {
