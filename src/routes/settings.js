@@ -22,6 +22,17 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Parse URL-encoded form bodies for all POST routes in this router
+router.use(express.urlencoded({ extended: true }));
+
+// Resolve client_id: prefer JWT claim, fall back to first client in DB.
+// This handles admin users created before tenancy was fully wired up.
+async function resolveClientId(req) {
+  if (req.user?.client_id) return req.user.client_id;
+  const { rows } = await pool.query('SELECT id FROM clients ORDER BY id LIMIT 1');
+  return rows[0]?.id || null;
+}
+
 // ─── GET /settings — hub page ────────────────────────────────────────────────
 router.get('/', requireAuth, (req, res) => {
   res.redirect('/settings/business');
@@ -69,7 +80,7 @@ function pageShell(title, active, body, msg, ok) {
 
 // ─── Business Info ────────────────────────────────────────────────────────────
 router.get('/business', requireAuth, async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+  const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const bc = rows[0]?.brand_config || {};
 
@@ -159,8 +170,8 @@ router.get('/business', requireAuth, async (req, res) => {
   res.send(pageShell('Business Info', 'business', body, req.query.msg, req.query.ok));
 });
 
-router.post('/business', requireAuth, express.urlencoded({ extended: true }), async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+router.post('/business', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const existing = rows[0]?.brand_config || {};
 
@@ -183,7 +194,7 @@ router.post('/business', requireAuth, express.urlencoded({ extended: true }), as
 
 // ─── Email Settings ───────────────────────────────────────────────────────────
 router.get('/email', requireAuth, async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+  const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]);
   const cfg = rows[0] || {};
 
@@ -357,8 +368,8 @@ router.get('/email', requireAuth, async (req, res) => {
   res.send(pageShell('Email Settings', 'email', body, req.query.msg, req.query.ok));
 });
 
-router.post('/email', requireAuth, express.urlencoded({ extended: true }), async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+router.post('/email', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
   const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass } = req.body;
   try {
     const { rows } = await pool.query('SELECT smtp_pass_enc, imap_pass_enc FROM client_email_config WHERE client_id = $1', [clientId]);
@@ -385,7 +396,7 @@ router.post('/email/test-smtp', requireAuth, async (req, res) => {
   const { smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass } = req.body;
   let pass = smtp_pass;
   if (!pass) {
-    const clientId = req.session?.clientId || req.user?.client_id;
+    const clientId = await resolveClientId(req);
     const { rows } = await pool.query('SELECT smtp_pass_enc FROM client_email_config WHERE client_id=$1',[clientId]);
     if (rows[0]?.smtp_pass_enc) pass = decrypt(rows[0].smtp_pass_enc);
   }
@@ -400,7 +411,7 @@ router.post('/email/test-imap', requireAuth, async (req, res) => {
   const { imap_host, imap_port, imap_user, imap_pass } = req.body;
   let pass = imap_pass;
   if (!pass) {
-    const clientId = req.session?.clientId || req.user?.client_id;
+    const clientId = await resolveClientId(req);
     const { rows } = await pool.query('SELECT imap_pass_enc FROM client_email_config WHERE client_id=$1',[clientId]);
     if (rows[0]?.imap_pass_enc) pass = decrypt(rows[0].imap_pass_enc);
   }
@@ -411,7 +422,7 @@ router.post('/email/test-imap', requireAuth, async (req, res) => {
 
 // ─── Phone & SMS ──────────────────────────────────────────────────────────────
 router.get('/phone', requireAuth, async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+  const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const bc = rows[0]?.brand_config || {};
 
@@ -455,8 +466,8 @@ router.get('/phone', requireAuth, async (req, res) => {
   res.send(pageShell('Phone & SMS', 'phone', body, req.query.msg, req.query.ok));
 });
 
-router.post('/phone', requireAuth, express.urlencoded({ extended: true }), async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+router.post('/phone', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const existing = rows[0]?.brand_config || {};
   const { phone, telnyx_api_key, telnyx_phone, telnyx_campaign_id } = req.body;
@@ -467,7 +478,7 @@ router.post('/phone', requireAuth, express.urlencoded({ extended: true }), async
 
 // ─── Theme & Branding ─────────────────────────────────────────────────────────
 router.get('/theme', requireAuth, async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+  const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const bc = rows[0]?.brand_config || {};
 
@@ -554,8 +565,8 @@ router.get('/theme', requireAuth, async (req, res) => {
   res.send(pageShell('Theme & Branding', 'theme', body, req.query.msg, req.query.ok));
 });
 
-router.post('/theme', requireAuth, express.urlencoded({ extended: true }), async (req, res) => {
-  const clientId = req.session?.clientId || req.user?.client_id;
+router.post('/theme', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const existing = rows[0]?.brand_config || {};
   const { primary_color, accent_color, bg_color, logo_url, favicon_url } = req.body;
