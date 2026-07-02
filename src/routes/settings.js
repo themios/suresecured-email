@@ -402,8 +402,16 @@ router.post('/email/test-smtp', requireAuth, async (req, res) => {
     if (rows[0]?.smtp_pass_enc) pass = decrypt(rows[0].smtp_pass_enc);
   }
   try {
-    const t = nodemailer.createTransport({ host: smtp_host, port: parseInt(smtp_port)||587, secure: smtp_secure===true||smtp_secure==='true', auth:{ user: smtp_user, pass } });
-    await t.verify();
+    const t = nodemailer.createTransport({
+      host: smtp_host, port: parseInt(smtp_port)||587,
+      secure: smtp_secure===true||smtp_secure==='true',
+      auth: { user: smtp_user, pass },
+      connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 10000,
+    });
+    await Promise.race([
+      t.verify(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Connection timed out after 10s — check host/port or firewall')), 10000)),
+    ]);
     res.json({ ok: true });
   } catch (err) { res.json({ ok: false, error: err.message }); }
 });
