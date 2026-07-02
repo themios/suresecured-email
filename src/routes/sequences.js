@@ -55,14 +55,15 @@ router.delete('/api/sequences/:id', requireAuth, async (req, res) => {
 
 // Upsert a step
 router.post('/api/sequences/:id/steps', requireAuth, async (req, res) => {
-  const { step_number, delay_days, subject, body } = req.body;
+  const { step_number, delay_days, delay_minutes, subject, body } = req.body;
+  const dm = delay_minutes != null ? parseInt(delay_minutes) : null;
   const { rows } = await pool.query(
-    `INSERT INTO sequence_steps (sequence_id, step_number, delay_days, subject, body)
-     VALUES ($1,$2,$3,$4,$5)
+    `INSERT INTO sequence_steps (sequence_id, step_number, delay_days, delay_minutes, subject, body)
+     VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT (sequence_id, step_number) DO UPDATE
-       SET delay_days=$3, subject=$4, body=$5
+       SET delay_days=$3, delay_minutes=$4, subject=$5, body=$6
      RETURNING *`,
-    [req.params.id, step_number, delay_days, subject, body]
+    [req.params.id, step_number, delay_days, dm, subject, body]
   );
   res.json(rows[0]);
 });
@@ -88,11 +89,14 @@ router.post('/api/sequences/:id/auto-enroll', requireAuth, async (req, res) => {
     const salespersonId = req.session?.salespersonId || req.user?.salesperson_id || null;
 
     const { rows: firstStep } = await pool.query(
-      `SELECT delay_days FROM sequence_steps WHERE sequence_id = $1 AND step_number = 1`,
+      `SELECT delay_days, delay_minutes FROM sequence_steps WHERE sequence_id = $1 AND step_number = 1`,
       [req.params.id]
     );
-    const delayDays  = firstStep[0]?.delay_days ?? 0;
-    const nextSendAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
+    const fs1 = firstStep[0];
+    const delayMs1 = fs1?.delay_minutes != null
+      ? fs1.delay_minutes * 60 * 1000
+      : (fs1?.delay_days ?? 0) * 24 * 60 * 60 * 1000;
+    const nextSendAt = new Date(Date.now() + delayMs1).toISOString();
 
     // Find eligible leads: matching audience_type, not suppressed, not already in this sequence
     const { rows: leads } = await pool.query(`
@@ -136,11 +140,14 @@ router.post('/api/sequences/:id/enroll', requireAuth, async (req, res) => {
 
   // Get first step delay to set initial next_send_at
   const { rows: firstStep } = await pool.query(
-    `SELECT delay_days FROM sequence_steps WHERE sequence_id = $1 AND step_number = 1`,
+    `SELECT delay_days, delay_minutes FROM sequence_steps WHERE sequence_id = $1 AND step_number = 1`,
     [req.params.id]
   );
-  const delayDays  = firstStep[0]?.delay_days ?? 0;
-  const nextSendAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
+  const fs1 = firstStep[0];
+  const delayMs1 = fs1?.delay_minutes != null
+    ? fs1.delay_minutes * 60 * 1000
+    : (fs1?.delay_days ?? 0) * 24 * 60 * 60 * 1000;
+  const nextSendAt = new Date(Date.now() + delayMs1).toISOString();
 
   let enrolled = 0, skipped = 0;
   for (const leadId of lead_ids) {
@@ -656,7 +663,10 @@ router.get('/', requireAuth, async (req, res) => {
       <div id="steps-section" class="hidden">
         <div class="flex justify-between items-center mb-3">
           <h4 class="font-semibold text-slate-700">Email Steps</h4>
-          <button onclick="addStep()" class="text-sm inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors">${ICONS.plus} Add Step</button>
+          <div class="flex items-center gap-2">
+            <button id="test-mode-btn" onclick="toggleTestMode()" class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-colors">🧪 Test Mode</button>
+            <button onclick="addStep()" class="text-sm inline-flex items-center gap-1 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors">${ICONS.plus} Add Step</button>
+          </div>
         </div>
         <div id="steps-list" class="space-y-4"></div>
       </div>
@@ -750,7 +760,12 @@ router.get('/', requireAuth, async (req, res) => {
     document.getElementById('seq-modal').classList.remove('hidden');
   }
 
-  function closeSeqModal() { document.getElementById('seq-modal').classList.add('hidden'); }
+  function closeSeqModal() {
+    document.getElementById('seq-modal').classList.add('hidden');
+    testMode = false;
+    var btn = document.getElementById('test-mode-btn');
+    if (btn) { btn.textContent = '🧪 Test Mode'; btn.className = 'text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-colors'; }
+  }
 
   function saveSequence() {
     var id       = document.getElementById('seq-id').value;
@@ -796,15 +811,48 @@ router.get('/', requireAuth, async (req, res) => {
       });
   }
 
+  var testMode = false;
+
+  function toggleTestMode() {
+    testMode = !testMode;
+    var btn = document.getElementById('test-mode-btn');
+    btn.textContent = testMode ? '🧪 Test Mode ON (minutes)' : '🧪 Test Mode';
+    btn.className = testMode
+      ? 'text-xs px-3 py-1.5 rounded-lg border border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors font-medium'
+      : 'text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-colors';
+    // Re-render steps so labels update
+    var list = document.getElementById('steps-list');
+    var blocks = list.querySelectorAll('[id^="step-block-"]');
+    blocks.forEach(function(block) {
+      var num = block.id.replace('step-block-', '');
+      var lbl = block.querySelector('label');
+      if (lbl && (lbl.textContent.includes('days') || lbl.textContent.includes('minutes'))) {
+        lbl.textContent = testMode ? 'Send after (minutes)' : 'Send after (days)';
+      }
+    });
+  }
+
   function renderSteps(steps) {
     var list = document.getElementById('steps-list');
     list.innerHTML = '';
     steps.forEach(function(step) {
-      list.innerHTML += buildStepHtml(step.step_number, step.delay_days, step.subject, step.body, step.id);
+      // If delay_minutes is set, activate test mode automatically
+      if (step.delay_minutes != null) testMode = true;
+      var delayVal = step.delay_minutes != null ? step.delay_minutes : (step.delay_days || 0);
+      list.innerHTML += buildStepHtml(step.step_number, delayVal, step.subject, step.body, step.id, step.delay_minutes != null);
     });
+    // Sync test mode button state
+    var btn = document.getElementById('test-mode-btn');
+    if (btn) {
+      btn.textContent = testMode ? '🧪 Test Mode ON (minutes)' : '🧪 Test Mode';
+      btn.className = testMode
+        ? 'text-xs px-3 py-1.5 rounded-lg border border-amber-400 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors font-medium'
+        : 'text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-colors';
+    }
   }
 
-  function buildStepHtml(stepNum, delayDays, subject, body, stepId) {
+  function buildStepHtml(stepNum, delayVal, subject, body, stepId, isMinutes) {
+    var label = (isMinutes || testMode) ? 'Send after (minutes)' : 'Send after (days)';
     return '<div class="border border-slate-200 rounded-xl p-4" id="step-block-' + stepNum + '">' +
       '<div class="flex justify-between items-center mb-3">' +
         '<span class="font-semibold text-sm text-slate-800">Step ' + stepNum + '</span>' +
@@ -812,8 +860,8 @@ router.get('/', requireAuth, async (req, res) => {
       '</div>' +
       '<div class="grid grid-cols-4 gap-3 mb-3">' +
         '<div>' +
-          '<label class="block text-xs text-slate-500 mb-1 font-medium">Send after (days)</label>' +
-          '<input type="number" min="0" value="' + delayDays + '" id="step-delay-' + stepNum + '" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">' +
+          '<label class="block text-xs text-slate-500 mb-1 font-medium">' + label + '</label>' +
+          '<input type="number" min="0" value="' + (delayVal || 0) + '" id="step-delay-' + stepNum + '" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">' +
         '</div>' +
         '<div class="col-span-3">' +
           '<label class="block text-xs text-slate-500 mb-1 font-medium">Subject line</label>' +
@@ -830,25 +878,35 @@ router.get('/', requireAuth, async (req, res) => {
   function addStep() {
     var list = document.getElementById('steps-list');
     stepCount = list.children.length + 1;
-    list.innerHTML += buildStepHtml(stepCount, stepCount === 1 ? 0 : 3, '', '', null);
+    var defaultDelay = testMode ? 10 : (stepCount === 1 ? 0 : 3);
+    list.innerHTML += buildStepHtml(stepCount, defaultDelay, '', '', null, testMode);
     list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
   }
 
   function saveStep(stepNum, stepId) {
     if (!activeSeqId) { showToast('Save the sequence first', 'warn'); return; }
-    var delay   = document.getElementById('step-delay-' + stepNum).value;
+    var delay   = parseInt(document.getElementById('step-delay-' + stepNum).value) || 0;
     var subject = document.getElementById('step-subject-' + stepNum).value.trim();
     var body    = document.getElementById('step-body-' + stepNum).value;
     if (!subject || !body) { showToast('Subject and body are required', 'error'); return; }
 
+    var payload = { step_number: stepNum, subject: subject, body: body };
+    if (testMode) {
+      payload.delay_minutes = delay;
+      payload.delay_days    = 0;
+    } else {
+      payload.delay_days    = delay;
+      payload.delay_minutes = null;
+    }
+
     fetch('/sequences/api/sequences/' + activeSeqId + '/steps', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ step_number: stepNum, delay_days: parseInt(delay), subject: subject, body: body }),
+      body: JSON.stringify(payload),
     })
     .then(function(r) { return r.json(); })
     .then(function() {
-      showToast('Step ' + stepNum + ' saved', 'success', 2000);
+      showToast('Step ' + stepNum + ' saved' + (testMode ? ' (test mode: minutes)' : ''), 'success', 2000);
     });
   }
 

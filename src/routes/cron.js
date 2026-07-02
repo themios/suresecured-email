@@ -532,13 +532,16 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
             [nextStepNum, now, row.enrollment_id]
           );
         } else {
-          // Get next step delay
+          // Get next step delay (delay_minutes overrides delay_days for test mode)
           const { rows: futureStep } = await client.query(
-            `SELECT delay_days FROM sequence_steps WHERE sequence_id = $1 AND step_number = $2`,
+            `SELECT delay_days, delay_minutes FROM sequence_steps WHERE sequence_id = $1 AND step_number = $2`,
             [row.sequence_id, nextStepNum + 1]
           );
-          const delayDays = futureStep[0]?.delay_days ?? 1;
-          const nextSendAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000).toISOString();
+          const fs = futureStep[0];
+          const delayMs = fs?.delay_minutes != null
+            ? fs.delay_minutes * 60 * 1000
+            : (fs?.delay_days ?? 1) * 24 * 60 * 60 * 1000;
+          const nextSendAt = new Date(Date.now() + delayMs).toISOString();
 
           await client.query(
             `UPDATE contact_enrollments

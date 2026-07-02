@@ -260,6 +260,11 @@ async function initDb() {
     ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_last_check_at TIMESTAMPTZ;
   `);
 
+  // Test mode: delay_minutes overrides delay_days when set
+  await pool.query(`
+    ALTER TABLE sequence_steps ADD COLUMN IF NOT EXISTS delay_minutes INTEGER;
+  `);
+
   // CRM notes / activity log
   await pool.query(`
     CREATE TABLE IF NOT EXISTS lead_notes (
