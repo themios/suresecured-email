@@ -22,8 +22,9 @@ function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Parse URL-encoded form bodies for all POST routes in this router
+// Parse both form and JSON bodies (test endpoints send JSON)
 router.use(express.urlencoded({ extended: true }));
+router.use(express.json());
 
 // Resolve client_id: prefer JWT claim, fall back to first client in DB.
 // This handles admin users created before tenancy was fully wired up.
