@@ -679,15 +679,22 @@ async function checkForRepliesByAddress(salespersonId, leadEmail, afterDate) {
  * Send a direct (non-sequence) email via IONOS SMTP.
  * Used by the lead CRM reply composer.
  */
-async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, salespersonId }) {
+async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, salespersonId, clientId }) {
   // Try Gmail OAuth first if a salesperson ID is provided
   if (salespersonId) {
     const authed = await getAuthedClient(salespersonId);
     if (authed) {
-      const raw = await buildRawMessage({ fromName: fromName || authed.account.email, fromAddress: authed.account.email, to, subject, textBody, htmlBody });
+      // Use configured from_email (e.g. sales@suresecured.com Send-As alias) if set
+      let effectiveFrom = authed.account.email;
+      let effectiveName = fromName || 'Sales';
+      if (clientId) {
+        const cfg = await getClientEmailConfig(clientId);
+        if (cfg?.from_email) { effectiveFrom = cfg.from_email; effectiveName = cfg.from_name || effectiveName; }
+      }
+      const raw = await buildRawMessage({ fromName: effectiveName, fromAddress: effectiveFrom, to, subject, textBody, htmlBody });
       const gmailApi = google.gmail({ version: 'v1', auth: authed.client });
-      await gmailApi.users.messages.send({ userId: 'me', requestBody: { raw } });
-      return { ok: true, via: 'gmail' };
+      const sent = await gmailApi.users.messages.send({ userId: 'me', requestBody: { raw } });
+      return { ok: true, via: 'gmail', threadId: sent.data.threadId, messageId: sent.data.id };
     }
   }
   if (sesEnabled()) {

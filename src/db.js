@@ -246,6 +246,13 @@ async function initDb() {
     ALTER TABLE leads ADD COLUMN IF NOT EXISTS unsubscribed_at TIMESTAMPTZ;
   `);
 
+  // Track direct (non-sequence) emails sent via reply composer for reply detection
+  await pool.query(`
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS direct_email_thread_id TEXT;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS direct_email_salesperson_id INTEGER;
+    ALTER TABLE leads ADD COLUMN IF NOT EXISTS replied_at TIMESTAMPTZ;
+  `);
+
   // CRM notes / activity log
   await pool.query(`
     CREATE TABLE IF NOT EXISTS lead_notes (

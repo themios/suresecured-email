@@ -8,7 +8,7 @@ const express  = require('express');
 const router   = express.Router();
 const { google } = require('googleapis');
 const { pool } = require('../db');
-const { sendSequenceEmail, checkForRepliesByAddress, sendReplyNotification, buildDigestHtml, getAuthedClient, buildRawMessage, getClientEmailConfig } = require('../lib/gmail');
+const { sendSequenceEmail, checkForReplies, checkForRepliesByAddress, sendReplyNotification, buildDigestHtml, getAuthedClient, buildRawMessage, getClientEmailConfig } = require('../lib/gmail');
 const { imapEnabled, checkForRepliesViaImap } = require('../lib/imap');
 const { callOpenRouter, buildDigestPrompt, classifyReply } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
@@ -27,8 +27,9 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
   const now = new Date().toISOString();
   let sent = 0, skipped = 0, errors = 0, replies = 0;
 
-  // Cache client email configs for this cron run (avoid per-enrollment DB hits)
+  // Cache client email configs and Gmail OAuth status per salesperson for this cron run
   const clientEmailConfigs = new Map();
+  const salespersonGmailAuthed = new Map();
 
   // ── Pass 1: reply check on ALL active enrollments with at least one send ────
   // Uses address-based Gmail search so it works for both Gmail and SES sends.
@@ -62,10 +63,20 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         }
         const clientCfg = row.client_id ? clientEmailConfigs.get(row.client_id) : null;
 
-        const replyCheck = imapEnabled(clientCfg)
-          ? await checkForRepliesViaImap(row.lead_email, row.enrolled_at, clientCfg)
-          : await checkForRepliesByAddress(row.salesperson_id, row.lead_email, row.enrolled_at);
-        if (!replyCheck.replied) continue;
+        // Check Gmail OAuth status for this salesperson (cached)
+        if (!salespersonGmailAuthed.has(row.salesperson_id)) {
+          const authed = await getAuthedClient(row.salesperson_id);
+          salespersonGmailAuthed.set(row.salesperson_id, !!authed);
+        }
+        const hasGmail = salespersonGmailAuthed.get(row.salesperson_id);
+
+        // Prefer Gmail API when OAuth is connected; fall back to IMAP or skip
+        const replyCheck = hasGmail
+          ? await checkForRepliesByAddress(row.salesperson_id, row.lead_email, row.enrolled_at)
+          : imapEnabled(clientCfg)
+            ? await checkForRepliesViaImap(row.lead_email, row.enrolled_at, clientCfg)
+            : null;
+        if (!replyCheck?.replied) continue;
 
         await pool.query(
           `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'replied', replied_at = NOW() WHERE id = $1`,
@@ -101,6 +112,59 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
     }
   } catch (err) {
     console.error('[reply-check] pass failed:', err.message);
+  }
+
+  // ── Pass 1b: reply check on direct emails sent via reply composer ─────────
+  try {
+    const { rows: directRows } = await pool.query(`
+      SELECT l.id AS lead_id, l.email AS lead_email, l.first_name, l.last_name,
+             l.direct_email_thread_id, l.direct_email_salesperson_id AS salesperson_id,
+             c.brand_config
+      FROM leads l
+      LEFT JOIN clients c ON c.id = l.client_id
+      WHERE l.direct_email_thread_id IS NOT NULL
+        AND (l.replied_at IS NULL OR l.replied_at < NOW() - INTERVAL '7 days')
+      LIMIT 100
+    `);
+
+    for (const row of directRows) {
+      try {
+        const auth = await getAuthedClient(row.salesperson_id);
+        if (!auth) continue;
+
+        const replyCheck = await checkForReplies(row.salesperson_id, row.direct_email_thread_id);
+        if (!replyCheck.replied) continue;
+
+        await pool.query(
+          `UPDATE leads SET reply_text = $1, reply_subject = $2, replied_at = NOW() WHERE id = $3`,
+          [replyCheck.replyText?.slice(0, 2000) || null, replyCheck.replySubject || null, row.lead_id]
+        );
+        replies++;
+
+        const lead = { id: row.lead_id, email: row.lead_email, first_name: row.first_name, last_name: row.last_name };
+        const brandConfig = row.brand_config || {};
+        if (replyCheck.replyText) {
+          classifyReply(replyCheck.replyText, row.first_name).then(async (classification) => {
+            try {
+              await pool.query(
+                `UPDATE leads SET reply_category=$1, reply_urgency=$2, reply_summary=$3, reply_classified_at=NOW() WHERE id=$4`,
+                [classification.category, classification.urgency, classification.summary, row.lead_id]
+              );
+              replyCheck.classification = classification;
+            } catch {}
+            sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+          }).catch(() => {
+            sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+          });
+        } else {
+          sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+        }
+      } catch (err) {
+        console.error('[direct-reply-check] lead', row.lead_id, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[direct-reply-check] pass failed:', err.message);
   }
 
   const client = await pool.connect();

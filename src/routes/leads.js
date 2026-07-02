@@ -810,7 +810,7 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
   try {
-    await sendDirectEmail({
+    const result = await sendDirectEmail({
       fromName:      process.env.SES_FROM_NAME  || 'Sales',
       fromAddress:   process.env.SES_FROM_EMAIL || process.env.SES_SMTP_USER,
       to:            lead.email,
@@ -818,7 +818,16 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
       textBody:      body.trim(),
       htmlBody:      `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#222">${body.trim().replace(/\n/g,'<br>')}</div>`,
       salespersonId: req.user?.id,
+      clientId:      req.user?.client_id,
     });
+
+    // Store Gmail thread ID so cron can detect replies to this direct email
+    if (result.threadId) {
+      await pool.query(
+        `UPDATE leads SET direct_email_thread_id = $1, direct_email_salesperson_id = $2 WHERE id = $3`,
+        [result.threadId, req.user?.id, leadId]
+      );
+    }
 
     const user = req.user;
     await pool.query(
