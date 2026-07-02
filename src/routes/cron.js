@@ -24,7 +24,67 @@ function cronAuth(req, res, next) {
 
 router.get('/send-sequences', cronAuth, async (req, res) => {
   const now = new Date().toISOString();
-  let sent = 0, skipped = 0, errors = 0;
+  let sent = 0, skipped = 0, errors = 0, replies = 0;
+
+  // ── Pass 1: reply check on ALL active enrollments with prior sends ──────────
+  // Runs independently of next_send_at so replies are caught immediately,
+  // not just when the next step happens to be due.
+  try {
+    const { rows: replyRows } = await pool.query(`
+      SELECT DISTINCT ON (ce.id)
+        ce.id              AS enrollment_id,
+        ce.lead_id,
+        ce.salesperson_id,
+        ce.client_id,
+        l.email            AS lead_email,
+        l.first_name,
+        l.last_name,
+        c.brand_config,
+        es.gmail_thread_id
+      FROM contact_enrollments ce
+      JOIN leads l        ON l.id = ce.lead_id
+      LEFT JOIN clients c ON c.id = ce.client_id
+      JOIN email_sends es ON es.enrollment_id = ce.id AND es.gmail_thread_id IS NOT NULL
+      WHERE ce.status = 'active'
+      ORDER BY ce.id, es.sent_at ASC
+    `);
+
+    for (const row of replyRows) {
+      try {
+        const replyCheck = await checkForReplies(row.salesperson_id, row.gmail_thread_id);
+        if (!replyCheck.replied) continue;
+
+        await pool.query(
+          `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'replied', replied_at = NOW() WHERE id = $1`,
+          [row.enrollment_id]
+        );
+        replies++;
+
+        const lead = { id: row.lead_id, email: row.lead_email, first_name: row.first_name, last_name: row.last_name };
+        const brandConfig = row.brand_config || {};
+        if (replyCheck.replyText) {
+          classifyReply(replyCheck.replyText, row.first_name).then(async (classification) => {
+            try {
+              await pool.query(
+                `UPDATE leads SET reply_category=$1, reply_urgency=$2, reply_summary=$3, reply_classified_at=NOW() WHERE id=$4`,
+                [classification.category, classification.urgency, classification.summary, row.lead_id]
+              );
+              replyCheck.classification = classification;
+            } catch {}
+            sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+          }).catch(() => {
+            sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+          });
+        } else {
+          sendReplyNotification(row.salesperson_id, lead, replyCheck, brandConfig).catch(() => {});
+        }
+      } catch (err) {
+        console.error('[reply-check] enrollment', row.enrollment_id, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[reply-check] pass failed:', err.message);
+  }
 
   const client = await pool.connect();
   let rows = [];
@@ -313,7 +373,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
     client.release();
   }
 
-  res.json({ ok: true, sent, skipped, errors, timestamp: now });
+  res.json({ ok: true, sent, skipped, errors, replies, timestamp: now });
 });
 
 /**
