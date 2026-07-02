@@ -401,10 +401,12 @@ router.post('/email', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
   const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass } = req.body;
   try {
-    const { rows } = await pool.query('SELECT smtp_pass_enc, imap_pass_enc FROM client_email_config WHERE client_id = $1', [clientId]);
-    const existing = rows[0] || {};
-    const smtpPassEnc = smtp_pass?.trim() ? encrypt(smtp_pass.trim()) : existing.smtp_pass_enc || null;
-    const imapPassEnc = imap_pass?.trim() ? encrypt(imap_pass.trim()) : existing.imap_pass_enc || null;
+    const { rows } = await pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]);
+    const ex = rows[0] || {};
+    // Preserve existing value for any field left blank
+    const val = (v, fallback) => v?.trim() || fallback || null;
+    const smtpPassEnc = smtp_pass?.trim() ? encrypt(smtp_pass.trim()) : ex.smtp_pass_enc || null;
+    const imapPassEnc = imap_pass?.trim() ? encrypt(imap_pass.trim()) : ex.imap_pass_enc || null;
     await pool.query(`
       INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,updated_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
@@ -414,7 +416,22 @@ router.post('/email', requireAuth, async (req, res) => {
         from_name=EXCLUDED.from_name, from_email=EXCLUDED.from_email, reply_to=EXCLUDED.reply_to,
         imap_host=EXCLUDED.imap_host, imap_port=EXCLUDED.imap_port, imap_user=EXCLUDED.imap_user,
         imap_pass_enc=EXCLUDED.imap_pass_enc, updated_at=NOW()
-    `, [clientId, provider||'smtp', smtp_host, parseInt(smtp_port)||587, smtp_secure==='1', smtp_user, smtpPassEnc, from_name, from_email, reply_to||null, imap_host, parseInt(imap_port)||993, imap_user, imapPassEnc]);
+    `, [
+      clientId,
+      val(provider, ex.provider) || 'smtp',
+      val(smtp_host, ex.smtp_host),
+      parseInt(smtp_port) || ex.smtp_port || 587,
+      smtp_secure === '1' ? true : (smtp_port ? false : ex.smtp_secure || false),
+      val(smtp_user, ex.smtp_user),
+      smtpPassEnc,
+      val(from_name, ex.from_name),
+      val(from_email, ex.from_email),
+      val(reply_to, ex.reply_to),
+      val(imap_host, ex.imap_host),
+      parseInt(imap_port) || ex.imap_port || 993,
+      val(imap_user, ex.imap_user),
+      imapPassEnc,
+    ]);
     res.redirect('/settings/email?ok=1&msg=Email+settings+saved.');
   } catch (err) {
     res.redirect('/settings/email?ok=0&msg=' + encodeURIComponent('Save failed: ' + err.message));
