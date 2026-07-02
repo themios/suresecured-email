@@ -196,11 +196,27 @@ router.post('/business', requireAuth, async (req, res) => {
 // ─── Email Settings ───────────────────────────────────────────────────────────
 router.get('/email', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { rows } = await pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]);
+  const [{ rows }, { rows: gmailRows }] = await Promise.all([
+    pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]),
+    pool.query('SELECT email FROM email_accounts WHERE salesperson_id = $1 AND enabled = true', [req.user?.id]),
+  ]);
   const cfg = rows[0] || {};
+  const gmailAccount = gmailRows[0] || null;
 
   const body = `
   <form method="POST" action="/settings/email" id="email-form">
+
+    ${gmailAccount ? `
+    <!-- Gmail connected banner -->
+    <div class="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 flex items-center justify-between">
+      <div>
+        <p class="text-sm font-semibold text-green-800">✓ Gmail Connected — outbound email active</p>
+        <p class="text-xs text-green-700 mt-0.5">Sending as <strong>${esc(gmailAccount.email)}</strong>. SMTP settings below are ignored for outbound.</p>
+      </div>
+      <form method="POST" action="/gmail/disconnect/${esc(String(req.user?.id || ''))}">
+        <button class="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50">Disconnect</button>
+      </form>
+    </div>` : ''}
 
     <!-- Provider selector -->
     <div class="bg-white rounded-xl shadow-sm p-6 mb-4">

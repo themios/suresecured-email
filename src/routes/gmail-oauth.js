@@ -55,7 +55,8 @@ router.post('/disconnect/:salespersonId', requireAuth, async (req, res) => {
     'UPDATE email_accounts SET enabled = false, oauth_refresh_token = NULL, oauth_access_token = NULL WHERE salesperson_id = $1',
     [req.params.salespersonId]
   );
-  res.json({ ok: true });
+  const back = req.get('Referer') || '/settings/email';
+  res.redirect(back);
 });
 
 module.exports = router;
