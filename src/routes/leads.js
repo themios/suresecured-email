@@ -809,6 +809,13 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
   const lead = leads[0];
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
+  // Resolve clientId — admin users may have null client_id in JWT
+  let clientId = req.user?.client_id;
+  if (!clientId) {
+    const { rows: cr } = await pool.query('SELECT id FROM clients ORDER BY id LIMIT 1');
+    clientId = cr[0]?.id || null;
+  }
+
   try {
     const result = await sendDirectEmail({
       fromName:      process.env.SES_FROM_NAME  || 'Sales',
@@ -818,7 +825,7 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
       textBody:      body.trim(),
       htmlBody:      `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#222">${body.trim().replace(/\n/g,'<br>')}</div>`,
       salespersonId: req.user?.id,
-      clientId:      req.user?.client_id,
+      clientId,
     });
 
     // Store Gmail thread ID so cron can detect replies to this direct email
