@@ -814,4 +814,16 @@ router.post('/score-leads', cronAuth, async (req, res) => {
   res.json({ ok: true, updated, errors });
 });
 
+router.get('/test-telegram', cronAuth, async (req, res) => {
+  const { sendTelegram } = require('../lib/telegram');
+  try {
+    await sendTelegram(
+      `✅ <b>SureSecured Bot Connected!</b>\n\nTelegram notifications are working. You'll receive alerts for:\n🆕 New inbound leads\n🔥 Hot replies\n📊 Daily AI summary`
+    );
+    res.json({ ok: true, message: 'Test message sent to Telegram' });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
