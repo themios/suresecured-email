@@ -206,7 +206,14 @@ router.get('/email', requireAuth, async (req, res) => {
     <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
       <h2 class="font-semibold text-gray-700 text-sm uppercase tracking-wide mb-3">Email Provider</h2>
       <div class="grid grid-cols-2 gap-2 mb-3">
-        ${Object.entries(PROVIDERS).map(([key, p]) => `
+        ${Object.entries(PROVIDERS).map(([key, p]) => key === 'google' ? `
+        <a href="/gmail/connect/${esc(String(req.user?.id || ''))}" data-provider="google"
+          class="provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition
+            ${(cfg.provider || 'smtp') === 'google'
+              ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium'
+              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'}">
+          ${esc(p.label)} →
+        </a>` : `
         <button type="button" onclick="selectProvider('${key}')" data-provider="${key}"
           class="provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition
             ${(cfg.provider || 'smtp') === key
@@ -268,17 +275,11 @@ router.get('/email', requireAuth, async (req, res) => {
         <input name="reply_to" type="email" value="${esc(cfg.reply_to)}" placeholder="Leave blank to use From Email"
           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
       </div>
-      <div class="flex items-center gap-3 flex-wrap">
-        <button type="button" onclick="testSmtp()"
-          class="text-sm text-blue-600 border border-blue-200 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100">
-          Test SMTP Connection
-        </button>
-        <span id="smtp-test-result" class="text-sm hidden"></span>
-        <a href="/gmail/connect/${esc(String(req.user?.id || ''))}"
-          class="text-sm text-white bg-red-500 hover:bg-red-600 px-4 py-1.5 rounded-lg font-medium">
-          Connect Gmail Instead →
-        </a>
-      </div>
+      <button type="button" onclick="testSmtp()"
+        class="text-sm text-blue-600 border border-blue-200 bg-blue-50 px-4 py-1.5 rounded-lg hover:bg-blue-100">
+        Test SMTP Connection
+      </button>
+      <span id="smtp-test-result" class="text-sm ml-3 hidden"></span>
     </div>
 
     <!-- IMAP -->
