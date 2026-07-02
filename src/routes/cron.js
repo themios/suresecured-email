@@ -8,7 +8,7 @@ const express  = require('express');
 const router   = express.Router();
 const { google } = require('googleapis');
 const { pool } = require('../db');
-const { sendSequenceEmail, checkForReplies, sendReplyNotification, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
+const { sendSequenceEmail, checkForRepliesByAddress, sendReplyNotification, buildDigestHtml, getAuthedClient, buildRawMessage } = require('../lib/gmail');
 const { callOpenRouter, buildDigestPrompt, classifyReply } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
@@ -26,32 +26,37 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
   const now = new Date().toISOString();
   let sent = 0, skipped = 0, errors = 0, replies = 0;
 
-  // ── Pass 1: reply check on ALL active enrollments with prior sends ──────────
-  // Runs independently of next_send_at so replies are caught immediately,
-  // not just when the next step happens to be due.
+  // ── Pass 1: reply check on ALL active enrollments with at least one send ────
+  // Uses address-based Gmail search so it works for both Gmail and SES sends.
+  // Capped at 200 per cron run to stay within Gmail API quota at scale.
   try {
     const { rows: replyRows } = await pool.query(`
       SELECT DISTINCT ON (ce.id)
         ce.id              AS enrollment_id,
         ce.lead_id,
         ce.salesperson_id,
+        ce.enrolled_at,
         ce.client_id,
         l.email            AS lead_email,
         l.first_name,
         l.last_name,
-        c.brand_config,
-        es.gmail_thread_id
+        c.brand_config
       FROM contact_enrollments ce
       JOIN leads l        ON l.id = ce.lead_id
       LEFT JOIN clients c ON c.id = ce.client_id
-      JOIN email_sends es ON es.enrollment_id = ce.id AND es.gmail_thread_id IS NOT NULL
       WHERE ce.status = 'active'
-      ORDER BY ce.id, es.sent_at ASC
+        AND EXISTS (SELECT 1 FROM email_sends es WHERE es.enrollment_id = ce.id AND es.status = 'sent')
+      ORDER BY ce.id
+      LIMIT 200
     `);
 
     for (const row of replyRows) {
       try {
-        const replyCheck = await checkForReplies(row.salesperson_id, row.gmail_thread_id);
+        const replyCheck = await checkForRepliesByAddress(
+          row.salesperson_id,
+          row.lead_email,
+          row.enrolled_at
+        );
         if (!replyCheck.replied) continue;
 
         await pool.query(
@@ -60,7 +65,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         );
         replies++;
 
-        const lead = { id: row.lead_id, email: row.lead_email, first_name: row.first_name, last_name: row.last_name };
+        const lead        = { id: row.lead_id, email: row.lead_email, first_name: row.first_name, last_name: row.last_name };
         const brandConfig = row.brand_config || {};
         if (replyCheck.replyText) {
           classifyReply(replyCheck.replyText, row.first_name).then(async (classification) => {
@@ -202,6 +207,25 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         );
         skipped++;
         continue;
+      }
+
+      // ── Tier gate: after step 3, pause leads with zero opens or clicks ──────
+      // Keeps domain reputation clean — only continue engaged leads past step 3.
+      if (nextStepNum > 3) {
+        const { rows: engagement } = await client.query(
+          `SELECT COALESCE(SUM(open_count),0) AS opens, COALESCE(SUM(click_count),0) AS clicks
+           FROM email_sends WHERE enrollment_id = $1`,
+          [row.enrollment_id]
+        );
+        const totalEngagement = parseInt(engagement[0]?.opens || 0) + parseInt(engagement[0]?.clicks || 0);
+        if (totalEngagement === 0) {
+          await client.query(
+            `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'no_engagement' WHERE id = $1`,
+            [row.enrollment_id]
+          );
+          skipped++;
+          continue;
+        }
       }
 
       const brandConfig = row.brand_config || {};

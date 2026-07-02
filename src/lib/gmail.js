@@ -218,6 +218,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
 }
 
 async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrollmentId, stepId, leadId }, brandConfig = {}) {
+  // Always need Gmail auth — for reply-to address even when sending via SES
   const auth = await getAuthedClient(salespersonId);
   if (!auth) return { ok: false, error: 'no_account' };
 
@@ -258,31 +259,49 @@ async function sendSequenceEmail({ salespersonId, to, subject, body, vars, enrol
   const html = buildHtml(rewrittenBody, fromName, unsubscribeUrl, brandConfig, pixelUrl);
 
   try {
-    const raw = await buildRawMessage({
-      fromName,
-      fromAddress: account.email,
-      to,
-      subject: resolvedSubject,
-      textBody: rewrittenBody,
-      htmlBody: html,
-    });
-
-    const sent = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
-
-    // Update status to 'sent' with Gmail message/thread IDs
-    await pool.query(
-      `UPDATE email_sends
-       SET status = 'sent', gmail_message_id = $1, gmail_thread_id = $2
-       WHERE id = $3`,
-      [sent.data.id, sent.data.threadId, emailSendId]
-    );
+    if (sesEnabled()) {
+      // ── SES path ─────────────────────────────────────────────────────────
+      const sesFrom = process.env.SES_FROM_EMAIL || account.email;
+      const sesName = process.env.SES_FROM_NAME  || fromName;
+      await sendViaSes({
+        fromName:    sesName,
+        fromAddress: sesFrom,
+        replyTo:     account.email,   // replies go back to salesperson's Gmail
+        to,
+        subject:     resolvedSubject,
+        textBody:    rewrittenBody,
+        htmlBody:    html,
+      });
+      await pool.query(
+        `UPDATE email_sends SET status = 'sent', send_service = 'ses' WHERE id = $1`,
+        [emailSendId]
+      );
+    } else {
+      // ── Gmail API path ────────────────────────────────────────────────────
+      const gmail = google.gmail({ version: 'v1', auth: client });
+      const raw   = await buildRawMessage({
+        fromName,
+        fromAddress: account.email,
+        to,
+        subject:     resolvedSubject,
+        textBody:    rewrittenBody,
+        htmlBody:    html,
+      });
+      const sent = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+      await pool.query(
+        `UPDATE email_sends
+         SET status = 'sent', gmail_message_id = $1, gmail_thread_id = $2, send_service = 'gmail'
+         WHERE id = $3`,
+        [sent.data.id, sent.data.threadId, emailSendId]
+      );
+    }
 
     await pool.query(
       'UPDATE email_accounts SET last_error = NULL WHERE salesperson_id = $1',
       [salespersonId]
     );
 
-    return { ok: true, messageId: sent.data.id };
+    return { ok: true };
   } catch (err) {
     const msg = err.message || 'Unknown error';
 
@@ -504,4 +523,86 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
 </html>`;
 }
 
-module.exports = { oauthClient, getAuthUrl, exchangeCode, buildHtml, buildDigestHtml, sendSequenceEmail, checkForReplies, sendReplyNotification, getAuthedClient, buildRawMessage };
+// ── SES sending via nodemailer SMTP ─────────────────────────────────────────
+
+function sesTransport() {
+  if (!process.env.SES_SMTP_HOST) return null;
+  return nodemailer.createTransport({
+    host: process.env.SES_SMTP_HOST,
+    port: parseInt(process.env.SES_SMTP_PORT) || 587,
+    secure: false,
+    auth: {
+      user: process.env.SES_SMTP_USER,
+      pass: process.env.SES_SMTP_PASS,
+    },
+  });
+}
+
+function sesEnabled() {
+  return !!(process.env.SES_SMTP_HOST && process.env.SES_SMTP_USER && process.env.SES_SMTP_PASS);
+}
+
+async function sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody }) {
+  const transport = sesTransport();
+  if (!transport) throw new Error('SES not configured');
+  await transport.sendMail({
+    from:    `"${fromName}" <${fromAddress}>`,
+    replyTo: replyTo || fromAddress,
+    to,
+    subject,
+    text:    textBody,
+    html:    htmlBody,
+  });
+}
+
+// ── Reply detection by lead email address (works for SES + Gmail sends) ─────
+
+async function checkForRepliesByAddress(salespersonId, leadEmail, afterDate) {
+  const auth = await getAuthedClient(salespersonId);
+  if (!auth) return { replied: false };
+
+  try {
+    const gmail = google.gmail({ version: 'v1', auth: auth.client });
+    // Search Gmail inbox for messages FROM the lead after the enrollment date
+    const after = Math.floor(new Date(afterDate).getTime() / 1000);
+    const q     = `from:${leadEmail} after:${after} in:anywhere`;
+    const list  = await gmail.users.messages.list({ userId: 'me', q, maxResults: 5 });
+    const msgs  = list.data.messages || [];
+    if (!msgs.length) return { replied: false };
+
+    // Get the first reply message
+    const msg     = await gmail.users.messages.get({ userId: 'me', id: msgs[0].id, format: 'full' });
+    const headers = msg.data.payload?.headers || [];
+    const from    = headers.find(h => h.name === 'From')?.value    || leadEmail;
+    const subject = headers.find(h => h.name === 'Subject')?.value || '';
+
+    let replyText = '';
+    const findText = (parts) => {
+      for (const p of (parts || [])) {
+        if (p.mimeType === 'text/plain' && p.body?.data) {
+          replyText = Buffer.from(p.body.data, 'base64').toString('utf8').slice(0, 600);
+          return;
+        }
+        if (p.parts) findText(p.parts);
+      }
+    };
+    if (msg.data.payload?.body?.data) {
+      replyText = Buffer.from(msg.data.payload.body.data, 'base64').toString('utf8').slice(0, 600);
+    } else {
+      findText(msg.data.payload?.parts);
+    }
+
+    return { replied: true, replyFrom: from, replySubject: subject, replyText: replyText.trim() };
+  } catch {
+    return { replied: false };
+  }
+}
+
+module.exports = {
+  oauthClient, getAuthUrl, exchangeCode,
+  buildHtml, buildDigestHtml,
+  sendSequenceEmail, sendViaSes, sesEnabled,
+  checkForReplies, checkForRepliesByAddress,
+  sendReplyNotification,
+  getAuthedClient, buildRawMessage,
+};

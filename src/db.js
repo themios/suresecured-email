@@ -203,6 +203,11 @@ async function initDb() {
     ALTER TABLE leads ADD COLUMN IF NOT EXISTS stage VARCHAR(30) DEFAULT 'new';
   `);
 
+  // SES / multi-provider sending columns
+  await pool.query(`
+    ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS send_service VARCHAR(20) DEFAULT 'gmail';
+  `);
+
   // CRM notes / activity log
   await pool.query(`
     CREATE TABLE IF NOT EXISTS lead_notes (
