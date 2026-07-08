@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-07-08 (prelaunch audit remediation)  
 **Canonical decisions:** see **`DECISIONS.md`**  
-**Git:** last pushed commit `fc136bb` on `master` → `github.com/themios/suresecured-email`. ⚠️ Audit remediation (2026-07-08) is **local, uncommitted** — see `PRELAUNCH_AUDIT_2026-07.md` + `ENHANCEMENTS.md`.
+**Git:** audit remediation committed + pushed as `359d2b2` on `master` → `github.com/themios/suresecured-email` (prior Phase 6 baseline: `fc136bb`).
 
 ---
 
@@ -107,7 +107,7 @@
 - [ ] Backfill `client_id` on legacy `NULL` leads (C3); Shopify Flow → `/api/form-submission` (C5)
 - [ ] S2 extra hardening: add `requireAuth` on `/gmail/callback` (optional — signed state already closes the hijack vector)
 - [ ] S5 hardening: shorten admin JWT TTL, CSRF tokens on admin/portal forms, generic error pages
-- [x] Git commit + push (`fc136bb`, 2026-07-09) — **note:** audit remediation (2026-07-08) is local, not yet committed/pushed
+- [x] Git commit + push (`fc136bb`, 2026-07-09; audit remediation `359d2b2`, 2026-07-08)
 
 ---
 
