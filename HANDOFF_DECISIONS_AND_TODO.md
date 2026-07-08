@@ -1,8 +1,8 @@
 # Handoff — Decisions & TODO List
 
-**Last updated:** 2026-07-09  
+**Last updated:** 2026-07-08 (prelaunch audit remediation)  
 **Canonical decisions:** see **`DECISIONS.md`**  
-**Git:** `fc136bb` on `master` → `github.com/themios/suresecured-email`
+**Git:** last pushed commit `fc136bb` on `master` → `github.com/themios/suresecured-email`. ⚠️ Audit remediation (2026-07-08) is **local, uncommitted** — see `PRELAUNCH_AUDIT_2026-07.md` + `ENHANCEMENTS.md`.
 
 ---
 
@@ -29,8 +29,9 @@
 | D4 | Cron requires `email_verified = true` | **CSV import sets `preverified`** — ZeroBounce optional |
 | D5 | Ambiguous orders → `pending_review` | |
 | D6 | Git commit when Tim requests | **Done 2026-07-09** — `fc136bb` pushed to `origin/master` |
-| D7–D8 | Warmup ramp + 3% bounce breaker | **Partial / pending** |
-| D9–D12 | Security secrets, API key, encryption | **Mostly done** — see Railway status |
+| D7 | Warmup ramp in daily send limits | **Done 2026-07-08** — migration 008 + `sendLimits.js`; `SEND_WARMUP=off` for established mailbox |
+| D8 | 3% bounce circuit breaker | **Pending** — P1 post-launch (offline clean mitigates) |
+| D9–D12 | Security secrets, API key, encryption | **Done** — OAuth token encryption implemented 2026-07-08; set `ENCRYPTION_KEY` in Railway |
 
 ---
 
@@ -38,11 +39,11 @@
 
 | Area | Status | Notes |
 |------|--------|-------|
-| 06-01 Security | **Done** | API auth, webhooks, SQL, cron POST, helmet |
-| 06-02 Attribution | **Mostly done** | Migration 007 fixed; lib + webhook + clicks |
-| 06-03 Voice | **Partial** | Retell/CallRail attribution; order phone match |
-| 06-04 Deliverability | **Partial** | `email_verified` gate; preverified CSV import; limits pending |
-| 06-05 Verification | **Pending** | Tests + `06-VERIFICATION.md`; build smoke OK |
+| 06-01 Security | **Done** | API auth, webhooks, SQL, cron POST, helmet; + audit remediation (OAuth token encryption, signed OAuth state, webhook raw-body verify, DB TLS toggle) |
+| 06-02 Attribution | **Done** | Migration 007; commission-theft guard + token/first-touch precedence + phone normalize; `attribution.test.js` |
+| 06-03 Voice | **Done** | Retell/CallRail attribution; order phone match (last-10) |
+| 06-04 Deliverability | **Done** | `email_verified` gate; preverified CSV import; per-identity daily caps + warmup (migration 008); List-Unsubscribe one-click |
+| 06-05 Verification | **Partial** | Unit tests green (`commissions`, `attribution`); staging E2E (Appendix A) pending |
 | Railway setup | **Done** | CLI linked; core vars; admin seeded |
 | Offline verify workflow | **Done** | Code + docs (`docs/DELIVERABILITY_RUNBOOK.md`) |
 | Git commit + push | **Done** | `fc136bb` — 43 files, Phase 6 + docs |
@@ -56,12 +57,23 @@
 
 ### P0 — Before first pilot send
 
+- [ ] **Railway env — send caps:** `SEND_WARMUP=off` + `DAILY_SEND_LIMIT=200` (or chosen cap). Default warmup starts at **5/day**, which throttles a 500–1k pilot. Use `off` for the established `sales@suresecured.com` mailbox; leave `on` only for a cold new inbox.
+- [ ] **Railway env — encryption:** `ENCRYPTION_KEY` (64-char hex). Without it, Gmail OAuth tokens + SMTP passwords stay plaintext (no crash). Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+- [ ] **Railway env — webhook secrets:** confirm `RETELL_WEBHOOK_SECRET` / `TELNYX_WEBHOOK_SECRET` set if voice/SMS webhooks are live (they now fail closed without them).
 - [ ] **Shopify webhook** — Settings → Notifications → Order creation → `https://suresecured-email-production.up.railway.app/webhooks/shopify/order` → set real `SHOPIFY_WEBHOOK_SECRET` in Railway
 - [ ] **Shopify snippet** — dev pastes `shopify-handoff/snippet.js` into `theme.liquid` before `</body>`
 - [ ] **Offline verify full list** — MillionVerifier / Bouncer → import **valid-only** CSV (see runbook)
 - [ ] **DNS** — SPF + DKIM + DMARC for `sales@suresecured.com` (Ionos)
+- [ ] **Test send** — one email → Gmail "Show original" → confirm `List-Unsubscribe` header + SPF/DKIM/DMARC pass
 - [ ] **Pilot enroll** — 500–1,000 leads only; watch bounce rate 48–72h
 - [ ] **Client record** — `integration_settings.shopify_domain` = your `.myshopify.com` store
+
+### P0 — Code (audit remediation, done 2026-07-08)
+
+- [x] C1 commission-theft guard · C2 token/first-touch precedence · C4 phone normalize
+- [x] S1 OAuth token encryption · S2 signed OAuth state · S3 webhook raw-body verify · S4 DB TLS toggle
+- [x] D1 per-identity send caps + warmup ramp · D2 List-Unsubscribe one-click
+- [x] Unit tests: `attribution.test.js` + `commissions.test.js` green; full `src` syntax check
 
 ### P0 — Done ✅
 
@@ -89,10 +101,13 @@
 
 ### P2 — Engineering (not blocking pilot)
 
-- [ ] Daily send limits + warmup ramp (D7)
-- [ ] 3% bounce circuit breaker (D8)
-- [ ] `06-VERIFICATION.md` + expanded tests
-- [x] Git commit + push (`fc136bb`, 2026-07-09)
+- [x] Daily send limits + warmup ramp (D7) — done 2026-07-08 (migration 008 + `sendLimits.js`)
+- [ ] 3% bounce circuit breaker (D8) + DSN parsing
+- [ ] `06-VERIFICATION.md` + staging E2E (unit tests done)
+- [ ] Backfill `client_id` on legacy `NULL` leads (C3); Shopify Flow → `/api/form-submission` (C5)
+- [ ] S2 extra hardening: add `requireAuth` on `/gmail/callback` (optional — signed state already closes the hijack vector)
+- [ ] S5 hardening: shorten admin JWT TTL, CSRF tokens on admin/portal forms, generic error pages
+- [x] Git commit + push (`fc136bb`, 2026-07-09) — **note:** audit remediation (2026-07-08) is local, not yet committed/pushed
 
 ---
 

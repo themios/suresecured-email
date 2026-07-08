@@ -20,6 +20,13 @@ function verifyCallRailWebhook(req) {
  * Retell — HMAC-SHA256 of raw JSON body with API key.
  * Header: x-retell-signature
  */
+function rawBodyString(req, rawBody) {
+  const rb = rawBody || req.rawBody;
+  if (Buffer.isBuffer(rb)) return rb.toString('utf8');
+  if (typeof rb === 'string') return rb;
+  return JSON.stringify(req.body || {}); // last-resort fallback (may not byte-match)
+}
+
 function verifyRetellWebhook(req, rawBody) {
   const apiKey = process.env.RETELL_API_KEY;
   const signature = req.headers['x-retell-signature'];
@@ -32,7 +39,7 @@ function verifyRetellWebhook(req, rawBody) {
     console.warn('[webhook] RETELL_API_KEY or RETELL_WEBHOOK_SECRET not set');
     return false;
   }
-  const body = rawBody || JSON.stringify(req.body || {});
+  const body = rawBodyString(req, rawBody);
   const expected = crypto.createHmac('sha256', apiKey).update(body).digest('hex');
   return timingSafeEqualStr(signature, expected);
 }
@@ -58,7 +65,7 @@ function verifyTelnyxWebhook(req, rawBody) {
   }
 
   try {
-    const payload = `${timestamp}|${rawBody || JSON.stringify(req.body || {})}`;
+    const payload = `${timestamp}|${rawBodyString(req, rawBody)}`;
     return crypto.verify(
       null,
       Buffer.from(payload),

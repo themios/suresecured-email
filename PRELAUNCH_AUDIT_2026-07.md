@@ -7,17 +7,43 @@
 
 ---
 
+## Remediation status (updated 2026-07-07)
+
+All code-side P0 and cheap P1 findings below were fixed in this pass. See `ENHANCEMENTS.md` for the change log and the new tests (`src/lib/attribution.test.js`).
+
+| ID | Finding | Status |
+|----|---------|--------|
+| C1 | Commission theft via forged `ss_salesperson` | ✅ Fixed — cart value validated (active + in-tenant), used only as last-resort hint |
+| C2 | Last-click vs first-touch contradiction | ✅ Fixed — token authoritative, then lead first-touch, then voice, then validated cart hint; covered by tests |
+| C4 | Phone match missed country-code variants | ✅ Fixed — normalize to last-10 on both sides |
+| S1 | Gmail OAuth tokens plaintext | ✅ Fixed — AES-GCM at rest (`maybeEncrypt`/`safeDecrypt`), backward-compatible |
+| S2 | OAuth callback CSRF / arbitrary-id binding | ✅ Fixed — signed, 10-min expiring `state`; salesperson existence checked |
+| S3 | Retell/Telnyx signature effectively bypassed | ✅ Fixed — raw body captured; true HMAC/Ed25519 verified |
+| S4 | DB TLS `rejectUnauthorized:false` | ✅ Mitigated — `DB_SSL_REJECT_UNAUTHORIZED`/`DB_SSL_CA` toggle (opt-in strict) |
+| D1 | No send caps / warmup | ✅ Fixed — per-identity daily cap + 5→10→20→40→max ramp (migration 008) |
+| D2 | No `List-Unsubscribe` header | ✅ Fixed — RFC 8058 one-click header on all send paths + POST handler |
+| C3 | Legacy leads not tenant-scoped | ⏳ Deferred (needs data backfill decision) — see note below |
+| C5 | Form submissions not auto-ingested | ⏳ Ops — needs Shopify Flow wiring |
+| D3 | DSN bounce parsing + circuit breaker | ⏳ P1 — offline pre-clean covers launch |
+| D4 | SPF/DKIM/DMARC/Postmaster | ⏳ Ops (DNS) — Tim |
+
+**C3 note:** cross-tenant commission leakage is now blocked at the point that matters (cart salesperson is validated against the order's client). The remaining item is backfilling `client_id` on legacy `NULL` leads so the `OR client_id IS NULL` fallback can be dropped — safe to do once, but it's a data decision for Tim, not a code change.
+
+---
+
 ## Verdict
 
-A lot of the original P0 list is genuinely fixed in code: `/api` and `/admin` now require auth, webhooks reject unsigned requests, analytics uses parameterized queries, cron accepts POST, setup seeds the `users` table. Good.
+> **Updated 2026-07-08 — all code-side blockers below are now closed.** See the remediation status table above. What remains is ops (DNS, Shopify webhook secret, Railway env config) and post-launch P1s (bounce circuit breaker, legacy `client_id` backfill, form-flow ingestion). The original findings are preserved below for traceability; treat the status table as authoritative.
 
-But **three launch-blocking problems remain**, and two of them go straight to your core goal — paying the right salesperson:
+**Original assessment (2026-07-07):** A lot of the original P0 list was already fixed: `/api` and `/admin` require auth, webhooks reject unsigned requests, analytics uses parameterized queries, cron accepts POST, setup seeds the `users` table.
 
-1. **Commission theft via a URL parameter** (attribution integrity) — highest priority.
-2. **Gmail OAuth tokens are stored in plaintext** and the OAuth callback has no CSRF/state protection (account-takeover of a rep's sending identity).
-3. **No send caps, no warmup, no `List-Unsubscribe` header** — this is how you get `suresecured.com` blacklisted on the first big send.
+Three launch-blocking problems remained at first review, all now remediated:
 
-Do not enroll the pilot list until C1, S1, and D1–D3 below are closed.
+1. **Commission theft via a URL parameter** (C1) — *fixed:* cart value validated + demoted to last-resort hint.
+2. **Gmail OAuth tokens in plaintext + no OAuth CSRF** (S1/S2) — *fixed:* AES-GCM at rest + signed expiring state.
+3. **No send caps / warmup / `List-Unsubscribe`** (D1/D2) — *fixed:* per-identity caps + ramp + RFC 8058 headers.
+
+**Pilot gate now:** set the Railway env vars (`ENCRYPTION_KEY`, `SEND_WARMUP=off` + `DAILY_SEND_LIMIT`, webhook secrets, real `SHOPIFY_WEBHOOK_SECRET`), verify DNS (SPF/DKIM/DMARC), and run one test send confirming `List-Unsubscribe` + auth pass. D3 (bounce breaker) is P1, not a solo-pilot blocker given the offline list clean.
 
 ---
 

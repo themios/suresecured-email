@@ -3,7 +3,9 @@ const nodemailer  = require('nodemailer');
 const { pool }    = require('../db');
 const { generateToken } = require('./unsubscribe');
 const { rewriteLinks, isPermanentBounce }  = require('./email-tracking');
-const { decrypt } = require('./crypto');
+const crypto = require('crypto');
+const { decrypt, maybeEncrypt, safeDecrypt } = require('./crypto');
+const { reserveSend } = require('./sendLimits');
 
 /**
  * Load and decrypt a client's email config from DB.
@@ -47,6 +49,43 @@ function oauthClient() {
   );
 }
 
+// ── Signed, expiring OAuth state (CSRF + identity binding) ──────────────────
+// state = base64url(JSON payload) + '.' + HMAC-SHA256(secret, payload)
+// Binds the connect flow to a specific salesperson for a short window so the
+// callback cannot be tricked into binding a Google account to an arbitrary id.
+function oauthStateSecret() {
+  return process.env.JWT_SECRET || process.env.UNSUBSCRIBE_HMAC_SECRET;
+}
+
+function signOAuthState(salespersonId, ttlMs = 10 * 60 * 1000) {
+  const secret = oauthStateSecret();
+  if (!secret) throw new Error('JWT_SECRET required to sign OAuth state');
+  const payload = { sid: String(salespersonId), nonce: crypto.randomBytes(8).toString('hex'), exp: Date.now() + ttlMs };
+  const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(encoded).digest('base64url');
+  return `${encoded}.${sig}`;
+}
+
+function verifyOAuthState(state) {
+  const secret = oauthStateSecret();
+  if (!secret || !state || typeof state !== 'string') return null;
+  const dot = state.lastIndexOf('.');
+  if (dot < 0) return null;
+  const encoded = state.slice(0, dot);
+  const sig     = state.slice(dot + 1);
+  const expected = crypto.createHmac('sha256', secret).update(encoded).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    if (!payload.exp || Date.now() > payload.exp) return null;
+    return payload.sid;
+  } catch {
+    return null;
+  }
+}
+
 function getAuthUrl(salespersonId) {
   const client = oauthClient();
   return client.generateAuthUrl({
@@ -57,7 +96,7 @@ function getAuthUrl(salespersonId) {
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/userinfo.email',
     ],
-    state: String(salespersonId),
+    state: signOAuthState(salespersonId),
   });
 }
 
@@ -82,8 +121,8 @@ async function getAuthedClient(salespersonId) {
   const account = rows[0];
   const client  = oauthClient();
   client.setCredentials({
-    refresh_token: account.oauth_refresh_token,
-    access_token:  account.oauth_access_token,
+    refresh_token: safeDecrypt(account.oauth_refresh_token),
+    access_token:  safeDecrypt(account.oauth_access_token),
     expiry_date:   account.oauth_token_expiry ? new Date(account.oauth_token_expiry).getTime() : undefined,
   });
 
@@ -98,7 +137,7 @@ async function getAuthedClient(salespersonId) {
         `UPDATE email_accounts
          SET oauth_access_token = $1, oauth_token_expiry = $2, last_error = NULL
          WHERE salesperson_id = $3`,
-        [credentials.access_token, credentials.expiry_date ? new Date(credentials.expiry_date) : null, salespersonId]
+        [maybeEncrypt(credentials.access_token), credentials.expiry_date ? new Date(credentials.expiry_date) : null, salespersonId]
       );
     } catch (err) {
       await pool.query(
@@ -116,7 +155,7 @@ function substituteVars(text, vars) {
   return text.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? `{${key}}`);
 }
 
-async function buildRawMessage({ fromName, fromAddress, to, subject, textBody, htmlBody }) {
+async function buildRawMessage({ fromName, fromAddress, to, subject, textBody, htmlBody, headers }) {
   const composer = nodemailer.createTransport({ streamTransport: true, buffer: true, newline: 'unix' });
   const info = await composer.sendMail({
     from:    { name: fromName, address: fromAddress },
@@ -124,6 +163,7 @@ async function buildRawMessage({ fromName, fromAddress, to, subject, textBody, h
     subject,
     text:    textBody,
     html:    htmlBody,
+    headers: headers || undefined,
   });
   if (!Buffer.isBuffer(info.message)) throw new Error('Failed to compose message');
   return info.message.toString('base64url');
@@ -277,6 +317,28 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
   const fromName       = vars.salesperson_name || `${brandConfig.name || 'SureSecured'} Team`;
   const unsubscribeUrl = buildUnsubscribeUrl(to);
 
+  // Load client SMTP config (DB takes priority over env vars) up front so we can
+  // resolve the true sending identity and enforce the daily cap BEFORE creating
+  // the email_sends row (avoids dangling 'sending' rows when capped).
+  const clientCfg = await getClientEmailConfig(clientId);
+
+  const usingClientSmtp = !!(clientCfg?.smtp_host && clientCfg?.smtp_user && clientCfg?.smtp_pass);
+  const sendIdentity = usingClientSmtp
+    ? (clientCfg.from_email || account?.email)
+    : (sesEnabled() ? (process.env.SES_FROM_EMAIL || account.email) : (clientCfg?.from_email || account.email));
+
+  // Warmup / daily cap gate — protects domain reputation
+  const reservation = await reserveSend(sendIdentity);
+  if (!reservation.ok) {
+    return { ok: false, error: 'daily_limit', limited: true, identity: sendIdentity, limit: reservation.limit };
+  }
+
+  // One-click unsubscribe headers (Gmail/Yahoo bulk sender requirement)
+  const listUnsubHeaders = {
+    'List-Unsubscribe': `<${unsubscribeUrl}>, <mailto:unsubscribe@${(brandConfig.website || 'suresecured.com').replace(/^https?:\/\//, '')}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  };
+
   // INSERT email_sends with status='sending' BEFORE Gmail send
   // This is required: email_tracking_tokens has NOT NULL FK to email_sends.id
   const insertResult = await pool.query(
@@ -293,9 +355,6 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
 
   const html = buildHtml(rewrittenBody, fromName, unsubscribeUrl, brandConfig, pixelUrl);
 
-  // Load client SMTP config (DB takes priority over env vars)
-  const clientCfg = await getClientEmailConfig(clientId);
-
   try {
     if (clientCfg?.smtp_host && clientCfg?.smtp_user && clientCfg?.smtp_pass) {
       // ── Client DB config path ─────────────────────────────────────────────
@@ -310,6 +369,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
         subject:     resolvedSubject,
         textBody:    rewrittenBody,
         htmlBody:    html,
+        headers:     listUnsubHeaders,
       });
       await pool.query(
         `UPDATE email_sends SET status = 'sent', send_service = $1 WHERE id = $2`,
@@ -327,6 +387,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
         subject:     resolvedSubject,
         textBody:    rewrittenBody,
         htmlBody:    html,
+        headers:     listUnsubHeaders,
       });
       await pool.query(
         `UPDATE email_sends SET status = 'sent', send_service = 'ses' WHERE id = $1`,
@@ -345,6 +406,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
         subject:     resolvedSubject,
         textBody:    rewrittenBody,
         htmlBody:    html,
+        headers:     listUnsubHeaders,
       });
       const sent = await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
       await pool.query(
@@ -601,7 +663,7 @@ function sesEnabled() {
   return !!(process.env.SES_SMTP_HOST && process.env.SES_SMTP_USER && process.env.SES_SMTP_PASS);
 }
 
-async function sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody }) {
+async function sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, headers }) {
   const transport = sesTransport();
   if (!transport) throw new Error('SES not configured');
   await transport.sendMail({
@@ -611,6 +673,7 @@ async function sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBod
     subject,
     text:    textBody,
     html:    htmlBody,
+    headers: headers || undefined,
   });
 }
 
@@ -618,7 +681,7 @@ async function sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBod
  * Send via a client's saved SMTP config (from client_email_config table).
  * clientCfg comes from getClientEmailConfig().
  */
-async function sendViaClientSmtp(clientCfg, { fromName, fromAddress, replyTo, to, subject, textBody, htmlBody }) {
+async function sendViaClientSmtp(clientCfg, { fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, headers }) {
   const transport = nodemailer.createTransport({
     host:   clientCfg.smtp_host,
     port:   clientCfg.smtp_port || 587,
@@ -632,6 +695,7 @@ async function sendViaClientSmtp(clientCfg, { fromName, fromAddress, replyTo, to
     subject,
     text:    textBody,
     html:    htmlBody,
+    headers: headers || undefined,
   });
 }
 
@@ -708,7 +772,7 @@ async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, te
 }
 
 module.exports = {
-  oauthClient, getAuthUrl, exchangeCode,
+  oauthClient, getAuthUrl, exchangeCode, verifyOAuthState, signOAuthState,
   buildHtml, buildDigestHtml,
   sendSequenceEmail, sendViaSes, sendViaClientSmtp, sesEnabled, sendDirectEmail,
   checkForReplies, checkForRepliesByAddress,

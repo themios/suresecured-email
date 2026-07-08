@@ -36,9 +36,9 @@ router.post('/', async (req, res) => {
     // Try to match caller to an existing lead by phone number
     let leadId = null;
     if (caller_number) {
-      const cleanCaller = caller_number.replace(/\D/g, '');
+      const cleanCaller = caller_number.replace(/\D/g, '').slice(-10);
       const leadResult = await pool.query(
-        `SELECT id FROM leads WHERE regexp_replace(phone, '[^0-9]', '', 'g') = $1 LIMIT 1`,
+        `SELECT id FROM leads WHERE RIGHT(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = $1 LIMIT 1`,
         [cleanCaller]
       );
       if (leadResult.rows.length > 0) leadId = leadResult.rows[0].id;

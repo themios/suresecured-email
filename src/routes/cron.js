@@ -568,6 +568,11 @@ async function sendSequencesHandler(req, res) {
         });
 
         sent++;
+      } else if (sendResult.limited) {
+        // Daily cap / warmup ceiling hit for this sending identity.
+        // Leave the enrollment due (do not advance) so it retries next window.
+        skipped++;
+        console.log(`[cron] daily send cap reached for ${sendResult.identity} (limit ${sendResult.limit}) — enrollment ${row.enrollment_id} deferred`);
       } else {
         errors++;
         console.error(`[cron] send failed for enrollment ${row.enrollment_id}:`, sendResult.error);

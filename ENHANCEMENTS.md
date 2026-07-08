@@ -4,6 +4,26 @@ Product and engineering changes beyond routine maintenance. Newest entries first
 
 ---
 
+## 2026-07-08 — Prelaunch audit remediation (security · attribution · deliverability)
+
+- **Category:** Security / Attribution / Deliverability
+- **Migration:** `migrations/008_send_limits.sql` (send caps + warmup ramp)
+- **Why:** Close the code-side P0/P1 findings from `PRELAUNCH_AUDIT_2026-07.md` before the pilot send — commission integrity, mailbox-token security, and domain reputation.
+- **What was built:**
+  - **C1 commission-theft guard** — `src/lib/attribution.js`: `ss_salesperson` cart value is now validated (active + belongs to the order's client) via `validateSalesperson()` and used only as a last-resort hint; forged/foreign ids fall through to `pending_review`.
+  - **C2 first-touch ordering** — resolver reordered to: server token → lead first-touch (email/phone) → recent voice call → validated cart hint → `pending_review`. Server-issued token and lead first-touch now beat the URL-derived cart value.
+  - **C4 phone normalization** — last-10-digit match on both sides (`RIGHT(...,10)`) in `attribution.js` + `phonecall.js` so `+1` prefixes match.
+  - **S1 OAuth token encryption** — `src/lib/crypto.js` gains `maybeEncrypt`/`safeDecrypt`/`encryptionEnabled`; `gmail-oauth.js` encrypts refresh/access tokens on write; `gmail.js` decrypts on read + on refresh write. Backward-compatible with existing plaintext rows.
+  - **S2 OAuth CSRF** — `gmail.js` `signOAuthState`/`verifyOAuthState` (HMAC, 10-min expiry); callback rejects tampered/expired state and verifies the salesperson exists.
+  - **S3 webhook signatures** — `index.js` captures `req.rawBody` in the JSON parser; `webhookVerify.js` verifies Retell HMAC + Telnyx Ed25519 against the exact bytes.
+  - **S4 DB TLS** — `db.js` `DB_SSL_REJECT_UNAUTHORIZED` / `DB_SSL_CA` opt-in strict verification.
+  - **D1 send caps + warmup** — `src/lib/sendLimits.js` (`reserveSend`) enforces an atomic per-identity daily cap with a 5→10→20→40→`DAILY_SEND_LIMIT` ramp; wired into `gmail.js` before the send; `cron.js` defers (not errors) capped enrollments.
+  - **D2 List-Unsubscribe** — RFC 8058 one-click header on all three send paths (`buildRawMessage`, SES, client SMTP) + `POST /unsubscribe` one-click handler.
+  - **Tests** — `src/lib/attribution.test.js` (theft guard, token/first-touch precedence, phone normalization); existing `commissions.test.js` still green.
+  - **Docs** — `.env.example` (`ENCRYPTION_KEY` fix, `DAILY_SEND_LIMIT`, `SES_FROM_*`, DB TLS vars); `PRELAUNCH_AUDIT_2026-07.md` status table.
+
+---
+
 ## 2026-07-09 — Git push + build verification + PII gitignore
 
 - **Category:** DevOps / Documentation

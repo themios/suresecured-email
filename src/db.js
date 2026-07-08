@@ -2,12 +2,23 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
+// TLS: in production, encrypt by default. Set DB_SSL_REJECT_UNAUTHORIZED=true
+// (optionally with DB_SSL_CA = PEM cert) to also authenticate the server cert
+// and defeat MITM. Left permissive by default so managed hosts whose cert chain
+// isn't trusted out of the box keep working.
+function dbSsl() {
+  if (process.env.NODE_ENV !== 'production') return false;
+  const strict = process.env.DB_SSL_REJECT_UNAUTHORIZED === 'true';
+  const ca = process.env.DB_SSL_CA;
+  return { rejectUnauthorized: strict, ...(ca ? { ca } : {}) };
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 20,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  ssl: dbSsl(),
 });
 
 async function initDb() {
@@ -51,6 +62,12 @@ async function initDb() {
     'utf8'
   );
   await pool.query(migration007Sql);
+
+  const migration008Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/008_send_limits.sql'),
+    'utf8'
+  );
+  await pool.query(migration008Sql);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (

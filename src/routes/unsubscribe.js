@@ -3,6 +3,40 @@ const router   = express.Router();
 const { pool } = require('../db');
 const { verifyToken } = require('../lib/unsubscribe');
 
+// Suppress an email everywhere: add to suppression list, flag lead, pause enrollments.
+async function suppressEmail(email) {
+  await pool.query(
+    `INSERT INTO suppression_list (email, reason) VALUES ($1, 'unsubscribed')
+     ON CONFLICT (email) DO UPDATE SET reason = 'unsubscribed', added_at = NOW()`,
+    [email]
+  );
+  await pool.query(
+    `UPDATE leads SET unsubscribed = true, unsubscribed_at = NOW() WHERE LOWER(email) = LOWER($1)`,
+    [email]
+  );
+  await pool.query(
+    `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'unsubscribed'
+     WHERE lead_id IN (SELECT id FROM leads WHERE LOWER(email) = LOWER($1))
+       AND status = 'active'`,
+    [email]
+  );
+  console.log(`[unsubscribe] ${email} removed at ${new Date().toISOString()}`);
+}
+
+// POST /unsubscribe?t=TOKEN — RFC 8058 one-click (Gmail/Yahoo bulk sender rule).
+// Body is `List-Unsubscribe=One-Click`; the token travels in the query string.
+router.post('/', express.urlencoded({ extended: false }), async (req, res) => {
+  const email = verifyToken(req.query.t || '');
+  if (!email) return res.status(400).send('Invalid token');
+  try {
+    await suppressEmail(email);
+    return res.status(200).send('Unsubscribed');
+  } catch (err) {
+    console.error('[unsubscribe:one-click] error:', err.message);
+    return res.status(500).send('Error');
+  }
+});
+
 // GET /unsubscribe?t=TOKEN
 router.get('/', async (req, res) => {
   const token = req.query.t;
@@ -12,28 +46,7 @@ router.get('/', async (req, res) => {
   if (!email) return res.status(400).send(page('Invalid link', 'This unsubscribe link is not valid.', false));
 
   try {
-    // Add to suppression list
-    await pool.query(
-      `INSERT INTO suppression_list (email, reason) VALUES ($1, 'unsubscribed')
-       ON CONFLICT (email) DO UPDATE SET reason = 'unsubscribed', added_at = NOW()`,
-      [email]
-    );
-
-    // Permanently flag the lead record
-    await pool.query(
-      `UPDATE leads SET unsubscribed = true, unsubscribed_at = NOW() WHERE LOWER(email) = LOWER($1)`,
-      [email]
-    );
-
-    // Pause all active enrollments for this email address
-    await pool.query(
-      `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'unsubscribed'
-       WHERE lead_id IN (SELECT id FROM leads WHERE LOWER(email) = LOWER($1))
-         AND status = 'active'`,
-      [email]
-    );
-
-    console.log(`[unsubscribe] ${email} removed at ${new Date().toISOString()}`);
+    await suppressEmail(email);
 
     res.send(page('You have been unsubscribed', `
       <p><strong>${email}</strong> has been removed from all SureSecured email lists.</p>

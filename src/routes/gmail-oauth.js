@@ -1,7 +1,8 @@
 const express  = require('express');
 const router   = express.Router();
 const { pool } = require('../db');
-const { getAuthUrl, exchangeCode } = require('../lib/gmail');
+const { getAuthUrl, exchangeCode, verifyOAuthState } = require('../lib/gmail');
+const { maybeEncrypt } = require('../lib/crypto');
 const { requireAuth } = require('../middleware/auth');
 
 // Redirect salesperson to Google consent screen
@@ -10,14 +11,27 @@ router.get('/connect/:salespersonId', requireAuth, (req, res) => {
   res.redirect(url);
 });
 
-// Google redirects back here with ?code=...&state=salespersonId
+// Google redirects back here with ?code=...&state=<signed state>
 router.get('/callback', async (req, res) => {
-  const { code, state: salespersonId, error } = req.query;
+  const { code, state, error } = req.query;
 
-  if (error) return res.send(`<p>Google denied access: ${error}. <a href="/admin">Back to Admin</a></p>`);
-  if (!code || !salespersonId) return res.send('<p>Missing parameters. <a href="/admin">Back to Admin</a></p>');
+  if (error) return res.send(`<p>Google denied access. <a href="/admin">Back to Admin</a></p>`);
+  if (!code || !state) return res.send('<p>Missing parameters. <a href="/admin">Back to Admin</a></p>');
+
+  // Verify signed, unexpired state — prevents binding a Google account to an
+  // arbitrary salesperson id (CSRF / identity hijack).
+  const salespersonId = verifyOAuthState(state);
+  if (!salespersonId) {
+    return res.status(400).send('<p>This connection link is invalid or expired. Please start again from Admin. <a href="/admin">Back to Admin</a></p>');
+  }
 
   try {
+    // Confirm the salesperson exists before binding a mailbox to it
+    const spCheck = await pool.query('SELECT id FROM salespeople WHERE id = $1', [salespersonId]);
+    if (!spCheck.rows.length) {
+      return res.status(404).send('<p>Salesperson not found. <a href="/admin">Back to Admin</a></p>');
+    }
+
     const { tokens, email } = await exchangeCode(code);
 
     await pool.query(
@@ -32,7 +46,7 @@ router.get('/callback', async (req, res) => {
          enabled             = true,
          last_error          = NULL,
          connected_at        = NOW()`,
-      [salespersonId, email, tokens.refresh_token, tokens.access_token,
+      [salespersonId, email, maybeEncrypt(tokens.refresh_token), maybeEncrypt(tokens.access_token),
        tokens.expiry_date ? new Date(tokens.expiry_date) : null]
     );
 

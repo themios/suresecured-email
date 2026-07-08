@@ -28,12 +28,12 @@
 | **D4** | **Send gate:** `email_verified = true` required | 2026-07-07 | **Updated 2026-07-08:** satisfied by **CSV import** (`verification_status = preverified`) OR in-app ZeroBounce batch — **not** ZeroBounce-only |
 | **D5** | Ambiguous orders → `commission_status = pending_review` | 2026-07-07 | No random rep assignment |
 | **D6** | Git commit when Tim requests | 2026-07-07 | **Done 2026-07-09:** `fc136bb` pushed to `origin/master` |
-| **D7** | Warmup ramp in daily limits (planned) | 2026-07-07 | 5→10→20→40→80/day per inbox — migration pending |
-| **D8** | Bounce circuit breaker at 3% (planned) | 2026-07-07 | Not fully implemented |
+| **D7** | Warmup ramp in daily limits (**implemented 2026-07-08**) | 2026-07-07 | `migrations/008_send_limits.sql` + `src/lib/sendLimits.js`; per-identity 5→10→20→40→`DAILY_SEND_LIMIT`. Set `SEND_WARMUP=off` for an established mailbox |
+| **D8** | Bounce circuit breaker at 3% (**still pending**) | 2026-07-07 | Not implemented — P1 post-launch; offline list clean mitigates for pilot |
 | **D9** | `UNSUBSCRIBE_HMAC_SECRET` separate from JWT | 2026-07-08 | Set in Railway |
 | **D10** | `X-Client-Api-Key` for server-to-server forms | 2026-07-07 | `CLIENT_API_KEY` set in Railway |
-| **D11** | E2E tests on staging before full send | 2026-07-07 | Appendix A in `PRELAUNCH_AUDIT.md` |
-| **D12** | OAuth token encryption when `ENCRYPTION_KEY` set | 2026-07-07 | Railway uses `ENCRYPTION_KEY` (64-char hex) |
+| **D11** | E2E tests on staging before full send | 2026-07-07 | Appendix A in `PRELAUNCH_AUDIT.md`; unit tests done (`attribution.test.js`), staging run pending |
+| **D12** | OAuth token encryption when `ENCRYPTION_KEY` set (**implemented 2026-07-08**) | 2026-07-07 | `maybeEncrypt`/`safeDecrypt` in `crypto.js`, wired in `gmail-oauth.js` + `gmail.js`; set 64-char hex `ENCRYPTION_KEY` in Railway or tokens stay plaintext |
 
 ---
 

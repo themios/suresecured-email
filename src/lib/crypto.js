@@ -30,4 +30,37 @@ function decrypt(encoded) {
   return decipher.update(enc).toString('utf8') + decipher.final('utf8');
 }
 
-module.exports = { encrypt, decrypt };
+/**
+ * Whether encryption is configured (ENCRYPTION_KEY present and valid length).
+ */
+function encryptionEnabled() {
+  const hex = process.env.ENCRYPTION_KEY;
+  return !!(hex && hex.length === 64);
+}
+
+/**
+ * Encrypt only if a key is configured; otherwise return the plaintext unchanged.
+ * Lets deploys without ENCRYPTION_KEY keep working (values stay plaintext).
+ */
+function maybeEncrypt(text) {
+  if (!text) return text ?? null;
+  return encryptionEnabled() ? encrypt(text) : text;
+}
+
+/**
+ * Decrypt a value that may be either ciphertext (this scheme) or legacy plaintext.
+ * Ciphertext is base64 of [12b iv][16b tag][ciphertext] = min 28 bytes and decodes
+ * cleanly under the GCM key. If decryption fails, assume the value predates
+ * encryption and return it as-is. Safe for a mixed-state column during rollout.
+ */
+function safeDecrypt(value) {
+  if (!value) return null;
+  if (!encryptionEnabled()) return value;
+  try {
+    return decrypt(value);
+  } catch {
+    return value; // legacy plaintext row
+  }
+}
+
+module.exports = { encrypt, decrypt, maybeEncrypt, safeDecrypt, encryptionEnabled };

@@ -41,7 +41,9 @@ app.use(helmet({
 // Webhooks need raw body for HMAC verification — must come before json middleware
 app.use('/webhooks', webhookRouter);
 
-app.use(express.json());
+// Capture the raw request bytes on every JSON body so webhook handlers
+// (Retell HMAC, Telnyx Ed25519) can verify signatures against the exact payload.
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(cookieParser());
 
 // Rate limits

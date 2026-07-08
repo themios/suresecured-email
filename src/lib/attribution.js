@@ -22,13 +22,44 @@ async function setFirstTouchAttribution({ leadId, salespersonId, source, clientI
   return rowCount > 0;
 }
 
+/**
+ * Normalize a phone number to its last 10 digits so that stored values like
+ * "8185551234" match order values like "+18185551234" (leading country code).
+ */
 function normalizePhone(phone) {
-  return (phone || '').replace(/\D/g, '') || null;
+  const digits = (phone || '').replace(/\D/g, '');
+  if (!digits) return null;
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+/**
+ * Validate that a salesperson id is real, active, and (when clientId is known)
+ * belongs to that client. Returns the id when valid, otherwise null.
+ * Used to prevent commission theft via forged `ss_salesperson` cart attributes.
+ */
+async function validateSalesperson(id, clientId, db = pool) {
+  const parsed = parseInt(id, 10);
+  if (Number.isNaN(parsed)) return null;
+  const { rows } = await db.query(
+    `SELECT id FROM salespeople
+     WHERE id = $1 AND active = true
+       AND ($2::int IS NULL OR client_id = $2)`,
+    [parsed, clientId || null]
+  );
+  return rows[0] ? parsed : null;
 }
 
 /**
  * Resolve commission salesperson for a Shopify order.
  * Returns { salespersonId, path, status } where status is 'credited' | 'pending_review'.
+ *
+ * Resolution policy (first-touch wins, tamper-proof signals first):
+ *   1. Server-issued tracking token on the order (authoritative — not user-editable)
+ *   2. Lead first-touch owner (attributed_salesperson_id) by email/phone
+ *   3. Recent inbound voice call by phone (voice first-touch)
+ *   4. Cart `ss_salesperson` — a client-side URL-derived HINT only, used to fill
+ *      the gap and ONLY after validating the salesperson is active + in-tenant
+ *   5. NULL → pending_review (never guess a rep)
  */
 async function resolveSalespersonForOrder({
   token,
@@ -37,15 +68,7 @@ async function resolveSalespersonForOrder({
   customerPhone,
   clientId,
 }, db = pool) {
-  // 1. Cart / note_attributes salesperson
-  if (cartSalespersonId) {
-    const id = parseInt(cartSalespersonId, 10);
-    if (!Number.isNaN(id)) {
-      return { salespersonId: id, path: `cart:ss_salesperson:${id}`, status: 'credited' };
-    }
-  }
-
-  // 2. Tracking token on order
+  // 1. Tracking token on order (server-issued, cannot be forged by the buyer)
   if (token) {
     const { rows } = await db.query(
       `SELECT lead_id, salesperson_id FROM tracking_tokens WHERE token = $1`,
@@ -82,7 +105,7 @@ async function resolveSalespersonForOrder({
     if (digits) {
       const params = [digits];
       let sql = `SELECT id, attributed_salesperson_id, salesperson_id, client_id
-                 FROM leads WHERE regexp_replace(phone, '[^0-9]', '', 'g') = $1`;
+                 FROM leads WHERE RIGHT(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = $1`;
       if (clientId) {
         sql += ` AND (client_id = $2 OR client_id IS NULL)`;
         params.push(clientId);
@@ -109,7 +132,7 @@ async function resolveSalespersonForOrder({
       let sql = `
         SELECT cl.salesperson_id, cl.lead_id
         FROM call_logs cl
-        WHERE regexp_replace(cl.from_number, '[^0-9]', '', 'g') = $1
+        WHERE RIGHT(regexp_replace(cl.from_number, '[^0-9]', '', 'g'), 10) = $1
           AND cl.call_started_at >= NOW() - INTERVAL '90 days'
           AND cl.salesperson_id IS NOT NULL`;
       if (clientId) {
@@ -126,6 +149,21 @@ async function resolveSalespersonForOrder({
           leadId: rows[0].lead_id,
         };
       }
+    }
+  }
+
+  // 6. Cart ss_salesperson HINT — only used to fill a gap, and only after
+  //    validating the salesperson is active and belongs to this tenant.
+  //    This value originates from a URL parameter, so it is never authoritative.
+  if (cartSalespersonId) {
+    const validId = await validateSalesperson(cartSalespersonId, clientId, db);
+    if (validId) {
+      return {
+        salespersonId: validId,
+        path: `cart:ss_salesperson:validated:${validId}`,
+        status: 'credited',
+        leadId: lead?.id || null,
+      };
     }
   }
 
@@ -148,4 +186,5 @@ module.exports = {
   resolveSalespersonForOrder,
   logCommissionEvent,
   normalizePhone,
+  validateSalesperson,
 };

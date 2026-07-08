@@ -30,11 +30,11 @@ Progress: [█████████████████████░] ~
 
 | Plan | Status |
 |------|--------|
-| 06-01 Security | **Done** — shipped in `fc136bb` |
-| 06-02 Attribution | **Mostly done** — migration 007, lib, webhook, clicks |
-| 06-03 Voice commission | **Partial** |
-| 06-04 Deliverability | **Partial** — gate + preverified import; limits pending |
-| 06-05 Verification | **Pending** — `06-VERIFICATION.md`, more tests |
+| 06-01 Security | **Done** — + audit remediation (OAuth token encryption, signed OAuth state, webhook raw-body verify, DB TLS toggle) |
+| 06-02 Attribution | **Done** — commission-theft guard, token/first-touch precedence, phone normalize; `attribution.test.js` |
+| 06-03 Voice commission | **Done** — order phone-match (last-10) + voice first-touch |
+| 06-04 Deliverability | **Done** — per-identity daily caps + warmup ramp (migration 008), List-Unsubscribe one-click |
+| 06-05 Verification | **Partial** — unit tests green; staging E2E (Appendix A) pending |
 
 ## Infrastructure
 
@@ -44,15 +44,20 @@ Progress: [█████████████████████░] ~
 | Railway | Email-Campaign / suresecured-email / production |
 | URL | https://suresecured-email-production.up.railway.app |
 | Admin | kmaautosinc@gmail.com |
-| Build | `npm ci` + syntax check + `commissions.test.js` ✅ |
-| Blocking (Tim) | Shopify webhook secret; import cleaned CSV; DNS |
+| Build | syntax check + `commissions.test.js` + `attribution.test.js` ✅ |
+| Blocking (Tim) | `ENCRYPTION_KEY` + `SEND_WARMUP`/`DAILY_SEND_LIMIT` in Railway; Shopify webhook secret; import cleaned CSV; DNS |
 
 ## Next actions (Tim)
 
-1. Finish Shopify webhook + snippet  
-2. Offline-verify list → import `Cleaned_Leads.csv` (or valid export)  
-3. DNS for `sales@suresecured.com`  
-4. Pilot enroll 500–1k leads  
+1. **Set Railway env vars** for the audit fixes:
+   - `ENCRYPTION_KEY` (64-char hex) — was mis-named `TOKEN_ENCRYPTION_KEY` in old docs; code uses `ENCRYPTION_KEY`. Without it, OAuth tokens/SMTP passwords stay plaintext (no crash).
+   - `SEND_WARMUP=off` + `DAILY_SEND_LIMIT=200` (or chosen cap) so the 500–1k pilot isn't throttled to 5/day. Leave `SEND_WARMUP=on` only for a brand-new cold mailbox.
+   - Confirm `RETELL_WEBHOOK_SECRET` / `TELNYX_WEBHOOK_SECRET` are set (webhooks fail closed without them).
+2. Finish Shopify webhook + snippet
+3. Offline-verify list → import `Cleaned_Leads.csv` (or valid export)
+4. DNS for `sales@suresecured.com` (SPF/DKIM/DMARC) + confirm `List-Unsubscribe` shows in Gmail "Show original"
+5. Pilot enroll 500–1k leads
+6. Post-launch (P1): DSN bounce parsing + 3% circuit breaker; backfill `client_id` on legacy leads; Shopify Flow → `/api/form-submission`
 
 ## Key Documents
 
@@ -66,4 +71,4 @@ Progress: [█████████████████████░] ~
 | `PRELAUNCH_AUDIT.md` | PL-### audit catalog |
 
 ---
-*Last updated: 2026-07-09*
+*Last updated: 2026-07-08 — prelaunch audit remediation (see `PRELAUNCH_AUDIT_2026-07.md`)*
