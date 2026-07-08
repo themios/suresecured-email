@@ -4,6 +4,19 @@ Product and engineering changes beyond routine maintenance. Newest entries first
 
 ---
 
+## 2026-07-09 — Git push + build verification + PII gitignore
+
+- **Category:** DevOps / Documentation
+- **Migration:** none
+- **Why:** Lock in Phase 6 work on GitHub; verify build before deploy; keep lead CSVs out of repo.
+- **What was built:**
+  - Commit `fc136bb` — 43 files to `themios/suresecured-email` `master`
+  - Build smoke: `npm ci`, all `src/**/*.js` syntax check, `commissions.test.js` pass
+  - `.gitignore` — lead CSV patterns, `graphify-out/`, `.claude/`, `.playwright-mcp/`
+  - Tracking docs updated (`HANDOFF`, `DECISIONS`, `STATE`, `ENHANCEMENTS`)
+
+---
+
 ## 2026-07-08 — Documentation sync (launch decisions)
 
 - **Category:** Documentation

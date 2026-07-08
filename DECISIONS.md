@@ -1,7 +1,7 @@
 # SureSecured SalesPilot — Decision Log
 
 **Canonical record of product and launch decisions.** Update this file when choices change.  
-**Last updated:** 2026-07-08
+**Last updated:** 2026-07-09
 
 ---
 
@@ -27,7 +27,7 @@
 | **D3** | Voice auto-enroll OFF unless `consent_email` | 2026-07-07 | Retell inbound still attributes |
 | **D4** | **Send gate:** `email_verified = true` required | 2026-07-07 | **Updated 2026-07-08:** satisfied by **CSV import** (`verification_status = preverified`) OR in-app ZeroBounce batch — **not** ZeroBounce-only |
 | **D5** | Ambiguous orders → `commission_status = pending_review` | 2026-07-07 | No random rep assignment |
-| **D6** | No git commits unless Tim requests | 2026-07-07 | Deploys via `railway up` from local tree |
+| **D6** | Git commit when Tim requests | 2026-07-07 | **Done 2026-07-09:** `fc136bb` pushed to `origin/master` |
 | **D7** | Warmup ramp in daily limits (planned) | 2026-07-07 | 5→10→20→40→80/day per inbox — migration pending |
 | **D8** | Bounce circuit breaker at 3% (planned) | 2026-07-07 | Not fully implemented |
 | **D9** | `UNSUBSCRIBE_HMAC_SECRET` separate from JWT | 2026-07-08 | Set in Railway |
@@ -50,9 +50,8 @@
 | Vars still needed | `SHOPIFY_WEBHOOK_SECRET` (real value) |
 | Vars **not** required | `ZEROBOUNCE_API_KEY` (offline verify workflow) |
 | Sending path | Ionos SMTP via `SES_SMTP_*` + `SES_FROM_EMAIL=sales@suresecured.com` |
-| Gmail OAuth | Configured in Railway; optional per rep |
-
----
+| Code on GitHub | ✅ `fc136bb` on `master` |
+| Railway auto-deploy | Confirm in Railway dashboard (repo: `themios/suresecured-email`) |
 
 ## Email verification workflow (effective 2026-07-08)
 
@@ -89,3 +88,4 @@ Export CRM → Offline verifier (MillionVerifier / Bouncer) → Download "Valid"
 | Verify full 40k via ZeroBounce (~$400) | B3 — one-time offline ~$40–65 for full list |
 | Instantly.ai recommended for first blast | B1 — in-house sending confirmed |
 | `ADMIN_EMAIL=tim@suresecured.com` in setup doc | Railway uses `kmaautosinc@gmail.com` |
+| Deploy only via `railway up` (no git) | `fc136bb` committed + pushed 2026-07-09 |

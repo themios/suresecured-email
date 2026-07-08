@@ -2,7 +2,7 @@
 
 **Your Railway app URL:** `https://suresecured-email-production.up.railway.app`  
 **Decisions log:** `DECISIONS.md`  
-**Last updated:** 2026-07-08
+**Last updated:** 2026-07-09
 
 **What you're doing:** Lock down the app, turn on email sending, connect Shopify so sales get credited, and log in as admin.
 
@@ -17,6 +17,7 @@
 | Admin login | ✅ `kmaautosinc@gmail.com` |
 | Sending (Ionos SMTP) | ✅ `SES_SMTP_*` + `sales@suresecured.com` |
 | Railway CLI linked | ✅ Project **Email-Campaign** |
+| Code on GitHub | ✅ `fc136bb` on `master` |
 | Email list cleaning | 📋 **You:** offline verify → CSV import (see Part 3) |
 | Shopify webhook | 🔄 **You:** in progress |
 | ZeroBounce in Railway | ⏭️ **Not needed** (see Part 3) |

@@ -1,7 +1,8 @@
 # Handoff — Decisions & TODO List
 
-**Last updated:** 2026-07-08  
-**Canonical decisions:** see **`DECISIONS.md`**
+**Last updated:** 2026-07-09  
+**Canonical decisions:** see **`DECISIONS.md`**  
+**Git:** `fc136bb` on `master` → `github.com/themios/suresecured-email`
 
 ---
 
@@ -27,7 +28,7 @@
 | D3 | Voice auto-enroll OFF without `consent_email` | |
 | D4 | Cron requires `email_verified = true` | **CSV import sets `preverified`** — ZeroBounce optional |
 | D5 | Ambiguous orders → `pending_review` | |
-| D6 | No git commits unless requested | Deploy via `railway up` |
+| D6 | Git commit when Tim requests | **Done 2026-07-09** — `fc136bb` pushed to `origin/master` |
 | D7–D8 | Warmup ramp + 3% bounce breaker | **Partial / pending** |
 | D9–D12 | Security secrets, API key, encryption | **Mostly done** — see Railway status |
 
@@ -41,10 +42,13 @@
 | 06-02 Attribution | **Mostly done** | Migration 007 fixed; lib + webhook + clicks |
 | 06-03 Voice | **Partial** | Retell/CallRail attribution; order phone match |
 | 06-04 Deliverability | **Partial** | `email_verified` gate; preverified CSV import; limits pending |
-| 06-05 Verification | **Pending** | Tests + `06-VERIFICATION.md` |
+| 06-05 Verification | **Pending** | Tests + `06-VERIFICATION.md`; build smoke OK |
 | Railway setup | **Done** | CLI linked; core vars; admin seeded |
 | Offline verify workflow | **Done** | Code + docs (`docs/DELIVERABILITY_RUNBOOK.md`) |
+| Git commit + push | **Done** | `fc136bb` — 43 files, Phase 6 + docs |
+| Build verification | **Done** | `npm ci`, all `src/**/*.js` syntax check, `commissions.test.js` pass |
 | Shopify | **Pending** | Webhook secret placeholder |
+| Lead CSVs (local) | **Present** | `Cleaned_Leads.csv` etc. gitignored — not in repo |
 
 ---
 
@@ -66,6 +70,8 @@
 - [x] Sending path: Ionos SMTP (`SES_SMTP_*`) configured
 - [x] CSV import marks leads preverified / send-ready
 - [x] Railway CLI linked locally
+- [x] Phase 6 code + docs committed and pushed (`fc136bb`)
+- [x] Build verified (`npm ci`, syntax check, `commissions.test.js`)
 
 ### P1 — Before scaling past pilot
 
@@ -81,12 +87,12 @@
 - [ ] `ZEROBOUNCE_API_KEY` — only if you want in-app verify later
 - [ ] Webhook secrets: CallRail, Retell, Telnyx (when those channels go live)
 
-### P2 — Engineering (not blocking pilot if security deployed)
+### P2 — Engineering (not blocking pilot)
 
 - [ ] Daily send limits + warmup ramp (D7)
 - [ ] 3% bounce circuit breaker (D8)
 - [ ] `06-VERIFICATION.md` + expanded tests
-- [ ] Git commit + push when Tim approves diff
+- [x] Git commit + push (`fc136bb`, 2026-07-09)
 
 ---
 
@@ -129,7 +135,8 @@ Full copy-paste reference: `YOUR_RAILWAY_VARS.txt` (local, gitignored).
 
 | Gate | Status |
 |------|--------|
-| Core security deployed | ✅ |
+| Core security deployed | ✅ Shipped `fc136bb` |
+| Code on GitHub | ✅ `master` pushed |
 | Offline-cleaned CSV imported | ☐ Tim |
 | Shopify webhook + snippet | 🔄 Tim |
 | DNS authenticated | ☐ Tim |

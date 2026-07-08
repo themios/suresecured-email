@@ -5,16 +5,16 @@
 See: `.planning/PROJECT.md` · **Decisions:** `DECISIONS.md`
 
 **Core value:** Any business with a contact list and commissioned sales team can hand it to SalesPilot and start generating sales within days  
-**Current focus:** Pilot launch — Shopify + offline-cleaned CSV + 500–1k send
+**Current focus:** Pilot launch — Shopify + offline-cleaned CSV import + 500–1k send
 
 ## Current Position
 
 Phase: 6 of 6 (Prelaunch Hardening) — **partial execution**  
-Status: **Pilot-ready** pending Shopify webhook + list import  
-Last activity: 2026-07-08 — decisions documented; preverified CSV import; Railway linked  
-Prelaunch gate: Pilot send only after offline-cleaned import + Shopify attribution wired
+Status: **Pilot-ready** — code on GitHub; Tim ops remaining  
+Last activity: 2026-07-09 — `fc136bb` pushed; build verified; tracking docs updated  
+Prelaunch gate: Pilot send after offline-cleaned import + Shopify webhook
 
-Progress: [█████████████████████░] ~95% (hardening partial; launch ops in Tim's hands)
+Progress: [█████████████████████░] ~95%
 
 ## Launch decisions (Tim — 2026-07-08)
 
@@ -30,29 +30,40 @@ Progress: [█████████████████████░] ~
 
 | Plan | Status |
 |------|--------|
-| 06-01 Security | **Done** |
-| 06-02 Attribution | **Mostly done** (007 migration fixed) |
+| 06-01 Security | **Done** — shipped in `fc136bb` |
+| 06-02 Attribution | **Mostly done** — migration 007, lib, webhook, clicks |
 | 06-03 Voice commission | **Partial** |
-| 06-04 Deliverability | **Partial** — `email_verified` gate + preverified import; warmup/limits pending |
-| 06-05 Verification | **Pending** |
+| 06-04 Deliverability | **Partial** — gate + preverified import; limits pending |
+| 06-05 Verification | **Pending** — `06-VERIFICATION.md`, more tests |
 
 ## Infrastructure
 
-- **Railway:** Email-Campaign / suresecured-email / production  
-- **URL:** https://suresecured-email-production.up.railway.app  
-- **Admin:** kmaautosinc@gmail.com  
-- **Blocking:** `SHOPIFY_WEBHOOK_SECRET` placeholder; cleaned CSV not imported yet
+| Item | Status |
+|------|--------|
+| GitHub | `fc136bb` on `master` (`themios/suresecured-email`) |
+| Railway | Email-Campaign / suresecured-email / production |
+| URL | https://suresecured-email-production.up.railway.app |
+| Admin | kmaautosinc@gmail.com |
+| Build | `npm ci` + syntax check + `commissions.test.js` ✅ |
+| Blocking (Tim) | Shopify webhook secret; import cleaned CSV; DNS |
+
+## Next actions (Tim)
+
+1. Finish Shopify webhook + snippet  
+2. Offline-verify list → import `Cleaned_Leads.csv` (or valid export)  
+3. DNS for `sales@suresecured.com`  
+4. Pilot enroll 500–1k leads  
 
 ## Key Documents
 
 | Document | Purpose |
 |----------|---------|
+| `HANDOFF_DECISIONS_AND_TODO.md` | **Active TODO checklist** |
 | `DECISIONS.md` | Canonical decision log |
-| `HANDOFF_DECISIONS_AND_TODO.md` | TODO checklist |
-| `docs/DELIVERABILITY_RUNBOOK.md` | Offline verify + pilot rollout |
-| `SETUP_WALKTHROUGH_FOR_TIM.md` | Operator setup |
 | `ENHANCEMENTS.md` | Code change log |
+| `docs/DELIVERABILITY_RUNBOOK.md` | List clean + pilot rollout |
+| `SETUP_WALKTHROUGH_FOR_TIM.md` | Operator setup |
 | `PRELAUNCH_AUDIT.md` | PL-### audit catalog |
 
 ---
-*Last updated: 2026-07-08*
+*Last updated: 2026-07-09*

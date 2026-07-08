@@ -138,4 +138,4 @@ Phase 6 waves: 06-01 → (06-02 ∥ 06-04) → 06-03 → 06-05
 | 5. AI Intelligence | 2/2 | ✓ Complete | 2026-06-30 |
 | 6. Prelaunch Hardening | 3/5 | In progress (pilot-ready) | — |
 
-*Phase 6: 06-01 done; 06-02/06-04 partial; launch ops per `DECISIONS.md`*
+*Phase 6: 06-01 shipped (`fc136bb`); 06-02/06-04 partial; 06-05 pending. Launch ops: `HANDOFF_DECISIONS_AND_TODO.md`*
