@@ -7,6 +7,8 @@
 
 > **Operator decisions (2026-07-08):** See **`DECISIONS.md`** — in-house sending, offline list verify (no ZeroBounce), pilot 500–1k leads, OK to re-contact prior leads.
 
+> **⚠️ Status (updated 2026-07-08):** This is the **original planning catalog** (PL-### IDs). A follow-up code-verified audit + remediation superseded it — **all code-side P0/P1 items below are now closed** (commit `359d2b2`). For current status, the code-verified findings, and what remains (ops + P1), read **`PRELAUNCH_AUDIT_2026-07.md`** (authoritative). Keep this file for the PL-### traceability only.
+
 ---
 
 ## How to use this document

@@ -17,7 +17,9 @@
 | Admin login | ✅ `kmaautosinc@gmail.com` |
 | Sending (Ionos SMTP) | ✅ `SES_SMTP_*` + `sales@suresecured.com` |
 | Railway CLI linked | ✅ Project **Email-Campaign** |
-| Code on GitHub | ✅ `fc136bb` on `master` |
+| Code on GitHub | ✅ `359d2b2` on `master` (prelaunch audit remediation; baseline `fc136bb`) |
+| Security/attribution/deliverability hardening | ✅ Audit P0/P1 closed 2026-07-08 (see `PRELAUNCH_AUDIT_2026-07.md`) |
+| Send caps + encryption env vars | 🔄 **You:** set `SEND_WARMUP=off`, `DAILY_SEND_LIMIT`, `ENCRYPTION_KEY` (Part 1, Step 2) |
 | Email list cleaning | 📋 **You:** offline verify → CSV import (see Part 3) |
 | Shopify webhook | 🔄 **You:** in progress |
 | ZeroBounce in Railway | ⏭️ **Not needed** (see Part 3) |
@@ -64,9 +66,17 @@ Repeat until all of these exist:
 | ADMIN_EMAIL | Your login email (e.g. tim@suresecured.com) |
 | ADMIN_PASSWORD | Password **you** choose |
 | UNSUBSCRIBE_HMAC_SECRET | Already generated |
-| TOKEN_ENCRYPTION_KEY | Already generated |
+| ENCRYPTION_KEY | 64-char hex. **Renamed** — old docs said `TOKEN_ENCRYPTION_KEY`; the code reads `ENCRYPTION_KEY`. Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| SEND_WARMUP | `off` for the established `sales@suresecured.com` mailbox (skips the slow 5/day warmup ramp). Use `on` only for a brand-new cold inbox. |
+| DAILY_SEND_LIMIT | Max sends/day per sending identity, e.g. `200` for the pilot. |
+| SES_FROM_EMAIL | `sales@suresecured.com` (the identity the daily cap is keyed on) |
+| RETELL_WEBHOOK_SECRET / TELNYX_WEBHOOK_SECRET | Set if voice/SMS webhooks are live — they now reject requests without a valid signature/secret |
 
 **Important:** If `CRON_SECRET` is missing, scheduled emails **will not send** (Railway cron calls your app every 15 minutes with this secret).
+
+**Send caps (new 2026-07-08):** the app now enforces a per-identity daily send cap. With `SEND_WARMUP=on` (default) a new mailbox starts at **5/day** and ramps 5→10→20→40→`DAILY_SEND_LIMIT` over ~4 weeks. For your 500–1k pilot on an established mailbox, set `SEND_WARMUP=off` and `DAILY_SEND_LIMIT=200` (or your chosen cap) so you aren't throttled.
+
+**Token encryption (new 2026-07-08):** with `ENCRYPTION_KEY` set, Gmail OAuth tokens and SMTP passwords are encrypted at rest. Without it they stay plaintext (the app still runs). Set it before connecting any Gmail account.
 
 ### Step 3: Redeploy
 

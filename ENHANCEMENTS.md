@@ -20,7 +20,7 @@ Product and engineering changes beyond routine maintenance. Newest entries first
   - **D1 send caps + warmup** — `src/lib/sendLimits.js` (`reserveSend`) enforces an atomic per-identity daily cap with a 5→10→20→40→`DAILY_SEND_LIMIT` ramp; wired into `gmail.js` before the send; `cron.js` defers (not errors) capped enrollments.
   - **D2 List-Unsubscribe** — RFC 8058 one-click header on all three send paths (`buildRawMessage`, SES, client SMTP) + `POST /unsubscribe` one-click handler.
   - **Tests** — `src/lib/attribution.test.js` (theft guard, token/first-touch precedence, phone normalization); existing `commissions.test.js` still green.
-  - **Docs** — `.env.example` (`ENCRYPTION_KEY` fix, `DAILY_SEND_LIMIT`, `SES_FROM_*`, DB TLS vars); `PRELAUNCH_AUDIT_2026-07.md` status table.
+  - **Docs** — full sweep synced to reflect Phase 6 code-complete: `.env.example` (`ENCRYPTION_KEY` fix, `DAILY_SEND_LIMIT`, `SEND_WARMUP`, `SES_FROM_*`, DB TLS vars); `PRELAUNCH_AUDIT_2026-07.md` (status table + reconciled verdict); `PRELAUNCH_AUDIT.md` (superseded banner → points to code-verified audit); `.planning/REQUIREMENTS.md` (SECU/ATTR/DELV all ✓ + new DELV-04); `.planning/ROADMAP.md` (Phase 6 4.5/5, plans checked); `.planning/STATE.md`; `DECISIONS.md` (D7/D12 implemented); `HANDOFF_DECISIONS_AND_TODO.md` (P0 checklist + P2 backlog); `SETUP_WALKTHROUGH_FOR_TIM.md` + `docs/DELIVERABILITY_RUNBOOK.md` (send-cap/warmup/List-Unsubscribe + env checklist); `YOUR_RAILWAY_VARS.txt` (local, gitignored — new vars).
 
 ---
 

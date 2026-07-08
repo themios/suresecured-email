@@ -17,6 +17,25 @@
 
 ---
 
+## Platform protections now in code (2026-07-08)
+
+The app enforces these automatically — you don't configure them per send:
+
+| Protection | Behavior | Your knob |
+|-----------|----------|-----------|
+| **Per-identity daily send cap** | No sending identity exceeds its daily cap no matter how often the 15-min cron runs. Capped enrollments defer to the next window. | `DAILY_SEND_LIMIT` (e.g. 200) |
+| **Warmup ramp** | New identity ramps 5→10→20→40→cap over ~4 weeks | `SEND_WARMUP=on`/`off` — **`off` for the established `sales@suresecured.com` mailbox** |
+| **One-click unsubscribe** | RFC 8058 `List-Unsubscribe` + `List-Unsubscribe-Post` headers on every send (Gmail/Yahoo bulk-sender requirement) | none — automatic |
+| **Verified-only send** | Cron skips `email_verified IS NOT TRUE` | offline CSV import sets `preverified` |
+| **Engagement gate** | After step 3, leads with zero opens/clicks are paused | none — automatic |
+| **Permanent-bounce suppression** | API-level 550/invalid-recipient → address suppressed + enrollment paused | none — automatic |
+
+> ⚠️ **Still manual / P1:** delayed DSN bounces (the "couldn't deliver" emails that arrive *after* acceptance) are **not** parsed yet, and there's no automatic 3% bounce circuit breaker. The offline pre-clean covers the pilot; watch your bounce rate manually for the first batches and pause via Admin if it climbs.
+
+**Pilot env checklist (Railway):** `SEND_WARMUP=off` · `DAILY_SEND_LIMIT=200` · `ENCRYPTION_KEY` (64-char hex) · verify DNS SPF/DKIM/DMARC · send one test → Gmail "Show original" → confirm `List-Unsubscribe` present and SPF/DKIM pass.
+
+---
+
 ## Phase 1 — Clean the list offline (one time)
 
 ### Recommended services (~10,000 emails)

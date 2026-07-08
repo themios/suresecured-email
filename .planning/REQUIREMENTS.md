@@ -36,16 +36,17 @@
 
 ### Prelaunch Hardening (v1.1 — Phase 6)
 
-- [ ] **SECU-01**: All API routes require JWT role auth or signed client API key — no public commission/lead access
-- [ ] **SECU-02**: CallRail, Retell, and Telnyx webhooks verify vendor signatures before processing
-- [ ] **SECU-03**: All SQL queries use parameterized inputs — no user string interpolation
-- [ ] **ATTR-01**: First-touch salesperson attribution stored on lead with source and lock flag
-- [ ] **ATTR-02**: Shopify orders resolve commission via token → cart → attributed owner (client-scoped)
-- [ ] **ATTR-03**: Voice inbound calls set attribution; orders match phone/email to credited rep
-- [ ] **DELV-01**: Cron send skips leads where `email_verified IS NOT TRUE`
+- [x] **SECU-01**: All API routes require JWT role auth or signed client API key — no public commission/lead access
+- [x] **SECU-02**: CallRail, Retell, and Telnyx webhooks verify vendor signatures before processing *(hardened 2026-07-08: raw-body HMAC/Ed25519 + OAuth token encryption + signed OAuth state + DB TLS toggle)*
+- [x] **SECU-03**: All SQL queries use parameterized inputs — no user string interpolation
+- [x] **ATTR-01**: First-touch salesperson attribution stored on lead with source and lock flag
+- [x] **ATTR-02**: Shopify orders resolve commission via token → first-touch → voice → validated cart hint (client-scoped); forged `ss_salesperson` rejected → `pending_review`
+- [x] **ATTR-03**: Voice inbound calls set attribution; orders match phone/email (last-10 normalized) to credited rep
+- [x] **DELV-01**: Cron send skips leads where `email_verified IS NOT TRUE`
 - [x] **DELV-01b**: CSV import from offline-cleaned list sets `email_verified=true`, `verification_status=preverified`
-- [ ] **DELV-02**: Per-inbox daily send limits with warmup ramp enforced before each send
-- [ ] **DELV-03**: Cron routes accept POST (Railway schedule) and GET for manual runs
+- [x] **DELV-02**: Per-identity daily send caps with warmup ramp enforced before each send *(migration 008 + `sendLimits.js`; `SEND_WARMUP=off` for established mailbox)*
+- [x] **DELV-03**: Cron routes accept POST (Railway schedule) and GET for manual runs
+- [x] **DELV-04**: RFC 8058 one-click `List-Unsubscribe` header on all send paths *(added 2026-07-08)*
 
 ## v2 Requirements
 
@@ -95,16 +96,19 @@
 | VOIC-01 | Phase 4 | Complete ✓ |
 | AIML-01 | Phase 5 | Complete ✓ |
 | AIML-02 | Phase 5 | Complete ✓ |
-| SECU-01 | Phase 6 | Pending |
-| SECU-02 | Phase 6 | Pending |
-| SECU-03 | Phase 6 | Pending |
-| ATTR-01 | Phase 6 | Pending |
-| ATTR-02 | Phase 6 | Pending |
-| ATTR-03 | Phase 6 | Pending |
-| DELV-01 | Phase 6 | Partial — gate enforced |
+| SECU-01 | Phase 6 | Complete ✓ |
+| SECU-02 | Phase 6 | Complete ✓ (hardened 2026-07-08) |
+| SECU-03 | Phase 6 | Complete ✓ |
+| ATTR-01 | Phase 6 | Complete ✓ |
+| ATTR-02 | Phase 6 | Complete ✓ (theft guard 2026-07-08) |
+| ATTR-03 | Phase 6 | Complete ✓ |
+| DELV-01 | Phase 6 | Complete ✓ |
 | DELV-01b | Phase 6 | Complete ✓ (2026-07-08) |
-| DELV-02 | Phase 6 | Pending |
-| DELV-03 | Phase 6 | Pending |
+| DELV-02 | Phase 6 | Complete ✓ (2026-07-08) |
+| DELV-03 | Phase 6 | Complete ✓ |
+| DELV-04 | Phase 6 | Complete ✓ (2026-07-08) |
+
+**Still open (P1/P2, not pilot blockers):** DSN bounce parsing + 3% circuit breaker (D8); legacy `client_id` backfill (C3); Shopify Flow → `/api/form-submission` (C5); admin JWT TTL + CSRF (S5). Ops: DNS SPF/DKIM/DMARC, Shopify webhook secret, staging E2E.
 
 **Coverage:**
 - v1 requirements: 14 total
