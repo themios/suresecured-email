@@ -1,3 +1,12 @@
 node_modules/
 .env
 *.log
+.local/
+YOUR_RAILWAY_VARS.txt
+.claude/
+.playwright-mcp/
+graphify-out/
+# Lead CSVs contain PII — keep local only
+Cleaned_Leads.csv
+TimTest.csv
+*Leads*.csv

@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireRole } = require('../middleware/auth');
+const { requireAdminAuth } = require('../middleware/apiAuth');
 const { shell, ICONS, esc } = require('../lib/layout');
 const { createLlm, createAgent } = require('../lib/retell');
 
@@ -17,7 +18,7 @@ function parseJsonField(value, fallback) {
 
 // ─── Admin page ────────────────────────────────────────────────────────────
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAdminAuth, async (req, res) => {
   try {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
@@ -502,7 +503,7 @@ router.get('/', requireAuth, async (req, res) => {
 
 // ─── Salesperson Actions ───────────────────────────────────────────────────
 
-router.post('/salespeople', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/salespeople', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const { first_name, last_name, email, commission_rate, tracking_phone_number, phone, title, voice_extension } = req.body;
   try {
     await pool.query(
@@ -525,7 +526,7 @@ router.post('/salespeople', express.urlencoded({ extended: true }), requireAuth,
   }
 });
 
-router.post('/salespeople/:id', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/salespeople/:id', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const { first_name, last_name, email, commission_rate, tracking_phone_number, phone, title, voice_extension } = req.body;
   try {
     await pool.query(
@@ -547,7 +548,7 @@ router.post('/salespeople/:id', express.urlencoded({ extended: true }), requireA
   }
 });
 
-router.post('/salespeople/:id/toggle', requireAuth, async (req, res) => {
+router.post('/salespeople/:id/toggle', requireAdminAuth, async (req, res) => {
   try {
     await pool.query(
       'UPDATE salespeople SET active = NOT active WHERE id = $1',
@@ -561,7 +562,7 @@ router.post('/salespeople/:id/toggle', requireAuth, async (req, res) => {
 
 // ─── Landing Page Matrix ───────────────────────────────────────────────────
 
-router.post('/matrix/:id', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/matrix/:id', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const { destination_url, active } = req.body;
   try {
     await pool.query(
@@ -576,7 +577,7 @@ router.post('/matrix/:id', express.urlencoded({ extended: true }), requireAuth, 
 
 // ─── Suppression List Upload ───────────────────────────────────────────────
 
-router.post('/suppression', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/suppression', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   // Railway / most hosts don't have multipart by default — handle raw text CSV via body
   // For file upload we use a simple text area approach via urlencoded fallback
   // The form sends the file; we read it as text
@@ -613,7 +614,7 @@ router.post('/suppression', express.urlencoded({ extended: true }), requireAuth,
 
 // ─── Suppression List Management ──────────────────────────────────────────
 
-router.get('/suppression', requireAuth, async (req, res) => {
+router.get('/suppression', requireAdminAuth, async (req, res) => {
   const search = req.query.search || '';
   const page   = Math.max(1, parseInt(req.query.page) || 1);
   const size   = 50;
@@ -717,7 +718,7 @@ router.get('/suppression', requireAuth, async (req, res) => {
   res.send(shell('Suppression List', 'admin', suppressContent, { user: req.user }));
 });
 
-router.post('/suppression/remove', requireAuth, async (req, res) => {
+router.post('/suppression/remove', requireAdminAuth, async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email required' });
   await pool.query('DELETE FROM suppression_list WHERE LOWER(email) = LOWER($1)', [email]);
@@ -726,7 +727,7 @@ router.post('/suppression/remove', requireAuth, async (req, res) => {
 
 // ─── Set Goal ─────────────────────────────────────────────────────────────
 
-router.post('/salespeople/:id/goal', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/salespeople/:id/goal', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const { period_month, target_revenue, target_orders } = req.body;
   try {
     // period_month is "YYYY-MM", convert to first day of month
@@ -747,7 +748,7 @@ router.post('/salespeople/:id/goal', express.urlencoded({ extended: true }), req
 
 // ─── Set Portal Password ───────────────────────────────────────────────────
 
-router.post('/salespeople/:id/portal-password', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/salespeople/:id/portal-password', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const bcrypt = require('bcryptjs');
   const { password } = req.body;
   try {
@@ -764,18 +765,18 @@ router.post('/salespeople/:id/portal-password', express.urlencoded({ extended: t
 
 // ─── Change Password ───────────────────────────────────────────────────────
 
-router.post('/change-password', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/change-password', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const bcrypt = require('bcryptjs');
   const { current_password, new_password } = req.body;
   try {
-    const result = await pool.query('SELECT * FROM admin_users WHERE id = $1', [req.user.id]);
+    const result = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
     if (!result.rows.length) return res.redirect('/admin?ok=0&msg=' + encodeURIComponent('User not found.'));
 
     const valid = await bcrypt.compare(current_password, result.rows[0].password_hash);
     if (!valid) return res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Current password is incorrect.'));
 
     const hash = await bcrypt.hash(new_password, 12);
-    await pool.query('UPDATE admin_users SET password_hash=$1 WHERE id=$2', [hash, req.user.id]);
+    await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, req.user.id]);
 
     res.redirect('/admin?ok=1&msg=' + encodeURIComponent('Password changed successfully.'));
   } catch (err) {
@@ -786,7 +787,7 @@ router.post('/change-password', express.urlencoded({ extended: true }), requireA
 // ─── Client Management ─────────────────────────────────────────────────────
 
 // GET /admin/clients — list all clients with org name
-router.get('/clients', requireAuth, async (req, res) => {
+router.get('/clients', requireAdminAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT c.id, c.name, c.slug, c.active, o.name AS org_name
@@ -841,7 +842,7 @@ router.get('/clients', requireAuth, async (req, res) => {
 });
 
 // GET /admin/clients/new — blank create form
-router.get('/clients/new', requireAuth, async (req, res) => {
+router.get('/clients/new', requireAdminAuth, async (req, res) => {
   try {
     const { rows: orgs } = await pool.query('SELECT id, name FROM organizations ORDER BY name');
     const orgOptions = orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
@@ -853,7 +854,7 @@ router.get('/clients/new', requireAuth, async (req, res) => {
 });
 
 // POST /admin/clients — create new client
-router.post('/clients', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/clients', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const { organization_id, name, slug, brand_config, commission_rules, integration_settings } = req.body;
   const voice_extension = (req.body.voice_extension || '').trim() || null;
   const errors = [];
@@ -894,7 +895,7 @@ router.post('/clients', express.urlencoded({ extended: true }), requireAuth, asy
 });
 
 // GET /admin/clients/:id/edit — pre-populated edit form
-router.get('/clients/:id/edit', requireAuth, async (req, res) => {
+router.get('/clients/:id/edit', requireAdminAuth, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM clients WHERE id = $1', [req.params.id]);
     if (!rows.length) return res.status(404).send('Client not found');
@@ -909,7 +910,7 @@ router.get('/clients/:id/edit', requireAuth, async (req, res) => {
 });
 
 // POST /admin/clients/:id — update existing client
-router.post('/clients/:id', express.urlencoded({ extended: true }), requireAuth, async (req, res) => {
+router.post('/clients/:id', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const { name, slug, brand_config, commission_rules, integration_settings, active } = req.body;
   const voice_extension = (req.body.voice_extension || '').trim() || null;
   const brandJson = parseJsonField(brand_config, {});
@@ -939,7 +940,7 @@ router.post('/clients/:id', express.urlencoded({ extended: true }), requireAuth,
  * Idempotent: calling again re-provisions (overwrites existing agent IDs).
  * Requires RETELL_API_KEY in env.
  */
-router.post('/clients/:id/provision-voice', requireAuth, requireRole('operator', 'owner'), async (req, res) => {
+router.post('/clients/:id/provision-voice', requireAdminAuth, requireRole('operator', 'owner'), async (req, res) => {
   const clientId = parseInt(req.params.id);
   if (!clientId) return res.status(400).json({ error: 'invalid client id' });
 
@@ -997,7 +998,7 @@ router.post('/clients/:id/provision-voice', requireAuth, requireRole('operator',
 
 // ─── Agency Dashboard ──────────────────────────────────────────────────────
 
-router.get('/agency', requireAuth, requireRole('operator', 'owner'), async (req, res) => {
+router.get('/agency', requireAdminAuth, requireRole('operator', 'owner'), async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT
@@ -1069,7 +1070,7 @@ router.get('/agency', requireAuth, requireRole('operator', 'owner'), async (req,
   }
 });
 
-router.get('/agency/clients/:clientId/dashboard', requireAuth, requireRole('operator', 'owner'), async (req, res) => {
+router.get('/agency/clients/:clientId/dashboard', requireAdminAuth, requireRole('operator', 'owner'), async (req, res) => {
   try {
     const clientCheck = await pool.query(
       'SELECT id, name, organization_id FROM clients WHERE id = $1',

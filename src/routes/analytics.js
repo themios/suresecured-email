@@ -6,12 +6,19 @@ const { shell, navHtml } = require('../lib/layout');
 
 // Data endpoint — returns all chart data as JSON
 router.get('/data', requireAuth, async (req, res) => {
-  const days = parseInt(req.query.days) || 30;
-  const spFilter = req.query.sp ? parseInt(req.query.sp) : null;
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+  const spFilter = req.query.sp ? parseInt(req.query.sp, 10) : null;
+  if (req.query.sp && Number.isNaN(spFilter)) {
+    return res.status(400).json({ error: 'Invalid salesperson filter' });
+  }
 
   try {
-    const spWhere = spFilter ? `AND salesperson_id = ${spFilter}` : '';
-    const spWhereL = spFilter ? `AND l.salesperson_id = ${spFilter}` : '';
+    const spClause = spFilter ? 'AND salesperson_id = $2' : '';
+    const spClauseS = spFilter ? 'AND s.id = $2' : '';
+    const spClauseL = spFilter ? 'AND l.salesperson_id = $2' : '';
+    const dayParam = [days];
+    const daySpParam = spFilter ? [days, spFilter] : [days];
+    const monthOnlyParam = spFilter ? [spFilter] : [];
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 
@@ -30,27 +37,27 @@ router.get('/data', requireAuth, async (req, res) => {
 
       pool.query(`
         SELECT DATE(ordered_at) AS date, COALESCE(SUM(amount),0) AS revenue
-        FROM orders WHERE ordered_at >= NOW() - INTERVAL '${days} days' ${spWhere}
+        FROM orders WHERE ordered_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
         GROUP BY DATE(ordered_at) ORDER BY date
-      `),
+      `, daySpParam),
 
       pool.query(`
         SELECT DATE(clicked_at) AS date, COUNT(*) AS clicks
-        FROM clicks WHERE clicked_at >= NOW() - INTERVAL '${days} days' ${spWhere}
+        FROM clicks WHERE clicked_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
         GROUP BY DATE(clicked_at) ORDER BY date
-      `),
+      `, daySpParam),
 
       pool.query(`
         SELECT DATE(called_at) AS date, COUNT(*) AS calls
-        FROM phone_calls WHERE called_at >= NOW() - INTERVAL '${days} days' ${spWhere}
+        FROM phone_calls WHERE called_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
         GROUP BY DATE(called_at) ORDER BY date
-      `),
+      `, daySpParam),
 
       pool.query(`
         SELECT DATE(submitted_at) AS date, COUNT(*) AS forms
-        FROM form_submissions WHERE submitted_at >= NOW() - INTERVAL '${days} days' ${spWhere}
+        FROM form_submissions WHERE submitted_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
         GROUP BY DATE(submitted_at) ORDER BY date
-      `),
+      `, daySpParam),
 
       pool.query(`
         SELECT s.name,
@@ -62,32 +69,31 @@ router.get('/data', requireAuth, async (req, res) => {
         LEFT JOIN orders o ON o.salesperson_id = s.id
         LEFT JOIN commissions cm ON cm.salesperson_id = s.id
         LEFT JOIN clicks c ON c.salesperson_id = s.id
-        WHERE s.active = true ${spFilter ? 'AND s.id = ' + spFilter : ''}
+        WHERE s.active = true ${spClauseS}
         GROUP BY s.name ORDER BY revenue DESC LIMIT 10
-      `),
+      `, monthOnlyParam),
 
       pool.query(`
         SELECT
-          (SELECT COUNT(*) FROM leads ${spFilter ? 'WHERE salesperson_id = ' + spFilter : ''}) AS total_leads,
-          (SELECT COUNT(*) FROM clicks ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_clicks,
-          (SELECT COUNT(*) FROM form_submissions ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_forms,
-          (SELECT COUNT(*) FROM phone_calls ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_calls,
-          (SELECT COUNT(*) FROM orders ${spWhere ? 'WHERE ' + spWhere.replace('AND ','') : ''}) AS total_orders
-      `),
+          (SELECT COUNT(*) FROM leads ${spFilter ? 'WHERE salesperson_id = $1' : ''}) AS total_leads,
+          (SELECT COUNT(*) FROM clicks WHERE clicked_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_clicks,
+          (SELECT COUNT(*) FROM form_submissions WHERE submitted_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_forms,
+          (SELECT COUNT(*) FROM phone_calls WHERE called_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_calls,
+          (SELECT COUNT(*) FROM orders WHERE ordered_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_orders
+      `, spFilter ? [spFilter, days] : [days]),
 
       pool.query(`
         SELECT l.audience_type, COUNT(*) AS count FROM leads l
-        WHERE 1=1 ${spWhereL}
+        WHERE 1=1 ${spClauseL}
         GROUP BY l.audience_type
-      `),
+      `, monthOnlyParam),
 
       pool.query(`
         SELECT COALESCE(l.product_interest, 'Unknown') AS product, COUNT(*) AS count
-        FROM leads l WHERE 1=1 ${spWhereL}
+        FROM leads l WHERE 1=1 ${spClauseL}
         GROUP BY l.product_interest ORDER BY count DESC LIMIT 6
-      `),
+      `, monthOnlyParam),
 
-      // Goal vs actual for each salesperson (current month)
       pool.query(`
         SELECT s.name,
           COALESCE(g.target_revenue, 0) AS goal_revenue,
@@ -97,12 +103,11 @@ router.get('/data', requireAuth, async (req, res) => {
         FROM salespeople s
         LEFT JOIN salesperson_goals g ON g.salesperson_id = s.id AND g.period_start = $1
         LEFT JOIN orders o ON o.salesperson_id = s.id AND DATE(o.ordered_at) >= $1
-        WHERE s.active = true ${spFilter ? 'AND s.id = ' + spFilter : ''}
+        WHERE s.active = true ${spFilter ? 'AND s.id = $2' : ''}
         GROUP BY s.name, g.target_revenue, g.target_orders
         ORDER BY actual_revenue DESC
-      `, [monthStart]),
+      `, spFilter ? [monthStart, spFilter] : [monthStart]),
 
-      // Salesperson list for dropdown
       pool.query('SELECT id, name FROM salespeople WHERE active = true ORDER BY name'),
     ]);
 

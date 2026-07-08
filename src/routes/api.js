@@ -2,11 +2,28 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { v4: uuidv4 } = require('uuid');
+const { requireClientApiKey, requireAdminAuth } = require('../middleware/apiAuth');
+
+// Record a form submission with attribution (Shopify Flow / server-to-server)
+// POST /api/form-submission — requires X-Client-Api-Key
+router.post('/form-submission', requireClientApiKey, async (req, res) => {
+  const { token, salesperson_id, lead_id, form_type, submitter_email, submitter_name, raw_data } = req.body;
+
+  try {
+    await pool.query(
+      `INSERT INTO form_submissions (token, lead_id, salesperson_id, form_type, submitter_email, submitter_name, raw_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [token || null, lead_id || null, salesperson_id || null, form_type || 'quote', submitter_email, submitter_name, raw_data || {}]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Form submission error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // Generate tracking links for a batch of leads
-// POST /api/generate-links
-// Body: { leads: [{ lead_id, salesperson_id, campaign_id, email_step, destination_url }] }
-router.post('/generate-links', async (req, res) => {
+router.post('/generate-links', requireAdminAuth, async (req, res) => {
   const { leads } = req.body;
   if (!Array.isArray(leads) || leads.length === 0) {
     return res.status(400).json({ error: 'leads array required' });
@@ -41,27 +58,7 @@ router.post('/generate-links', async (req, res) => {
   }
 });
 
-// Record a form submission with attribution
-// POST /api/form-submission
-router.post('/form-submission', async (req, res) => {
-  const { token, salesperson_id, lead_id, form_type, submitter_email, submitter_name, raw_data } = req.body;
-
-  try {
-    await pool.query(
-      `INSERT INTO form_submissions (token, lead_id, salesperson_id, form_type, submitter_email, submitter_name, raw_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [token || null, lead_id || null, salesperson_id || null, form_type || 'quote', submitter_email, submitter_name, raw_data || {}]
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('Form submission error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Add a salesperson
-// POST /api/salespeople
-router.post('/salespeople', async (req, res) => {
+router.post('/salespeople', requireAdminAuth, async (req, res) => {
   const { name, email, commission_rate } = req.body;
   try {
     const result = await pool.query(
@@ -75,9 +72,7 @@ router.post('/salespeople', async (req, res) => {
   }
 });
 
-// Add a lead
-// POST /api/leads
-router.post('/leads', async (req, res) => {
+router.post('/leads', requireAdminAuth, async (req, res) => {
   const { email, first_name, last_name, phone, city, audience_type, product_interest, salesperson_id } = req.body;
   try {
     const result = await pool.query(
@@ -92,9 +87,7 @@ router.post('/leads', async (req, res) => {
   }
 });
 
-// Dashboard data endpoint
-// GET /api/stats
-router.get('/stats', async (req, res) => {
+router.get('/stats', requireAdminAuth, async (req, res) => {
   try {
     const [spStats, recentOrders, recentForms] = await Promise.all([
       pool.query(`
@@ -146,32 +139,48 @@ router.get('/stats', async (req, res) => {
 
 // ─── Landing Page Matrix ───────────────────────────────────────────────────
 
-// Get the right destination URL for a lead segment
-// GET /api/landing-page?audience_type=B2C&product_interest=door&location_type=la_county&intent_level=normal&angle=product
-router.get('/landing-page', async (req, res) => {
+async function findLandingPageMatch(criteria) {
+  const queries = [
+    criteria,
+    { ...criteria, location_type: null },
+    { ...criteria, location_type: null, intent_level: null },
+    { ...criteria, product_interest: null, location_type: criteria.location_type, intent_level: null, angle: null },
+    { audience_type: criteria.audience_type, product_interest: null, location_type: null, intent_level: 'normal', angle: 'reconnect' },
+  ];
+
+  for (const q of queries) {
+    const parts = ['active = true'];
+    const params = [];
+    let n = 1;
+    for (const col of ['audience_type', 'product_interest', 'location_type', 'intent_level', 'angle']) {
+      if (q[col] != null && q[col] !== '') {
+        parts.push(`${col} = $${n++}`);
+        params.push(q[col]);
+      } else {
+        parts.push(`${col} IS NULL`);
+      }
+    }
+    const result = await pool.query(
+      `SELECT * FROM landing_page_matrix WHERE ${parts.join(' AND ')} LIMIT 1`,
+      params
+    );
+    if (result.rows.length > 0) return result.rows[0];
+  }
+  return null;
+}
+
+router.get('/landing-page', requireAdminAuth, async (req, res) => {
   const { audience_type, product_interest, location_type, intent_level, angle } = req.query;
 
   try {
-    // Try progressively broader matches until one is found
-    const queries = [
-      { audience_type, product_interest, location_type, intent_level, angle },
-      { audience_type, product_interest, location_type: null, intent_level, angle },
-      { audience_type, product_interest, location_type: null, intent_level: null, angle },
-      { audience_type, product_interest: null, location_type, intent_level: null, angle: null },
-      { audience_type, product_interest: null, location_type: null, intent_level: 'normal', angle: 'reconnect' },
-    ];
-
-    for (const q of queries) {
-      const conditions = Object.entries(q)
-        .map(([k, v]) => v ? `${k} = '${v}'` : `${k} IS NULL`)
-        .join(' AND ');
-
-      const result = await pool.query(
-        `SELECT * FROM landing_page_matrix WHERE ${conditions} AND active = true LIMIT 1`
-      );
-      if (result.rows.length > 0) return res.json(result.rows[0]);
-    }
-
+    const row = await findLandingPageMatch({
+      audience_type: audience_type || null,
+      product_interest: product_interest || null,
+      location_type: location_type || null,
+      intent_level: intent_level || null,
+      angle: angle || null,
+    });
+    if (row) return res.json(row);
     res.json({ destination_url: '/', label: 'Fallback – homepage' });
   } catch (err) {
     console.error('Landing page matrix error:', err);
@@ -179,9 +188,7 @@ router.get('/landing-page', async (req, res) => {
   }
 });
 
-// Get full landing page matrix
-// GET /api/landing-page/all
-router.get('/landing-page/all', async (req, res) => {
+router.get('/landing-page/all', requireAdminAuth, async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM landing_page_matrix ORDER BY audience_type, product_interest, intent_level');
     res.json(result.rows);
@@ -190,9 +197,7 @@ router.get('/landing-page/all', async (req, res) => {
   }
 });
 
-// Update a landing page matrix entry
-// PUT /api/landing-page/:id
-router.put('/landing-page/:id', async (req, res) => {
+router.put('/landing-page/:id', requireAdminAuth, async (req, res) => {
   const { destination_url, label, active } = req.body;
   try {
     const result = await pool.query(
@@ -209,10 +214,7 @@ router.put('/landing-page/:id', async (req, res) => {
 
 // ─── Suppression List ──────────────────────────────────────────────────────
 
-// Upload a list of emails to suppress (existing Shopify customers, unsubscribes)
-// POST /api/suppression
-// Body: { emails: ['a@b.com', ...], reason: 'existing_customer' }
-router.post('/suppression', async (req, res) => {
+router.post('/suppression', requireAdminAuth, async (req, res) => {
   const { emails, reason } = req.body;
   if (!Array.isArray(emails) || emails.length === 0) {
     return res.status(400).json({ error: 'emails array required' });
@@ -239,9 +241,7 @@ router.post('/suppression', async (req, res) => {
   }
 });
 
-// Check if an email is suppressed before adding to a campaign
-// GET /api/suppression/check?email=foo@bar.com
-router.get('/suppression/check', async (req, res) => {
+router.get('/suppression/check', requireAdminAuth, async (req, res) => {
   const { email } = req.query;
   if (!email) return res.status(400).json({ error: 'email required' });
   try {
@@ -255,11 +255,7 @@ router.get('/suppression/check', async (req, res) => {
   }
 });
 
-// ─── Salesperson Tracking Number ──────────────────────────────────────────
-
-// Assign a CallRail tracking number to a salesperson
-// PUT /api/salespeople/:id/tracking-number
-router.put('/salespeople/:id/tracking-number', async (req, res) => {
+router.put('/salespeople/:id/tracking-number', requireAdminAuth, async (req, res) => {
   const { tracking_phone_number, callrail_number_id } = req.body;
   try {
     const result = await pool.query(

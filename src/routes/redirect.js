@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { setFirstTouchAttribution } = require('../lib/attribution');
+const { buildAttributionPayload, setAttributionCookie, appendAttributionToUrl } = require('../lib/attributionCookie');
 
-// Every email link points to /r/:token
-// This logs the click, sets the attribution cookie, then redirects to the destination
 router.get('/:token', async (req, res) => {
   const { token } = req.params;
 
@@ -19,7 +19,6 @@ router.get('/:token', async (req, res) => {
 
     const record = result.rows[0];
 
-    // Log the click
     await pool.query(
       `INSERT INTO clicks (token, lead_id, salesperson_id, ip_address, user_agent, referrer)
        VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -33,31 +32,28 @@ router.get('/:token', async (req, res) => {
       ]
     );
 
-    // Set attribution cookie (365 days)
-    const cookieData = JSON.stringify({
+    if (record.lead_id && record.salesperson_id) {
+      setFirstTouchAttribution({
+        leadId: record.lead_id,
+        salespersonId: record.salesperson_id,
+        source: 'tracking_click',
+        clientId: record.client_id,
+      }).catch(() => {});
+    }
+
+    const payload = buildAttributionPayload({
       token,
-      lead_id: record.lead_id,
-      salesperson_id: record.salesperson_id,
-      campaign_id: record.campaign_id,
-      email_step: record.email_step,
+      salespersonId: record.salesperson_id,
+      leadId: record.lead_id,
     });
+    setAttributionCookie(res, payload);
 
-    res.cookie('ss_attribution', cookieData, {
-      maxAge: 365 * 24 * 60 * 60 * 1000,
-      httpOnly: false, // Must be readable by Shopify JS snippet
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      domain: process.env.COOKIE_DOMAIN || undefined,
-    });
-
-    // Build destination URL with tracking params appended
-    const destination = new URL(
-      record.destination_url || process.env.SITE_URL || 'https://suresecured.com'
+    const dest = appendAttributionToUrl(
+      record.destination_url,
+      token,
+      record.salesperson_id
     );
-    destination.searchParams.set('ss_token', token);
-    destination.searchParams.set('ss_sp', record.salesperson_id);
-
-    res.redirect(302, destination.toString());
+    res.redirect(302, dest);
   } catch (err) {
     console.error('Redirect error:', err);
     res.redirect(process.env.SITE_URL || 'https://suresecured.com');

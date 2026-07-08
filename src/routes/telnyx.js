@@ -7,12 +7,17 @@
 const express = require('express');
 const router  = express.Router();
 const { pool } = require('../db');
+const { verifyTelnyxWebhook } = require('../lib/webhookVerify');
 
 /**
  * POST /telnyx-hooks/sms
  * Telnyx inbound SMS webhook — fires on message.received events.
  */
 router.post('/sms', async (req, res) => {
+  if (!verifyTelnyxWebhook(req)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
   try {
     const eventType = req.body?.data?.event_type;
     if (eventType !== 'message.received') {

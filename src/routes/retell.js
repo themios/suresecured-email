@@ -3,6 +3,15 @@
 const express = require('express');
 const router  = express.Router();
 const { pool } = require('../db');
+const { setFirstTouchAttribution } = require('../lib/attribution');
+const { verifyRetellWebhook } = require('../lib/webhookVerify');
+
+function retellAuth(req, res, next) {
+  if (!verifyRetellWebhook(req)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
 
 /**
  * POST /retell-hooks/inbound
@@ -10,7 +19,7 @@ const { pool } = require('../db');
  * Respond with override_agent_id to route to the correct client's agent.
  * Payload: { event: "call_inbound", call: { to_number, from_number, call_id, ... } }
  */
-router.post('/inbound', async (req, res) => {
+router.post('/inbound', retellAuth, async (req, res) => {
   try {
     const call       = req.body?.call || {};
     const toNumber   = call.to_number;
@@ -48,7 +57,7 @@ router.post('/inbound', async (req, res) => {
  *   2. Insert call_logs row (ON CONFLICT DO NOTHING on retell_call_id)
  *   3. Auto-enroll lead in the client's default sequence (if any, ON CONFLICT DO NOTHING)
  */
-router.post('/call-ended', async (req, res) => {
+router.post('/call-ended', retellAuth, async (req, res) => {
   try {
     const call = req.body?.call || {};
     if (req.body?.event !== 'call_ended') {
@@ -139,6 +148,16 @@ router.post('/call-ended', async (req, res) => {
       leadId = existing[0]?.id;
     }
 
+    // First-touch attribution for voice outreach
+    if (leadId && salespersonId) {
+      await setFirstTouchAttribution({
+        leadId,
+        salespersonId,
+        source: 'voice_call',
+        clientId,
+      });
+    }
+
     // Insert call_log (idempotent on retell_call_id)
     await pool.query(
       `INSERT INTO call_logs
@@ -150,22 +169,28 @@ router.post('/call-ended', async (req, res) => {
        transcript, disconnection_reason, callStartedAt, callEndedAt]
     );
 
-    // Auto-enroll in matching sequence (B2C by default for inbound callers)
-    if (leadId && clientId) {
-      const { rows: seqRows } = await pool.query(
-        `SELECT id FROM sequences
-         WHERE active = true AND client_id = $1
-         ORDER BY id ASC LIMIT 1`,
-        [clientId]
+    // Auto-enroll only when lead has email consent (TCPA/CAN-SPAM)
+    if (leadId && clientId && salespersonId) {
+      const { rows: consentRows } = await pool.query(
+        `SELECT consent_email FROM leads WHERE id = $1`,
+        [leadId]
       );
-      if (seqRows[0]) {
-        await pool.query(
-          `INSERT INTO contact_enrollments
-             (lead_id, sequence_id, salesperson_id, client_id, status, next_send_at)
-           VALUES ($1, $2, $3, $4, 'active', NOW())
-           ON CONFLICT (lead_id, sequence_id) DO NOTHING`,
-          [leadId, seqRows[0].id, salespersonId, clientId]
+      if (consentRows[0]?.consent_email) {
+        const { rows: seqRows } = await pool.query(
+          `SELECT id FROM sequences
+           WHERE active = true AND client_id = $1
+           ORDER BY id ASC LIMIT 1`,
+          [clientId]
         );
+        if (seqRows[0]) {
+          await pool.query(
+            `INSERT INTO contact_enrollments
+               (lead_id, sequence_id, salesperson_id, client_id, status, next_send_at)
+             VALUES ($1, $2, $3, $4, 'active', NOW())
+             ON CONFLICT (lead_id, sequence_id) DO NOTHING`,
+            [leadId, seqRows[0].id, salespersonId, clientId]
+          );
+        }
       }
     }
 

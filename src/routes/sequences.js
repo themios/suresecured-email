@@ -370,25 +370,45 @@ router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', l
     const email = cols[emailIdx];
     if (!email || !email.includes('@')) { skipped++; continue; }
 
+    const normalizedEmail = email.toLowerCase();
+    const leadValues = [
+      normalizedEmail,
+      firstIdx   >= 0 ? cols[firstIdx]   : null,
+      lastIdx    >= 0 ? cols[lastIdx]     : null,
+      phoneIdx   >= 0 ? cols[phoneIdx]    : null,
+      cityIdx    >= 0 ? cols[cityIdx]     : null,
+      typeIdx    >= 0 ? (cols[typeIdx] || 'B2C') : 'B2C',
+      productIdx >= 0 ? cols[productIdx]  : null,
+    ];
+
     try {
-      await pool.query(
-        `INSERT INTO leads (email, first_name, last_name, phone, city, audience_type, product_interest)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT DO NOTHING`,
-        [
-          email.toLowerCase(),
-          firstIdx   >= 0 ? cols[firstIdx]   : null,
-          lastIdx    >= 0 ? cols[lastIdx]     : null,
-          phoneIdx   >= 0 ? cols[phoneIdx]    : null,
-          cityIdx    >= 0 ? cols[cityIdx]     : null,
-          typeIdx    >= 0 ? (cols[typeIdx] || 'B2C') : 'B2C',
-          productIdx >= 0 ? cols[productIdx]  : null,
-        ]
+      // CSV imports are pre-verified offline — mark send-ready immediately
+      const { rowCount: updated } = await pool.query(
+        `UPDATE leads SET
+           first_name = COALESCE($2, first_name),
+           last_name = COALESCE($3, last_name),
+           phone = COALESCE($4, phone),
+           city = COALESCE($5, city),
+           audience_type = COALESCE($6, audience_type),
+           product_interest = COALESCE($7, product_interest),
+           email_verified = true,
+           verification_status = 'preverified',
+           verified_at = NOW()
+         WHERE LOWER(email) = LOWER($1)`,
+        leadValues
       );
+
+      if (updated === 0) {
+        await pool.query(
+          `INSERT INTO leads (email, first_name, last_name, phone, city, audience_type, product_interest, email_verified, verification_status, verified_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7, true, 'preverified', NOW())`,
+          leadValues
+        );
+      }
       imported++;
     } catch { skipped++; }
   }
-  res.json({ ok: true, imported, skipped });
+  res.json({ ok: true, imported, skipped, preverified: true });
 });
 
 // -- Preview: send all steps of a sequence immediately to one email ----------
@@ -610,7 +630,7 @@ router.get('/', requireAuth, async (req, res) => {
     <!-- Contact Import & Verification -->
     <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-6">
       <h2 class="font-semibold text-slate-800 mb-1">Import Contacts (CSV)</h2>
-      <p class="text-sm text-slate-500 mb-4">Required column: <code class="bg-slate-100 px-1 rounded text-xs">email</code>. Optional: <code class="bg-slate-100 px-1 rounded text-xs">first_name, last_name, phone, city, audience_type, product_interest</code></p>
+      <p class="text-sm text-slate-500 mb-4">Upload a <strong>pre-verified</strong> list (clean offline first with MillionVerifier, Bouncer, etc.). Required column: <code class="bg-slate-100 px-1 rounded text-xs">email</code>. Optional: <code class="bg-slate-100 px-1 rounded text-xs">first_name, last_name, phone, city, audience_type, product_interest</code>. Imported contacts are marked <em>send-ready</em> automatically.</p>
       <div class="flex gap-3 items-center flex-wrap mb-5">
         <input type="file" id="csv-file" accept=".csv" class="text-sm border border-slate-200 rounded-lg p-2 text-slate-600">
         <button onclick="importCsv()" class="bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors">Upload &amp; Import</button>

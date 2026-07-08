@@ -1,10 +1,12 @@
 require('dotenv').config();
 const express = require('express');
+const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const cron = require('node-cron');
 const { initDb } = require('./db');
 
 const { requireAuth, requireRole } = require('./middleware/auth');
+const { loginLimiter, apiLimiter, cronLimiter } = require('./middleware/rateLimit');
 
 const redirectRouter = require('./routes/redirect');
 const webhookRouter = require('./routes/webhook');
@@ -31,11 +33,22 @@ const PORT = process.env.PORT || 3000;
 
 app.set('trust proxy', 1);
 
+app.use(helmet({
+  contentSecurityPolicy: false, // inline Tailwind/HTML dashboards
+  crossOriginEmbedderPolicy: false,
+}));
+
 // Webhooks need raw body for HMAC verification — must come before json middleware
 app.use('/webhooks', webhookRouter);
 
 app.use(express.json());
 app.use(cookieParser());
+
+// Rate limits
+app.use('/login', loginLimiter);
+app.use('/portal/login', loginLimiter);
+app.use('/api', apiLimiter);
+app.use('/cron', cronLimiter);
 
 // Tracking redirects
 app.use('/r', redirectRouter);
@@ -107,6 +120,7 @@ async function start() {
   cron.schedule('*/15 * * * *', async () => {
     try {
       const res = await fetch(`http://localhost:${PORT}/cron/send-sequences`, {
+        method: 'POST',
         headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
       });
       const data = await res.json();

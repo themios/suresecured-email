@@ -46,6 +46,12 @@ async function initDb() {
   );
   await pool.query(migration006Sql);
 
+  const migration007Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/007_attribution.sql'),
+    'utf8'
+  );
+  await pool.query(migration007Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,

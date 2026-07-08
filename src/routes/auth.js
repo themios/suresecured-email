@@ -121,7 +121,7 @@ router.get('/logout', (req, res) => {
 
 // ─── Operator seed (dev only) ──────────────────────────────────────────────
 
-if (process.env.SEED_OPERATOR === '1') {
+if (process.env.SEED_OPERATOR === '1' && process.env.NODE_ENV !== 'production') {
   const { pool: seedPool } = require('../db');
   bcrypt.hash('operator123', 10).then(hash => {
     seedPool.query(

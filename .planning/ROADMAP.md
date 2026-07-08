@@ -15,6 +15,7 @@ SalesPilot AI evolves an existing single-tenant CommissionTracker into a multi-t
 - [x] **Phase 3: Email Deliverability** - Open/click tracking pixels, bounce suppression ✓ 2026-06-30
 - [x] **Phase 4: Voice** - Telnyx SMS + Retell AI inbound voice with post-call lead creation ✓ 2026-06-30
 - [x] **Phase 5: AI Intelligence** - Daily digest emails, lead engagement scoring ✓ 2026-06-30
+- [ ] **Phase 6: Prelaunch Hardening** - Security, attribution integrity, voice commission, deliverability gates (pilot launch — see `DECISIONS.md`)
 
 ## Phase Details
 
@@ -102,11 +103,31 @@ Plans:
 - [x] 05-01-PLAN.md — Daily digest engine: migration 005, openrouter.js, buildDigestHtml(), POST /cron/daily-digest route ✓
 - [x] 05-02-PLAN.md — Lead scoring: computeScore() pure function, POST /cron/score-leads batch route, score badge on portal ✓
 
+### Phase 6: Prelaunch Hardening
+**Goal**: Platform is secure, attributes sales to the initiating rep across email and voice, and cannot blacklist domains during staged mass outreach
+**Depends on**: Phases 1–5 (feature-complete baseline)
+**Source audit**: `PRELAUNCH_AUDIT.md` (2026-07-07)
+**Launch decisions (2026-07-08):** `DECISIONS.md` — in-house send, offline list verify + `preverified` CSV import, pilot 500–1k, no ZeroBounce requirement.
+**Requirements**: SECU-01, SECU-02, SECU-03, ATTR-01, ATTR-02, ATTR-03, DELV-01, DELV-01b, DELV-02, DELV-03
+**Success Criteria** (what must be TRUE):
+  1. No unauthenticated access to commission data or lead mutation APIs; all vendor webhooks verify signatures
+  2. Shopify order credits the salesperson who initiated outreach (email enrollment, click, or voice call) with auditable resolution path
+  3. Cron sends only to verified leads (`email_verified` via offline-cleaned CSV import or optional ZeroBounce), within per-inbox daily caps, with bounce circuit breaker
+  4. Appendix A E2E tests pass in staging; pilot send signed off before full list scale-up
+**Plans**: 5 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — Security lockdown: API auth, webhook signatures, SQL injection fix, cron method, auth consistency, helmet/rate-limit
+- [ ] 06-02-PLAN.md — Attribution engine: first-touch model, Shopify chain, OAuth hardening, token encryption, tenant scoping
+- [ ] 06-03-PLAN.md — Voice commission: Retell/CallRail → attribution → order resolution → portal
+- [ ] 06-04-PLAN.md — Deliverability gates: verification enforcement, daily limits, circuit breaker, List-Unsubscribe, ops runbook
+- [ ] 06-05-PLAN.md — Verification: unit tests, Appendix A E2E, monitoring, gsd-verifier sign-off
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5
-Phase 4 (Voice) can be deferred without blocking Phase 5.
+Phases 1–5 complete. **Phase 6 is mandatory before production send.**
+Phase 6 waves: 06-01 → (06-02 ∥ 06-04) → 06-03 → 06-05
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -115,3 +136,6 @@ Phase 4 (Voice) can be deferred without blocking Phase 5.
 | 3. Email Deliverability | 4/4 | ✓ Complete | 2026-06-30 |
 | 4. Voice | 4/4 | ✓ Complete | 2026-06-30 |
 | 5. AI Intelligence | 2/2 | ✓ Complete | 2026-06-30 |
+| 6. Prelaunch Hardening | 3/5 | In progress (pilot-ready) | — |
+
+*Phase 6: 06-01 done; 06-02/06-04 partial; launch ops per `DECISIONS.md`*

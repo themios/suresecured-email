@@ -1,8 +1,14 @@
 const crypto = require('crypto');
 
+function hmacSecret() {
+  return process.env.UNSUBSCRIBE_HMAC_SECRET || process.env.JWT_SECRET;
+}
+
 function sign(email) {
+  const secret = hmacSecret();
+  if (!secret) throw new Error('UNSUBSCRIBE_HMAC_SECRET or JWT_SECRET required');
   return crypto
-    .createHmac('sha256', process.env.JWT_SECRET)
+    .createHmac('sha256', secret)
     .update(email.toLowerCase())
     .digest('base64url');
 }

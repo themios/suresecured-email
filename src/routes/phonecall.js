@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
+const { verifyCallRailWebhook } = require('../lib/webhookVerify');
+const { setFirstTouchAttribution } = require('../lib/attribution');
 
 // CallRail fires this webhook every time a tracked call comes in.
-// Each salesperson has a unique CallRail number in their email signature.
-// POST /api/phone-call
 router.post('/', async (req, res) => {
+  if (!verifyCallRailWebhook(req)) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   const {
     tracking_phone_number,  // The unique number in the salesperson's signature
     caller_number,          // The lead's phone number
@@ -58,6 +61,14 @@ router.post('/', async (req, res) => {
         start_time ? new Date(start_time) : new Date(),
       ]
     );
+
+    if (leadId && salespersonId) {
+      await setFirstTouchAttribution({
+        leadId,
+        salespersonId,
+        source: 'callrail_call',
+      });
+    }
 
     res.status(200).json({ ok: true, salesperson_id: salespersonId, lead_id: leadId });
   } catch (err) {

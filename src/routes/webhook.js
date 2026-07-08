@@ -3,6 +3,7 @@ const router = express.Router();
 const crypto = require('crypto');
 const { pool } = require('../db');
 const { calculateCommission } = require('../lib/commissions');
+const { resolveSalespersonForOrder, logCommissionEvent } = require('../lib/attribution');
 
 // Verify the request actually came from Shopify
 function verifyShopifyWebhook(req) {
@@ -34,10 +35,13 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
 
   try {
     const customerEmail = order.email;
+    const customerPhone = order.phone
+      || order.billing_address?.phone
+      || order.shipping_address?.phone
+      || null;
     const orderAmount = parseFloat(order.total_price);
     const shopifyOrderId = String(order.id);
 
-    // Resolve client from Shopify shop domain header
     const shopDomain = req.headers['x-shopify-shop-domain'] || null;
     let clientId = null;
     if (shopDomain) {
@@ -54,58 +58,35 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
       console.warn('Webhook: no x-shopify-shop-domain header present — order will be recorded without client_id, commission skipped.');
     }
 
-    // Look for attribution token in order note attributes (written by Shopify snippet via cart.attributes)
     const attrs = order.note_attributes || [];
     const tokenAttr = attrs.find(a => a.name === 'ss_token');
     const spAttr    = attrs.find(a => a.name === 'ss_salesperson') ||
-                      attrs.find(a => a.name === 'ss_salesperson_id'); // legacy fallback
+                      attrs.find(a => a.name === 'ss_salesperson_id');
 
     const token = tokenAttr?.value || null;
-    const salespersonId = spAttr?.value ? parseInt(spAttr.value) : null;
+    const cartSalespersonId = spAttr?.value || null;
 
-    // Find lead by email if no token
-    let leadId = null;
-    if (token) {
-      const tkResult = await pool.query(
-        'SELECT lead_id FROM tracking_tokens WHERE token = $1',
-        [token]
-      );
-      if (tkResult.rows.length > 0) leadId = tkResult.rows[0].lead_id;
-    }
+    const resolution = await resolveSalespersonForOrder({
+      token,
+      cartSalespersonId,
+      customerEmail,
+      customerPhone,
+      clientId,
+    });
 
-    if (!leadId && customerEmail) {
-      const leadResult = await pool.query(
-        'SELECT id, salesperson_id FROM leads WHERE email = $1 LIMIT 1',
-        [customerEmail]
-      );
-      if (leadResult.rows.length > 0) {
-        leadId = leadResult.rows[0].id;
-      }
-    }
+    const resolvedSalespersonId = resolution.salespersonId;
+    const leadId = resolution.leadId || null;
+    const commissionStatus = resolution.status;
 
-    // Resolve salesperson from lead if not on token
-    let resolvedSalespersonId = salespersonId;
-    if (!resolvedSalespersonId && leadId) {
-      const leadResult = await pool.query(
-        'SELECT salesperson_id FROM leads WHERE id = $1',
-        [leadId]
-      );
-      if (leadResult.rows.length > 0) {
-        resolvedSalespersonId = leadResult.rows[0].salesperson_id;
-      }
-    }
-
-    // Record the order (with client_id for dashboard scoping)
     const orderResult = await pool.query(
-      `INSERT INTO orders (shopify_order_id, token, lead_id, salesperson_id, customer_email, amount, order_data, client_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO orders (shopify_order_id, token, lead_id, salesperson_id, customer_email, amount, order_data, client_id, commission_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (shopify_order_id) DO NOTHING
        RETURNING id`,
-      [shopifyOrderId, token, leadId, resolvedSalespersonId, customerEmail, orderAmount, order, clientId]
+      [shopifyOrderId, token, leadId, resolvedSalespersonId, customerEmail, orderAmount, order, clientId, commissionStatus]
     );
 
-    // Calculate and record tiered commission if we have both salesperson and client
-    if (orderResult.rows.length > 0 && resolvedSalespersonId && clientId) {
+    if (orderResult.rows.length > 0 && resolvedSalespersonId && clientId && commissionStatus === 'credited') {
       const orderId = orderResult.rows[0].id;
 
       const [spResult, unitsResult] = await Promise.all([
@@ -138,6 +119,15 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
         [resolvedSalespersonId, clientId, orderId, orderAmount, rate, earned]
       );
 
+      await logCommissionEvent({
+        orderId,
+        salespersonId: resolvedSalespersonId,
+        clientId,
+        resolutionPath: resolution.path,
+        saleAmount: orderAmount,
+        commissionEarned: earned,
+      });
+
       for (const bonus of bonusesTriggered) {
         await pool.query(
           `INSERT INTO commissions
@@ -146,6 +136,8 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
           [resolvedSalespersonId, clientId, orderId, bonus.amount]
         );
       }
+    } else if (orderResult.rows.length > 0 && commissionStatus === 'pending_review') {
+      console.warn(`Webhook: order ${orderResult.rows[0].id} pending_review — no commission (${resolution.path})`);
     } else if (orderResult.rows.length > 0 && resolvedSalespersonId && !clientId) {
       console.warn(`Webhook: order ${orderResult.rows[0].id} recorded but commission skipped — no client_id resolved.`);
     }

@@ -34,6 +34,19 @@
 - [x] **AIML-01**: Each client receives a daily email digest (via OpenRouter/Gemini) summarizing new leads, sequence performance, reply rate, and top-performing subject lines for the past 24 hours
 - [x] **AIML-02**: Leads are scored 1–100 based on email engagement patterns (opens, clicks, step reached, reply) and score is visible on the lead record and commission dashboard
 
+### Prelaunch Hardening (v1.1 — Phase 6)
+
+- [ ] **SECU-01**: All API routes require JWT role auth or signed client API key — no public commission/lead access
+- [ ] **SECU-02**: CallRail, Retell, and Telnyx webhooks verify vendor signatures before processing
+- [ ] **SECU-03**: All SQL queries use parameterized inputs — no user string interpolation
+- [ ] **ATTR-01**: First-touch salesperson attribution stored on lead with source and lock flag
+- [ ] **ATTR-02**: Shopify orders resolve commission via token → cart → attributed owner (client-scoped)
+- [ ] **ATTR-03**: Voice inbound calls set attribution; orders match phone/email to credited rep
+- [ ] **DELV-01**: Cron send skips leads where `email_verified IS NOT TRUE`
+- [x] **DELV-01b**: CSV import from offline-cleaned list sets `email_verified=true`, `verification_status=preverified`
+- [ ] **DELV-02**: Per-inbox daily send limits with warmup ramp enforced before each send
+- [ ] **DELV-03**: Cron routes accept POST (Railway schedule) and GET for manual runs
+
 ## v2 Requirements
 
 ### SaaS Layer
@@ -82,6 +95,16 @@
 | VOIC-01 | Phase 4 | Complete ✓ |
 | AIML-01 | Phase 5 | Complete ✓ |
 | AIML-02 | Phase 5 | Complete ✓ |
+| SECU-01 | Phase 6 | Pending |
+| SECU-02 | Phase 6 | Pending |
+| SECU-03 | Phase 6 | Pending |
+| ATTR-01 | Phase 6 | Pending |
+| ATTR-02 | Phase 6 | Pending |
+| ATTR-03 | Phase 6 | Pending |
+| DELV-01 | Phase 6 | Partial — gate enforced |
+| DELV-01b | Phase 6 | Complete ✓ (2026-07-08) |
+| DELV-02 | Phase 6 | Pending |
+| DELV-03 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 14 total
@@ -90,4 +113,4 @@
 
 ---
 *Requirements defined: 2026-06-30*
-*Last updated: 2026-06-30 — Phase 5 complete, AIML-01 and AIML-02 marked Complete ✓. All v1 phases complete (Phase 4 Voice deferred pending Twilio).*
+*Last updated: 2026-07-08 — DELV-01b preverified CSV import; launch decisions in DECISIONS.md*

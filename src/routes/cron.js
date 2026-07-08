@@ -1,5 +1,5 @@
 /**
- * GET /cron/send-sequences
+ * GET|POST /cron/send-sequences
  * Fires due email sequence steps.
  * Called every 15 minutes by cron-job.org.
  * Auth: Authorization: Bearer <CRON_SECRET>
@@ -13,6 +13,7 @@ const { imapEnabled, checkForRepliesViaImap } = require('../lib/imap');
 const { callOpenRouter, buildDigestPrompt, classifyReply } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
+const { setFirstTouchAttribution } = require('../lib/attribution');
 const { sendTelegram, notifyNewLead, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 
 function cronAuth(req, res, next) {
@@ -24,7 +25,7 @@ function cronAuth(req, res, next) {
   next();
 }
 
-router.get('/send-sequences', cronAuth, async (req, res) => {
+async function sendSequencesHandler(req, res) {
   const now = new Date().toISOString();
   let sent = 0, skipped = 0, errors = 0, replies = 0;
 
@@ -297,6 +298,7 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
         l.city,
         l.product_interest,
         l.audience_type,
+        l.email_verified,
         s.name             AS salesperson_name,
         s.email            AS salesperson_email,
         s.phone            AS salesperson_phone,
@@ -394,6 +396,12 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
           `UPDATE contact_enrollments SET status = 'paused', paused_reason = $1 WHERE id = $2`,
           [pauseReason, row.enrollment_id]
         );
+        skipped++;
+        continue;
+      }
+
+      // Skip unverified addresses (ZeroBounce gate)
+      if (row.email_verified !== true) {
         skipped++;
         continue;
       }
@@ -551,11 +559,13 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
           );
         }
 
-        // Log click/lead attribution
-        await client.query(
-          `UPDATE leads SET salesperson_id = $1 WHERE id = $2 AND salesperson_id IS NULL`,
-          [row.salesperson_id, row.lead_id]
-        );
+        // First-touch attribution on successful outreach
+        await setFirstTouchAttribution({
+          leadId: row.lead_id,
+          salespersonId: row.salesperson_id,
+          source: 'email_enrollment',
+          clientId: row.client_id,
+        });
 
         sent++;
       } else {
@@ -595,7 +605,9 @@ router.get('/send-sequences', cronAuth, async (req, res) => {
   }
 
   res.json({ ok: true, sent, skipped, errors, replies, timestamp: now });
-});
+}
+
+router.all('/send-sequences', cronAuth, sendSequencesHandler);
 
 /**
  * POST /cron/daily-digest
