@@ -42,7 +42,7 @@ Progress: [█████████████████████░] ~
 |------|--------|
 | GitHub | `fc136bb` on `master` (`themios/suresecured-email`) |
 | Railway | Email-Campaign / suresecured-email / production |
-| URL | https://suresecured-email-production.up.railway.app |
+| URL | https://saleswyze.up.railway.app |
 | Admin | kmaautosinc@gmail.com |
 | Build | syntax check + `commissions.test.js` + `attribution.test.js` ✅ |
 | Blocking (Tim) | `ENCRYPTION_KEY` + `SEND_WARMUP`/`DAILY_SEND_LIMIT` in Railway; Shopify webhook secret; import cleaned CSV; DNS |

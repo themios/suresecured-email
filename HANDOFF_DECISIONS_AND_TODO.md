@@ -60,7 +60,7 @@
 - [ ] **Railway env — send caps:** `SEND_WARMUP=off` + `DAILY_SEND_LIMIT=200` (or chosen cap). Default warmup starts at **5/day**, which throttles a 500–1k pilot. Use `off` for the established `sales@suresecured.com` mailbox; leave `on` only for a cold new inbox.
 - [ ] **Railway env — encryption:** `ENCRYPTION_KEY` (64-char hex). Without it, Gmail OAuth tokens + SMTP passwords stay plaintext (no crash). Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
 - [ ] **Railway env — webhook secrets:** confirm `RETELL_WEBHOOK_SECRET` / `TELNYX_WEBHOOK_SECRET` set if voice/SMS webhooks are live (they now fail closed without them).
-- [ ] **Shopify webhook** — Settings → Notifications → Order creation → `https://suresecured-email-production.up.railway.app/webhooks/shopify/order` → set real `SHOPIFY_WEBHOOK_SECRET` in Railway
+- [ ] **Shopify webhook** — Settings → Notifications → Order creation → `https://saleswyze.up.railway.app/webhooks/shopify/order` → set real `SHOPIFY_WEBHOOK_SECRET` in Railway
 - [ ] **Shopify snippet** — dev pastes `shopify-handoff/snippet.js` into `theme.liquid` before `</body>`
 - [ ] **Offline verify full list** — MillionVerifier / Bouncer → import **valid-only** CSV (see runbook)
 - [ ] **DNS** — SPF + DKIM + DMARC for `sales@suresecured.com` (Ionos)

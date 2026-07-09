@@ -13,7 +13,7 @@ One file, one paste, done
 2. Set up the Shopify order webhook
 
 Shopify Admin → Settings → Notifications → Webhooks
-Create webhook: Order creation → URL: https://suresecured-email-production.up.railway.app/webhooks/shopify/order
+Create webhook: Order creation → URL: https://saleswyze.up.railway.app/webhooks/shopify/order
 Copy the webhook signing secret → give it to you so you can add SHOPIFY_WEBHOOK_SECRET to Railway vars
 3. Confirm the quote form type
 

@@ -4,6 +4,23 @@ Product and engineering changes beyond routine maintenance. Newest entries first
 
 ---
 
+## 2026-07-08 — Railway public URL rename (saleswyze)
+
+- **Category:** DevOps / Infra
+- **Migration:** none
+- **Why:** Simpler, product-aligned public URL before the pilot send (safe now — near-zero tracking links in flight; risky after a mass send).
+- **What was done:**
+  - Renamed the Railway service domain `suresecured-email-production.up.railway.app` → **`saleswyze.up.railway.app`** (via `railway domain update`). Old URL no longer routes (404).
+  - Updated Railway vars: `TRACKER_URL`, `APP_BASE_URL`, `GMAIL_REDIRECT_URI` → new base URL.
+  - No code changes needed — all URL references read from env vars.
+  - Synced docs: `SETUP_WALKTHROUGH_FOR_TIM.md`, `DECISIONS.md`, `.planning/STATE.md`, `HANDOFF_DECISIONS_AND_TODO.md`, `docs/DELIVERABILITY_RUNBOOK.md`, `TimQuestions.md`, `YOUR_RAILWAY_VARS.txt`.
+- **Manual follow-ups (Tim — cannot be done via CLI):**
+  - **Google Cloud Console** → OAuth client → Authorized redirect URIs → add `https://saleswyze.up.railway.app/gmail/callback` (new Gmail connects fail until added; already-connected Gmail keeps working via refresh token).
+  - **Shopify webhook** → use `https://saleswyze.up.railway.app/webhooks/shopify/order` (fine — not created yet).
+  - **External cron** (if cron-job.org hits `/cron/daily-digest` or `/cron/score-leads`) → repoint to new URL. The 15-min send cron runs in-process on localhost — unaffected.
+
+---
+
 ## 2026-07-08 — Prelaunch audit remediation (security · attribution · deliverability)
 
 - **Category:** Security / Attribution / Deliverability

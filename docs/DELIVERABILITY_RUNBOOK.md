@@ -66,7 +66,7 @@ The app enforces these automatically — you don't configure them per send:
 
 ## Phase 2 — Import into SalesPilot
 
-1. Log in: `https://suresecured-email-production.up.railway.app`
+1. Log in: `https://saleswyze.up.railway.app`
 2. **Sequences** → **Import Contacts (CSV)**
 3. Upload cleaned CSV only.
 

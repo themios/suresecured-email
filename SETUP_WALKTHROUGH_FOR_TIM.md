@@ -1,6 +1,6 @@
 # SureSecured Email App — Setup Walkthrough (Non-Technical)
 
-**Your Railway app URL:** `https://suresecured-email-production.up.railway.app`  
+**Your Railway app URL:** `https://saleswyze.up.railway.app`  
 **Decisions log:** `DECISIONS.md`  
 **Last updated:** 2026-07-09
 
@@ -59,7 +59,7 @@ Repeat until all of these exist:
 | JWT_SECRET | Already generated in YOUR_RAILWAY_VARS.txt |
 | CRON_SECRET | Already generated |
 | CLIENT_API_KEY | Already generated |
-| TRACKER_URL | `https://suresecured-email-production.up.railway.app` |
+| TRACKER_URL | `https://saleswyze.up.railway.app` |
 | APP_BASE_URL | Same as TRACKER_URL |
 | SITE_URL | `https://suresecured.com` |
 | COOKIE_DOMAIN | `.suresecured.com` |
@@ -110,7 +110,7 @@ railway run node src/setup.js
 
 ### Step 4: Log in
 
-1. Open: `https://suresecured-email-production.up.railway.app`
+1. Open: `https://saleswyze.up.railway.app`
 2. Log in with **ADMIN_EMAIL** + **ADMIN_PASSWORD**.
 3. Change password in the app if there's a change-password screen.
 
@@ -150,7 +150,7 @@ This tells the app when someone **buys** on suresecured.com so commission can be
 2. **Create webhook**:
    - Event: **Order creation**
    - Format: **JSON**
-   - URL: `https://suresecured-email-production.up.railway.app/webhooks/shopify/order`
+   - URL: `https://saleswyze.up.railway.app/webhooks/shopify/order`
      - Note: `/order` at the end — **not** `shopify-order`
 3. Save. Shopify shows a **signing secret** (sometimes after creation — click the webhook to view).
 4. Railway → Variables:
@@ -210,7 +210,7 @@ Only needed if you want emails to come **from each salesperson's Gmail** instead
 5. **Credentials** → **Create credentials** → **OAuth client ID**:
    - Type: **Web application**
    - Authorized redirect URI:  
-     `https://suresecured-email-production.up.railway.app/gmail/callback`
+     `https://saleswyze.up.railway.app/gmail/callback`
 6. Copy **Client ID** and **Client secret**.
 
 ### Railway
@@ -221,7 +221,7 @@ Add:
 |----------|--------|
 | GMAIL_CLIENT_ID | from Google |
 | GMAIL_CLIENT_SECRET | from Google |
-| GMAIL_REDIRECT_URI | `https://suresecured-email-production.up.railway.app/gmail/callback` |
+| GMAIL_REDIRECT_URI | `https://saleswyze.up.railway.app/gmail/callback` |
 
 Redeploy. In the admin app, each rep uses **Connect Gmail** (or similar) once.
 
@@ -244,7 +244,7 @@ If these are **missing** in production, those webhooks may reject requests (by d
 ### Health check
 
 Open in browser:  
-`https://suresecured-email-production.up.railway.app/health`  
+`https://saleswyze.up.railway.app/health`  
 Should return OK / healthy JSON.
 
 ### Cron (email sequences)
@@ -253,7 +253,7 @@ Railway runs every **15 minutes** and hits `/cron/send-sequences` with your `CRO
 
 1. Wait up to 15 minutes, or
 2. Ask dev to trigger manually:  
-   `curl -X POST https://suresecured-email-production.up.railway.app/cron/send-sequences -H "Authorization: Bearer YOUR_CRON_SECRET"`
+   `curl -X POST https://saleswyze.up.railway.app/cron/send-sequences -H "Authorization: Bearer YOUR_CRON_SECRET"`
 
 ### Shopify test order
 
@@ -267,9 +267,9 @@ Railway runs every **15 minutes** and hits `/cron/send-sequences` with your `CRO
 
 | What | URL |
 |------|-----|
-| Admin / tracker app | https://suresecured-email-production.up.railway.app |
-| Shopify order webhook | https://suresecured-email-production.up.railway.app/webhooks/shopify/order |
-| Gmail OAuth callback | https://suresecured-email-production.up.railway.app/gmail/callback |
+| Admin / tracker app | https://saleswyze.up.railway.app |
+| Shopify order webhook | https://saleswyze.up.railway.app/webhooks/shopify/order |
+| Gmail OAuth callback | https://saleswyze.up.railway.app/gmail/callback |
 | Your store | https://suresecured.com |
 
 ---

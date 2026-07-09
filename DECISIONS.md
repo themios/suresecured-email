@@ -42,7 +42,7 @@
 | Item | Status |
 |------|--------|
 | Railway project | **Email-Campaign** / service **suresecured-email** / **production** |
-| Public URL | `https://suresecured-email-production.up.railway.app` |
+| Public URL | `https://saleswyze.up.railway.app` |
 | Railway CLI | Installed; repo linked on Tim's machine |
 | Admin user | `kmaautosinc@gmail.com` (`node src/setup.js` run) |
 | Health | `/health` → OK |
