@@ -23,5 +23,6 @@ function createRateLimiter({ windowMs = 60_000, max = 60, keyFn = (req) => req.i
 const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 20 });
 const apiLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 const cronLimiter = createRateLimiter({ windowMs: 60_000, max: 30, keyFn: (req) => req.headers.authorization || req.ip });
+const leadFormLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 10 });
 
-module.exports = { createRateLimiter, loginLimiter, apiLimiter, cronLimiter };
+module.exports = { createRateLimiter, loginLimiter, apiLimiter, cronLimiter, leadFormLimiter };

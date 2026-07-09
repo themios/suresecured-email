@@ -27,6 +27,7 @@ const retellRouter      = require('./routes/retell');
 const telnyxRouter      = require('./routes/telnyx');
 const pixelRouter       = require('./routes/pixel');
 const emailClickRouter  = require('./routes/email-click');
+const marketingRouter   = require('./routes/marketing');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,6 +61,9 @@ app.use('/pixel', pixelRouter);
 
 // Email click tracking (no auth — tracked email link redirect)
 app.use('/e', emailClickRouter);
+
+// Public marketing site — owns GET / and POST /get-started
+app.use('/', marketingRouter);
 
 // Auth
 app.use('/', authRouter);
@@ -108,9 +112,6 @@ app.use('/settings', settingsRouter);
 
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
-// Root redirect
-app.get('/', (req, res) => res.redirect('/dashboard'));
 
 async function start() {
   await initDb();

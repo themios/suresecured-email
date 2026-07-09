@@ -367,6 +367,24 @@ async function initDb() {
     );
   `);
 
+  // Prospective agency clients captured from the public marketing site.
+  // Deliberately separate from `leads` (a tenant's own contacts) — no client_id,
+  // these people don't belong to a tenant yet.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS platform_leads (
+      id SERIAL PRIMARY KEY,
+      business_name VARCHAR(255) NOT NULL,
+      contact_name VARCHAR(255),
+      trade VARCHAR(100),
+      email VARCHAR(255) NOT NULL,
+      phone VARCHAR(50),
+      list_size VARCHAR(50),
+      message TEXT,
+      source VARCHAR(100) DEFAULT 'landing_page',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
   await seedLandingPageMatrix();
 
   console.log('Database tables ready.');
