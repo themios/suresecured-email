@@ -4,16 +4,30 @@ const { pool } = require('../db');
 const { v4: uuidv4 } = require('uuid');
 const { requireClientApiKey, requireAdminAuth } = require('../middleware/apiAuth');
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function toInt(v) {
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
 // Record a form submission with attribution (Shopify Flow / server-to-server)
 // POST /api/form-submission — requires X-Client-Api-Key
 router.post('/form-submission', requireClientApiKey, async (req, res) => {
   const { token, salesperson_id, lead_id, form_type, submitter_email, submitter_name, raw_data } = req.body;
 
+  // External callers (e.g. GHL merge tags) may send unresolved placeholders or
+  // empty strings instead of omitting the field — validate shape before it hits
+  // the UUID/integer columns, since those crash the query rather than reject cleanly.
+  const safeToken = typeof token === 'string' && UUID_RE.test(token) ? token : null;
+  const safeSalespersonId = toInt(salesperson_id);
+  const safeLeadId = toInt(lead_id);
+
   try {
     await pool.query(
       `INSERT INTO form_submissions (token, lead_id, salesperson_id, form_type, submitter_email, submitter_name, raw_data)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [token || null, lead_id || null, salesperson_id || null, form_type || 'quote', submitter_email, submitter_name, raw_data || {}]
+      [safeToken, safeLeadId, safeSalespersonId, form_type || 'quote', submitter_email || null, submitter_name || null, raw_data || {}]
     );
     res.json({ ok: true });
   } catch (err) {
