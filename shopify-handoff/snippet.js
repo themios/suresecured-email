@@ -1,6 +1,6 @@
 /**
  * SureSecured Commission Tracking Snippet
- * Version: 1.1
+ * Version: 1.2
  *
  * ─── SHOPIFY DEVELOPER INSTRUCTIONS ────────────────────────────────────────
  *
@@ -17,10 +17,12 @@
  *   1. Saves the attribution token in a 365-day cookie + localStorage on this domain
  *   2. Writes it to the Shopify cart as a note attribute — flows to every order placed
  *   3. Injects it as a hidden field into every form on every page
+ *   4. Appends ss_token/ss_sp onto any GoHighLevel form iframe's src, so GHL's
+ *      own "fill from URL parameter" hidden fields can pick it up
  *
  * On return visits (no token in URL):
  *   1. Reads saved cookie/localStorage — attribution persists for 365 days
- *   2. Re-injects cart attribute and form fields on every page load
+ *   2. Re-injects cart attribute, form fields, and GHL iframe src on every page load
  *
  * ─── ATTRIBUTION CHAIN ───────────────────────────────────────────────────────
  *
@@ -29,18 +31,19 @@
  *       → customer buys → order has note_attribute ss_token
  *       → SalesPilot webhook fires → commission credited to correct salesperson
  *
- * ─── QUOTE FORM NOTE ────────────────────────────────────────────────────────
+ * ─── QUOTE / DEALER FORM NOTE ─────────────────────────────────────────────
  *
- * For /pages/request-a-quote and /pages/become-a-dealer:
- * The snippet injects two hidden fields into every form:
- *   - contact[ss_token]      (Shopify contact form format)
- *   - contact[ss_salesperson] (Shopify contact form format)
+ * request-a-quote and become-a-dealer are GoHighLevel forms embedded in a
+ * cross-origin <iframe src="https://links.suresecured.com/widget/form/...">.
+ * JS on the parent page cannot reach into that iframe's DOM (Same-Origin
+ * Policy), so the old "inject hidden fields into every form" approach never
+ * reached them. Instead, this snippet rewrites the iframe's own src to add
+ * ?ss_token=...&ss_sp=... — GHL's hidden fields are configured (in the GHL
+ * form builder) to read those same param names and store them on the
+ * contact record, which SalesPilot's webhook then reads.
  *
- * These appear in the notification email SureSecured receives when a form is
- * submitted. The sales team can look up the token in SalesPilot to find the lead.
- *
- * If the quote form is a third-party embed (Typeform, JotForm, etc.),
- * confirm the field names with that platform's support — they differ per tool.
+ * The plain `injectIntoForms()` hidden-field approach below still applies to
+ * any genuinely native Shopify/HTML forms elsewhere on the site.
  *
  * ─── ENV VARS REQUIRED IN SALESPILOT (.env) ─────────────────────────────────
  *
@@ -167,10 +170,35 @@
 
   injectIntoForms();
 
-  // Watch for dynamically rendered forms (Typeform, JotForm, multi-step flows)
+  // ── GoHighLevel iframe forms (request-a-quote, become-a-dealer) ───────────
+  // These forms live in a cross-origin iframe, so injectIntoForms() above can
+  // never reach their fields. GHL's own hidden fields instead read from the
+  // iframe's own URL — so we rewrite the iframe src to carry the params.
+
+  var GHL_IFRAME_RE = /links\.suresecured\.com\/widget\/form\//;
+
+  function fixGhlIframes() {
+    document.querySelectorAll('iframe').forEach(function (frame) {
+      if (!frame.src || !GHL_IFRAME_RE.test(frame.src)) return;
+      if (frame.src.indexOf('ss_token=') !== -1) return; // already carries it
+      try {
+        var url = new URL(frame.src);
+        url.searchParams.set('ss_token', attribution.token || '');
+        url.searchParams.set('ss_sp', attribution.salesperson_id || '');
+        frame.src = url.toString();
+      } catch (e) {}
+    });
+  }
+
+  fixGhlIframes();
+
+  // Watch for dynamically rendered forms/iframes (Typeform, JotForm, GHL embeds,
+  // multi-step flows) that aren't present in the DOM at initial script run
   if (window.MutationObserver) {
-    new MutationObserver(injectIntoForms)
-      .observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(function () {
+      injectIntoForms();
+      fixGhlIframes();
+    }).observe(document.body, { childList: true, subtree: true });
   }
 
 })();
