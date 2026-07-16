@@ -579,7 +579,7 @@ a{color:inherit;text-decoration:none;}
 /* reveal animation — hidden only once JS confirms it can reveal them again (progressive enhancement, see html.has-js) */
 .reveal{transition:opacity .6s ease, transform .6s ease;transition-delay:var(--delay,0ms);}
 html.has-js .reveal{opacity:0;transform:translateY(18px);}
-.reveal.in-view{opacity:1;transform:translateY(0);}
+html.has-js .reveal.in-view{opacity:1;transform:translateY(0);}
 
 /* responsive */
 @media (max-width:920px){
@@ -617,7 +617,13 @@ function js() {
       if(e.isIntersecting){ e.target.classList.add('in-view'); io.unobserve(e.target); }
     });
   }, {threshold:0, rootMargin:'0px 0px -10px 0px'});
-  document.querySelectorAll('.reveal').forEach(function(el){ io.observe(el); });
+  document.querySelectorAll('.reveal').forEach(function(el){
+    io.observe(el);
+    var rect = el.getBoundingClientRect();
+    if(rect.top < window.innerHeight && rect.bottom > 0){
+      el.classList.add('in-view');
+    }
+  });
 
   var counterEl = document.querySelector('.num-total');
   if(counterEl){

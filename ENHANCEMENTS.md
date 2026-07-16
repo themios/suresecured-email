@@ -4,6 +4,16 @@ Product and engineering changes beyond routine maintenance. Newest entries first
 
 ---
 
+## 2026-07-12 — Landing page reveal CSS specificity fix
+
+- **Category:** UX
+- **Migration:** none
+- **Why:** The SalesWyze public landing page (`GET /`) showed only nav/footer on a blank beige background. JavaScript added `in-view` correctly, but `html.has-js .reveal { opacity: 0 }` had higher CSS specificity than `.reveal.in-view`, so main content never became visible.
+- **What was built:**
+  - `src/routes/marketing.js` — changed reveal rule to `html.has-js .reveal.in-view` so visible state wins the specificity battle; added above-fold viewport fallback in the IntersectionObserver loop for first-paint safety.
+
+---
+
 ## 2026-07-08 — Railway public URL rename (saleswyze)
 
 - **Category:** DevOps / Infra
