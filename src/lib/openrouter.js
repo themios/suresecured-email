@@ -4,10 +4,17 @@
  */
 const https = require('https');
 
-function callOpenRouter(prompt) {
+const DEFAULT_MODEL = 'google/gemini-2.5-flash';
+
+/**
+ * Low-level OpenRouter call that returns content + token usage + model.
+ * Used by the agent runner for per-tenant cost accounting. Callers who only
+ * want the text should use callOpenRouter (below), which wraps this.
+ */
+function callOpenRouterRaw(prompt, { model = DEFAULT_MODEL, title = 'SalesPilot Agent' } = {}) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
-      model: 'google/gemini-2.5-flash',
+      model,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -20,7 +27,7 @@ function callOpenRouter(prompt) {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
         'HTTP-Referer': process.env.TRACKER_URL || 'https://salespilot.app',
-        'X-Title': 'SalesPilot Digest',
+        'X-Title': title,
       },
     }, (res) => {
       let data = '';
@@ -29,7 +36,11 @@ function callOpenRouter(prompt) {
         try {
           const parsed = JSON.parse(data);
           if (parsed.error) return reject(new Error('OpenRouter error: ' + JSON.stringify(parsed.error)));
-          resolve(parsed.choices[0].message.content);
+          resolve({
+            content: parsed.choices[0].message.content,
+            usage: parsed.usage || {},
+            model: parsed.model || model,
+          });
         } catch (e) {
           reject(new Error('OpenRouter parse error: ' + data.slice(0, 200)));
         }
@@ -47,6 +58,11 @@ function callOpenRouter(prompt) {
   });
 }
 
+async function callOpenRouter(prompt) {
+  const { content } = await callOpenRouterRaw(prompt, { title: 'SalesPilot Digest' });
+  return content;
+}
+
 function buildDigestPrompt(metrics) {
   return `You are a sales analytics assistant. Summarize the following 24-hour email campaign metrics for an operator.
 Write 3-4 plain English sentences. Be direct and actionable. No bullet lists. No markdown.
@@ -57,6 +73,7 @@ Metrics:
 - Replies received: ${metrics.replies_24h}
 - Reply rate: ${metrics.reply_rate_pct}%
 - Bounces: ${metrics.bounces_24h}
+- Bounce rate: ${metrics.bounce_rate_pct != null ? metrics.bounce_rate_pct : '0.0'}%
 - Average opens per email: ${parseFloat(metrics.avg_opens).toFixed(2)}
 - Average clicks per email: ${parseFloat(metrics.avg_clicks).toFixed(2)}
 - Top subject lines this week: ${metrics.top_subjects.join(' | ')}
@@ -97,4 +114,4 @@ Classify this reply. Respond with valid JSON only — no explanation, no markdow
   }
 }
 
-module.exports = { callOpenRouter, buildDigestPrompt, classifyReply };
+module.exports = { callOpenRouter, callOpenRouterRaw, buildDigestPrompt, classifyReply };

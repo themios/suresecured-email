@@ -182,6 +182,41 @@ router.get('/', requireAuth, async (req, res) => {
       </div>
     </div>` : '';
 
+    // AI agent report card — latest weekly Reporting agent summary + pending
+    // approvals. Fully defensive: any failure yields an empty card so it can
+    // never break the live dashboard.
+    let agentReportCard = '';
+    try {
+      const clientId = req.user?.client_id
+        || (await pool.query('SELECT id FROM clients ORDER BY id LIMIT 1')).rows[0]?.id || null;
+      if (clientId) {
+        const [{ rows: enabledRows }, { rows: reportRows }, { rows: pendRows }] = await Promise.all([
+          pool.query(`SELECT enabled FROM client_agent_settings WHERE client_id=$1 AND agent='reporting'`, [clientId]),
+          pool.query(`SELECT period, summary, created_at FROM agent_reports WHERE client_id=$1 ORDER BY created_at DESC LIMIT 1`, [clientId]),
+          pool.query(`SELECT COUNT(*)::int AS n FROM agent_proposals WHERE client_id=$1 AND status='pending'`, [clientId]),
+        ]);
+        const enabled = enabledRows[0]?.enabled === true;
+        const report  = reportRows[0];
+        const pending  = pendRows[0]?.n || 0;
+        if (enabled) {
+          const inner = report
+            ? `<p class="text-sm text-slate-700 leading-relaxed">${esc(report.summary)}</p>
+               <p class="text-xs text-slate-400 mt-2">Week ${esc(report.period)} · generated ${formatDate(report.created_at)}</p>`
+            : `<p class="text-sm text-slate-500">No report yet — the first weekly summary runs on the next scheduled cycle.</p>`;
+          agentReportCard = `
+          <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden mb-6">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+              <h2 class="font-semibold text-slate-800">📊 AI Weekly Report</h2>
+              ${pending ? `<a href="/settings/agents" class="ml-auto text-xs font-medium px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">${pending} awaiting approval</a>` : '<span class="ml-auto text-xs text-emerald-500 font-medium">Reporting agent on</span>'}
+            </div>
+            <div class="px-6 py-4">${inner}</div>
+          </div>`;
+        }
+      }
+    } catch (err) {
+      console.error('[dashboard] agent card failed (non-fatal):', err.message);
+    }
+
     const content = `
     <div class="px-6 py-8 max-w-7xl mx-auto">
 
@@ -189,6 +224,8 @@ router.get('/', requireAuth, async (req, res) => {
         <h1 class="text-2xl font-bold text-slate-900">Overview</h1>
         <p class="text-sm text-slate-500 mt-0.5">All-time performance across all salespeople</p>
       </div>
+
+      ${agentReportCard}
 
       ${primaryKpis}
       ${secondaryKpis}

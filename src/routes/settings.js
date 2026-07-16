@@ -45,6 +45,7 @@ function settingsNav(active) {
     { key: 'email',    label: 'Email' },
     { key: 'phone',    label: 'Phone & SMS' },
     { key: 'theme',    label: 'Theme & Branding' },
+    { key: 'agents',   label: 'AI Agents' },
   ];
   return `
   <div class="bg-white border-b border-slate-100 mb-6">
@@ -69,6 +70,77 @@ function pageShell(title, active, body, msg, ok) {
   </div>`;
   return shell(title, 'settings', content, {});
 }
+
+// ─── AI Agents ────────────────────────────────────────────────────────────────
+// Per-tenant enablement for the AI marketing agents. Everything ships disabled;
+// a tenant opts each agent in here. Only agents that are live can be toggled;
+// the rest are shown as "coming soon" so operators know what's on the roadmap.
+const AGENT_CATALOG = [
+  { key: 'reporting',    label: 'Reporting Agent',    live: true,
+    desc: 'Weekly cross-agent summary of what is working and what needs attention, delivered to this dashboard and Telegram. Read-only — never sends or spends.' },
+  { key: 'segmentation', label: 'Segmentation Agent', live: false,
+    desc: 'Sorts your contacts into engagement tiers so messaging can differ by group.' },
+  { key: 'email',        label: 'Email Agent',        live: false,
+    desc: 'Drafts campaigns and follow-ups for your approval before anything is sent.' },
+  { key: 'research',     label: 'Lead Research Agent', live: false,
+    desc: 'Finds and enriches new prospects on a schedule.' },
+  { key: 'planning',     label: 'Campaign Planning Agent', live: false,
+    desc: 'Plans the month of outreach and coordinates the other agents.' },
+];
+
+router.get('/agents', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const { rows } = await pool.query(
+    `SELECT agent, enabled FROM client_agent_settings WHERE client_id = $1`, [clientId]
+  );
+  const enabledMap = Object.fromEntries(rows.map(r => [r.agent, r.enabled]));
+
+  const cards = AGENT_CATALOG.map(a => {
+    const on = enabledMap[a.key] === true;
+    const toggle = a.live
+      ? `<button type="submit" name="agent" value="${a.key}"
+            class="shrink-0 px-4 py-2 rounded-lg text-sm font-semibold ${on
+              ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+              : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}">
+            ${on ? 'Enabled — click to disable' : 'Disabled — click to enable'}
+          </button>`
+      : `<span class="shrink-0 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-400">Coming soon</span>`;
+    return `
+    <div class="flex items-start gap-4 justify-between border border-slate-100 rounded-xl p-4 ${a.live ? '' : 'opacity-70'}">
+      <div>
+        <div class="font-semibold text-slate-900">${esc(a.label)}
+          ${on ? '<span class="ml-2 align-middle inline-block w-2 h-2 rounded-full bg-emerald-500"></span>' : ''}
+        </div>
+        <p class="text-sm text-slate-500 mt-1">${esc(a.desc)}</p>
+      </div>
+      ${toggle}
+    </div>`;
+  }).join('');
+
+  const body = `
+  <p class="text-sm text-slate-500 mb-5">Turn AI marketing agents on for your account. All agents are off by default,
+    and no agent sends email or spends money without your approval.</p>
+  <form method="post" action="/settings/agents" class="space-y-3">${cards}</form>`;
+
+  res.send(pageShell('AI Agents', 'agents', body, req.query.msg, req.query.ok));
+});
+
+router.post('/agents', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const agent = String(req.body.agent || '');
+  const catalogEntry = AGENT_CATALOG.find(a => a.key === agent && a.live);
+  if (!clientId || !catalogEntry) {
+    return res.redirect('/settings/agents?ok=0&msg=' + encodeURIComponent('Unknown or unavailable agent.'));
+  }
+  const { rows } = await pool.query(
+    `SELECT enabled FROM client_agent_settings WHERE client_id = $1 AND agent = $2`, [clientId, agent]
+  );
+  const nextEnabled = !(rows[0]?.enabled === true);
+  const { setAgentEnabled } = require('../lib/agents/runner');
+  await setAgentEnabled(clientId, agent, nextEnabled);
+  res.redirect('/settings/agents?ok=1&msg=' +
+    encodeURIComponent(`${catalogEntry.label} ${nextEnabled ? 'enabled' : 'disabled'}.`));
+});
 
 // ─── Business Info ────────────────────────────────────────────────────────────
 router.get('/business', requireAuth, async (req, res) => {

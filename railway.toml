@@ -18,3 +18,9 @@ command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/daily-digest -H \
 [[cron]]
 schedule = "30 6 * * *"
 command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/score-leads -H \"Authorization: Bearer $CRON_SECRET\""
+
+# AI marketing agents — weekly fan-out (Mondays 07:00 UTC). No-op until a tenant
+# opts an agent in; Phase 07 runs the Reporting agent's weekly cross-agent rollup.
+[[cron]]
+schedule = "0 7 * * 1"
+command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/run-agents -H \"Authorization: Bearer $CRON_SECRET\""

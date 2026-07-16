@@ -69,6 +69,14 @@ async function initDb() {
   );
   await pool.query(migration008Sql);
 
+  // Run AI agent system migration (idempotent) — event bus, per-tenant
+  // enablement, run/cost log, approval queue, reporting output.
+  const migration009Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/009_agent_system.sql'),
+    'utf8'
+  );
+  await pool.query(migration009Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,

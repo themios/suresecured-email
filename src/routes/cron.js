@@ -15,6 +15,7 @@ const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
 const { setFirstTouchAttribution } = require('../lib/attribution');
 const { sendTelegram, notifyNewLead, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
+const { runDueAgents } = require('../lib/agents/scheduler');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -609,6 +610,12 @@ async function sendSequencesHandler(req, res) {
     client.release();
   }
 
+  // Monitoring: alert on send failures so a broken sending identity / quota
+  // issue surfaces immediately instead of silently degrading. Fire-and-forget.
+  if (errors > 0) {
+    sendTelegram(`⚠️ <b>Cron send-sequences</b>: ${errors} send error(s) this run (sent ${sent}, skipped ${skipped}).`).catch(() => {});
+  }
+
   res.json({ ok: true, sent, skipped, errors, replies, timestamp: now });
 }
 
@@ -682,6 +689,12 @@ router.post('/daily-digest', cronAuth, async (req, res) => {
 
       // Ensure reply_rate_pct is never null in the prompt
       metrics.reply_rate_pct = metrics.reply_rate_pct != null ? metrics.reply_rate_pct : '0.0';
+
+      // Bounce rate — deliverability health signal for the ops digest.
+      const sent24 = Number(metrics.emails_sent_24h) || 0;
+      metrics.bounce_rate_pct = sent24 > 0
+        ? Math.round((Number(metrics.bounces_24h) / sent24) * 1000) / 10
+        : '0.0';
 
       // Top subject lines by open rate (last 7 days)
       const { rows: topSubjects } = await pool.query(`
@@ -832,6 +845,27 @@ router.post('/score-leads', cronAuth, async (req, res) => {
   }
 
   res.json({ ok: true, updated, errors });
+});
+
+/**
+ * POST /cron/run-agents
+ * Fans out the AI marketing agents across every tenant that has them enabled.
+ * Agents ship disabled by default, so this is a no-op until a tenant opts in.
+ * Phase 07: Reporting agent (weekly cross-agent rollup). Idempotent per tenant/week.
+ * Auth: Authorization: Bearer <CRON_SECRET>
+ */
+router.post('/run-agents', cronAuth, async (req, res) => {
+  try {
+    const results = await runDueAgents({ trigger: 'cron' });
+    const totalErrors = results.reduce((a, r) => a + (r.errors || 0), 0);
+    if (totalErrors > 0) {
+      sendTelegram(`⚠️ <b>Cron run-agents</b>: ${totalErrors} agent error(s) this run.`).catch(() => {});
+    }
+    res.json({ ok: true, results, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[run-agents] failed:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 router.get('/test-telegram', cronAuth, async (req, res) => {
