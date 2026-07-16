@@ -85,6 +85,13 @@ async function initDb() {
   );
   await pool.query(migration010Sql);
 
+  // Research (enrichment) + campaign planning agents (idempotent).
+  const migration011Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/011_agent_research_planning.sql'),
+    'utf8'
+  );
+  await pool.query(migration011Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,

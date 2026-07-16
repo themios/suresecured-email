@@ -9,6 +9,8 @@ const { isoWeekKey, buildPrompt, fallbackSummary } = require('./reporting');
 const { estimateCost } = require('./costs');
 const { segmentForScore, resolveThresholds } = require('./segmentation');
 const { buildDraftPrompt } = require('./email');
+const { buildEnrichPrompt } = require('./research');
+const { monthKey, buildPlanPrompt, fallbackPlan } = require('./planning');
 
 test('isoWeekKey formats ISO week correctly', () => {
   // 2026-01-01 is a Thursday -> ISO week 01 of 2026
@@ -115,4 +117,34 @@ test('buildDraftPrompt tolerates missing lead fields', () => {
   const p = buildDraftPrompt({}, {});
   assert.match(p, /there/);          // fallback greeting
   assert.match(p, /our company/);    // fallback brand
+});
+
+test('buildEnrichPrompt asks for strict JSON with interest + audience', () => {
+  const p = buildEnrichPrompt({ first_name: 'Sam', email: 'sam@doors.com' }, { name: 'Acme' });
+  assert.match(p, /Acme/);
+  assert.match(p, /sam@doors\.com/);
+  assert.match(p, /"product_interest"/);
+  assert.match(p, /"audience_type"/);
+});
+
+test('monthKey formats UTC calendar month', () => {
+  assert.strictEqual(monthKey(new Date('2026-07-16T12:00:00Z')), '2026-07');
+  assert.strictEqual(monthKey(new Date('2026-12-31T23:00:00Z')), '2026-12');
+  assert.strictEqual(monthKey(new Date('2026-01-01T00:00:00Z')), '2026-01');
+});
+
+test('buildPlanPrompt includes segments and 30-day metrics', () => {
+  const p = buildPlanPrompt(
+    { segments: { hot: 3, warm: 5 }, new_leads_30d: 8, emails_30d: 40, replies_30d: 4 },
+    { name: 'Acme' }
+  );
+  assert.match(p, /Acme/);
+  assert.match(p, /hot: 3/);
+  assert.match(p, /new leads: 8/);
+});
+
+test('fallbackPlan summarizes when AI is unavailable', () => {
+  const s = fallbackPlan({ segments: { hot: 2 }, new_leads_30d: 1, emails_30d: 5, replies_30d: 0 });
+  assert.match(s, /Plan \(auto\)/);
+  assert.match(s, /5 emails/);
 });

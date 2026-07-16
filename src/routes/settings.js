@@ -82,10 +82,10 @@ const AGENT_CATALOG = [
     desc: 'Sorts your contacts into engagement tiers (hot / warm / cool / cold) so messaging can differ by group. Read-only — labels contacts, never sends.' },
   { key: 'email',        label: 'Email Agent',        live: true,
     desc: 'Drafts personalized follow-ups for engaged contacts. Every draft waits for your approval below — nothing is sent until you click Approve.' },
-  { key: 'research',     label: 'Lead Research Agent', live: false,
-    desc: 'Finds and enriches new prospects on a schedule.' },
-  { key: 'planning',     label: 'Campaign Planning Agent', live: false,
-    desc: 'Plans the month of outreach and coordinates the other agents.' },
+  { key: 'research',     label: 'Lead Research Agent', live: true,
+    desc: 'Enriches your existing contacts — infers missing product interest so segmentation and email drafts are sharper. Read-only.' },
+  { key: 'planning',     label: 'Campaign Planning Agent', live: true,
+    desc: 'Writes a monthly outreach plan (segments to target, themes, cadence) from your data. A recommendation — it never sends.' },
 ];
 
 router.get('/agents', requireAuth, async (req, res) => {
@@ -150,11 +150,24 @@ router.get('/agents', requireAuth, async (req, res) => {
       </div>
     </div>` : '';
 
+  // Latest monthly campaign plan (read-only recommendation).
+  const { rows: planRows } = await pool.query(
+    `SELECT period, plan, created_at FROM agent_plans WHERE client_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [clientId]
+  );
+  const planHtml = planRows.length ? `
+    <div class="mt-8">
+      <h2 class="text-lg font-bold text-slate-900 mb-1">Monthly campaign plan</h2>
+      <p class="text-xs text-slate-400 mb-3">${esc(planRows[0].period)} · generated ${new Date(planRows[0].created_at).toLocaleDateString('en-US')}</p>
+      <pre class="text-sm text-slate-700 whitespace-pre-wrap font-sans bg-slate-50 rounded-lg p-4 border border-slate-100">${esc(planRows[0].plan)}</pre>
+    </div>` : '';
+
   const body = `
   <p class="text-sm text-slate-500 mb-5">Turn AI marketing agents on for your account. All agents are off by default,
     and no agent sends email or spends money without your approval.</p>
   <form method="post" action="/settings/agents" class="space-y-3">${cards}</form>
-  ${proposalsHtml}`;
+  ${proposalsHtml}
+  ${planHtml}`;
 
   res.send(pageShell('AI Agents', 'agents', body, req.query.msg, req.query.ok));
 });
