@@ -8,6 +8,7 @@ const { test } = require('node:test');
 const { isoWeekKey, buildPrompt, fallbackSummary } = require('./reporting');
 const { estimateCost } = require('./costs');
 const { segmentForScore, resolveThresholds } = require('./segmentation');
+const { buildDraftPrompt } = require('./email');
 
 test('isoWeekKey formats ISO week correctly', () => {
   // 2026-01-01 is a Thursday -> ISO week 01 of 2026
@@ -96,4 +97,22 @@ test('custom thresholds re-bucket scores', () => {
   const cfg = { thresholds: { hot: 80, warm: 40, cool: 10 } };
   assert.strictEqual(segmentForScore(70, cfg), 'warm');
   assert.strictEqual(segmentForScore(5, cfg),  'cold');
+});
+
+test('buildDraftPrompt personalizes and demands strict JSON', () => {
+  const p = buildDraftPrompt(
+    { first_name: 'Sam', product_interest: 'security doors', segment: 'hot' },
+    { name: 'Acme', website: 'acme.com' }
+  );
+  assert.match(p, /Acme/);
+  assert.match(p, /Sam/);
+  assert.match(p, /security doors/);
+  assert.match(p, /strict JSON/i);
+  assert.match(p, /"subject"/);
+});
+
+test('buildDraftPrompt tolerates missing lead fields', () => {
+  const p = buildDraftPrompt({}, {});
+  assert.match(p, /there/);          // fallback greeting
+  assert.match(p, /our company/);    // fallback brand
 });

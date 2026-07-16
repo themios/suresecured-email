@@ -12,11 +12,14 @@
 const { enabledClientsForAgent } = require('./runner');
 const { runReportingForClient } = require('./reporting');
 const { runSegmentationForClient } = require('./segmentation');
+const { runEmailForClient } = require('./email');
 
 // Map of agent name -> per-tenant runner. Each runner: (client, ctx) => Promise
 const AGENT_DISPATCH = {
   segmentation: (client, ctx) =>
     runSegmentationForClient(client.client_id, { ...ctx, config: client.config || {} }),
+  email: (client, ctx) =>
+    runEmailForClient(client.client_id, { ...ctx, config: client.config || {}, brandConfig: client.brand_config || {} }),
   reporting: (client, ctx) =>
     runReportingForClient(client.client_id, { ...ctx, brandConfig: client.brand_config || {} }),
 };
@@ -64,9 +67,9 @@ function summarize(r) {
  */
 async function runDueAgents(ctx = {}) {
   const results = [];
-  // Order matters: segmentation first so the Reporting agent's same-run rollup
-  // can see the segment.updated event it emits.
-  for (const agent of ['segmentation', 'reporting']) {
+  // Order matters: segmentation first (labels leads), then email (drafts by
+  // segment), then reporting so the weekly rollup sees both agents' events.
+  for (const agent of ['segmentation', 'email', 'reporting']) {
     results.push(await runAgentForAllTenants(agent, ctx));
   }
   return results;

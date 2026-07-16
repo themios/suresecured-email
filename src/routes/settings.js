@@ -80,8 +80,8 @@ const AGENT_CATALOG = [
     desc: 'Weekly cross-agent summary of what is working and what needs attention, delivered to this dashboard and Telegram. Read-only — never sends or spends.' },
   { key: 'segmentation', label: 'Segmentation Agent', live: true,
     desc: 'Sorts your contacts into engagement tiers (hot / warm / cool / cold) so messaging can differ by group. Read-only — labels contacts, never sends.' },
-  { key: 'email',        label: 'Email Agent',        live: false,
-    desc: 'Drafts campaigns and follow-ups for your approval before anything is sent.' },
+  { key: 'email',        label: 'Email Agent',        live: true,
+    desc: 'Drafts personalized follow-ups for engaged contacts. Every draft waits for your approval below — nothing is sent until you click Approve.' },
   { key: 'research',     label: 'Lead Research Agent', live: false,
     desc: 'Finds and enriches new prospects on a schedule.' },
   { key: 'planning',     label: 'Campaign Planning Agent', live: false,
@@ -117,10 +117,44 @@ router.get('/agents', requireAuth, async (req, res) => {
     </div>`;
   }).join('');
 
+  // Pending approvals — email drafts awaiting the operator's decision.
+  const { rows: proposals } = await pool.query(
+    `SELECT id, title, summary, payload, created_at
+       FROM agent_proposals
+      WHERE client_id = $1 AND agent = 'email' AND kind = 'email_draft' AND status = 'pending'
+      ORDER BY created_at DESC LIMIT 50`, [clientId]
+  );
+  const proposalsHtml = proposals.length ? `
+    <div class="mt-8">
+      <h2 class="text-lg font-bold text-slate-900 mb-1">Pending email drafts</h2>
+      <p class="text-sm text-slate-500 mb-4">Review each draft. Approve to send it now, or reject to discard. Nothing sends automatically.</p>
+      <div class="space-y-4">
+        ${proposals.map(p => `
+        <div class="border border-slate-200 rounded-xl p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-900 truncate">${esc(p.title)}</div>
+              <div class="text-xs text-slate-400">To ${esc(p.payload?.to || '')} · drafted ${new Date(p.created_at).toLocaleString('en-US')}</div>
+            </div>
+            <div class="flex gap-2 shrink-0">
+              <form method="post" action="/settings/agents/proposals/${p.id}/approve">
+                <button class="px-3 py-1.5 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700">Approve &amp; send</button>
+              </form>
+              <form method="post" action="/settings/agents/proposals/${p.id}/reject">
+                <button class="px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-100 text-slate-600 hover:bg-slate-200">Reject</button>
+              </form>
+            </div>
+          </div>
+          <pre class="mt-3 text-sm text-slate-700 whitespace-pre-wrap font-sans bg-slate-50 rounded-lg p-3">${esc(p.payload?.body || p.summary || '')}</pre>
+        </div>`).join('')}
+      </div>
+    </div>` : '';
+
   const body = `
   <p class="text-sm text-slate-500 mb-5">Turn AI marketing agents on for your account. All agents are off by default,
     and no agent sends email or spends money without your approval.</p>
-  <form method="post" action="/settings/agents" class="space-y-3">${cards}</form>`;
+  <form method="post" action="/settings/agents" class="space-y-3">${cards}</form>
+  ${proposalsHtml}`;
 
   res.send(pageShell('AI Agents', 'agents', body, req.query.msg, req.query.ok));
 });
@@ -140,6 +174,31 @@ router.post('/agents', requireAuth, async (req, res) => {
   await setAgentEnabled(clientId, agent, nextEnabled);
   res.redirect('/settings/agents?ok=1&msg=' +
     encodeURIComponent(`${catalogEntry.label} ${nextEnabled ? 'enabled' : 'disabled'}.`));
+});
+
+// Approve a pending email draft → sends it now (with suppression/unsubscribe guards).
+router.post('/agents/proposals/:id/approve', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const id = parseInt(req.params.id, 10);
+  const decidedBy = req.user?.email || req.user?.name || 'operator';
+  const { sendApprovedDraft } = require('../lib/agents/email');
+  let r;
+  try { r = await sendApprovedDraft(id, clientId, decidedBy); }
+  catch (err) { r = { ok: false, error: err.message }; }
+  const msg = r.ok
+    ? 'Draft approved and sent.'
+    : `Could not send: ${r.error === 'suppressed_or_unsubscribed' ? 'recipient is unsubscribed/suppressed (draft discarded)' : r.error}`;
+  res.redirect(`/settings/agents?ok=${r.ok ? 1 : 0}&msg=${encodeURIComponent(msg)}`);
+});
+
+// Reject a pending email draft → discarded, never sent.
+router.post('/agents/proposals/:id/reject', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const id = parseInt(req.params.id, 10);
+  const decidedBy = req.user?.email || req.user?.name || 'operator';
+  const { rejectDraft } = require('../lib/agents/email');
+  const r = await rejectDraft(id, clientId, decidedBy);
+  res.redirect(`/settings/agents?ok=1&msg=${encodeURIComponent(r.ok ? 'Draft rejected.' : 'Draft already decided.')}`);
 });
 
 // ─── Business Info ────────────────────────────────────────────────────────────
