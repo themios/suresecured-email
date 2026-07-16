@@ -15,7 +15,12 @@ function verifyShopifyWebhook(req) {
     .update(req.rawBody)
     .digest('base64');
 
-  return crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(digest));
+  const hmacBuf   = Buffer.from(hmac, 'utf8');
+  const digestBuf = Buffer.from(digest, 'utf8');
+  // timingSafeEqual throws on length mismatch — guard so a malformed header
+  // returns false instead of throwing.
+  if (hmacBuf.length !== digestBuf.length) return false;
+  return crypto.timingSafeEqual(hmacBuf, digestBuf);
 }
 
 // Shopify fires this every time an order is placed
@@ -150,3 +155,5 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
 });
 
 module.exports = router;
+// Exported for unit testing (Phase 6 / 06-05 task 1).
+module.exports.verifyShopifyWebhook = verifyShopifyWebhook;

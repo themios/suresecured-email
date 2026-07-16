@@ -34,7 +34,7 @@ Progress: [█████████████████████░] ~
 | 06-02 Attribution | **Done** — commission-theft guard, token/first-touch precedence, phone normalize; `attribution.test.js` |
 | 06-03 Voice commission | **Done** — order phone-match (last-10) + voice first-touch |
 | 06-04 Deliverability | **Done** — per-identity daily caps + warmup ramp (migration 008), List-Unsubscribe one-click |
-| 06-05 Verification | **Partial** — unit tests green; staging E2E (Appendix A) pending |
+| 06-05 Verification | **Conditional-pass** (2026-07-16) — tests+CI+monitoring done; `06-VERIFICATION.md`/`06-SUMMARY.md` written. Pending human/ops: staging E2E (Appendix A) + go/no-go sign-off. |
 
 ## Infrastructure
 
