@@ -217,8 +217,9 @@ router.post('/agents/proposals/:id/reject', requireAuth, async (req, res) => {
 // ─── Business Info ────────────────────────────────────────────────────────────
 router.get('/business', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
+  const { rows } = await pool.query('SELECT brand_config, integration_settings FROM clients WHERE id = $1', [clientId]);
   const bc = rows[0]?.brand_config || {};
+  const isg = rows[0]?.integration_settings || {};
 
   const body = `
   <form method="POST" action="/settings/business">
@@ -296,6 +297,17 @@ router.get('/business', requireAuth, async (req, res) => {
             class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
       </div>
+
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Store Connection (Shopify)</h2>
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Shopify store domain</label>
+        <input name="shopify_domain" value="${esc(isg.shopify_domain)}" placeholder="suresecured.myshopify.com"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+        <p class="text-xs text-slate-400 mt-1">
+          Your permanent <strong>.myshopify.com</strong> address (Shopify admin → Settings → Domains).
+          This links incoming orders to your account so sales and commissions get recorded. Required for commission tracking.
+        </p>
+      </div>
     </div>
 
     <div class="flex justify-end mt-4">
@@ -308,10 +320,11 @@ router.get('/business', requireAuth, async (req, res) => {
 
 router.post('/business', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
+  const { rows } = await pool.query('SELECT brand_config, integration_settings FROM clients WHERE id = $1', [clientId]);
   const existing = rows[0]?.brand_config || {};
+  const existingIntegrations = rows[0]?.integration_settings || {};
 
-  const { name, website, phone, support_email, address_street, address_city, address_state, address_zip, address, cta_label, cta_url } = req.body;
+  const { name, website, phone, support_email, address_street, address_city, address_state, address_zip, address, cta_label, cta_url, shopify_domain } = req.body;
 
   const footerAddress = address?.trim() ||
     [name, [address_street, address_city, address_state, address_zip].filter(Boolean).join(', ')].filter(Boolean).join(' • ');
@@ -324,7 +337,18 @@ router.post('/business', requireAuth, async (req, res) => {
     cta_label, cta_url,
   };
 
-  await pool.query('UPDATE clients SET brand_config = $1 WHERE id = $2', [JSON.stringify(updated), clientId]);
+  // Normalize the Shopify domain to the bare host Shopify sends in the
+  // x-shopify-shop-domain header (e.g. "suresecured.myshopify.com").
+  const normalizedDomain = String(shopify_domain || '')
+    .trim().toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/.*$/, '');
+  const updatedIntegrations = { ...existingIntegrations, shopify_domain: normalizedDomain };
+
+  await pool.query(
+    'UPDATE clients SET brand_config = $1, integration_settings = $2 WHERE id = $3',
+    [JSON.stringify(updated), JSON.stringify(updatedIntegrations), clientId]
+  );
   res.redirect('/settings/business?ok=1&msg=Business+info+saved.');
 });
 
