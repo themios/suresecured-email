@@ -306,7 +306,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
     vars.salesperson_phone || vars.company_phone || '',
     vars.salesperson_email || '',
   ].filter(Boolean).join('\n');
-  const resolvedBody = substituteVars(body, vars) + (signature ? `\n\n${signature}` : '');
+  const resolvedBody = substituteVars(body, vars);
 
   // Pre-generate pixel token
   const pixelToken  = require('crypto').randomUUID();
@@ -351,9 +351,13 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
   const emailSendId = insertResult.rows[0].id;
 
   // Rewrite body links AFTER insert (FK now satisfied)
+  // No signature here — buildHtml() renders its own styled signature block.
   const rewrittenBody = await rewriteLinks(resolvedBody, emailSendId);
 
   const html = buildHtml(rewrittenBody, fromName, unsubscribeUrl, brandConfig, pixelUrl);
+
+  // Plain-text fallback has no styled signature block, so it needs the signature appended.
+  const rewrittenBodyText = rewrittenBody + (signature ? `\n\n${signature}` : '');
 
   try {
     if (clientCfg?.smtp_host && clientCfg?.smtp_user && clientCfg?.smtp_pass) {
@@ -367,7 +371,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
         replyTo:     replyToAddr,
         to,
         subject:     resolvedSubject,
-        textBody:    rewrittenBody,
+        textBody:    rewrittenBodyText,
         htmlBody:    html,
         headers:     listUnsubHeaders,
       });
@@ -385,7 +389,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
         replyTo:     account?.email,
         to,
         subject:     resolvedSubject,
-        textBody:    rewrittenBody,
+        textBody:    rewrittenBodyText,
         htmlBody:    html,
         headers:     listUnsubHeaders,
       });
@@ -404,7 +408,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
         fromAddress: gmailFrom,
         to,
         subject:     resolvedSubject,
-        textBody:    rewrittenBody,
+        textBody:    rewrittenBodyText,
         htmlBody:    html,
         headers:     listUnsubHeaders,
       });
