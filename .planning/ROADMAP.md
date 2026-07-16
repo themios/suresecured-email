@@ -121,7 +121,7 @@ Plans:
 - [x] 06-02-PLAN.md — Attribution engine: first-touch model, Shopify chain (commission-theft guard), phone normalize, tenant scoping
 - [x] 06-03-PLAN.md — Voice commission: Retell/CallRail → attribution → order resolution → portal
 - [x] 06-04-PLAN.md — Deliverability gates: verification enforcement, per-identity daily caps + warmup, List-Unsubscribe, ops runbook *(circuit breaker deferred to P1)*
-- [~] 06-05-PLAN.md — Verification: unit tests done (`commissions`, `attribution`); Appendix A staging E2E + monitoring pending
+- [x] 06-05-PLAN.md — Verification: tests (`commissions`, `attribution`, `unsubscribe`, `webhook`) + `npm test` + CI + monitoring + `06-VERIFICATION.md`/`06-SUMMARY.md` done (2026-07-16, conditional-pass). Appendix A staging E2E + go/no-go sign-off remain human/ops.
 
 ## Progress
 
@@ -136,6 +136,37 @@ Phase 6 waves: 06-01 → (06-02 ∥ 06-04) → 06-03 → 06-05
 | 3. Email Deliverability | 4/4 | ✓ Complete | 2026-06-30 |
 | 4. Voice | 4/4 | ✓ Complete | 2026-06-30 |
 | 5. AI Intelligence | 2/2 | ✓ Complete | 2026-06-30 |
-| 6. Prelaunch Hardening | 4.5/5 | Code complete (pilot-ready) | 2026-07-08 |
+| 6. Prelaunch Hardening | 5/5 | Conditional-pass (staging E2E + sign-off human/ops) | 2026-07-16 |
 
-*Phase 6: 06-01 baseline (`fc136bb`); audit remediation 06-02/03/04 complete (`359d2b2`); 06-05 unit tests done, staging E2E pending. Full audit: `PRELAUNCH_AUDIT_2026-07.md`. Launch ops: `HANDOFF_DECISIONS_AND_TODO.md`*
+*Phase 6: 06-01 baseline (`fc136bb`); audit remediation 06-02/03/04 complete (`359d2b2`); 06-05 closed 2026-07-16 (`f41950e`) — tests+CI+monitoring+verification docs. Full audit: `PRELAUNCH_AUDIT_2026-07.md`. Launch ops: `HANDOFF_DECISIONS_AND_TODO.md`*
+
+---
+
+## Milestone v2 — AI Agent System (2026-07-16)
+
+**Goal:** A multi-tenant AI marketing agent framework layered on the existing
+stack, shipped disabled-by-default per tenant (Settings → AI Agents), with a
+shared event bus, per-tenant cost accounting, and a human approval gate on any
+send. See `docs/AI_AGENT_SYSTEM_PLAN.md`.
+
+**Success Criteria** (all TRUE):
+  1. Agents are strictly tenant-scoped and off by default — no tenant affected until opt-in ✓
+  2. No agent sends email without explicit human approval; suppression/unsubscribe enforced at send ✓
+  3. Per-tenant token/cost accounting recorded per run ✓
+  4. Each phase built, unit + integration tested, and deployed to prod (additive/idempotent migrations) ✓
+
+Plans:
+- [x] 07 — Foundation (event bus, runner, cost log, approval queue) + Reporting agent — `6051455`
+- [x] 08 — Segmentation agent (engagement tiers) — `b675b9e`
+- [x] 09 — Email agent (draft → human approval → send, with guards) — `31ccf39`
+- [x] 10 — Research (lead enrichment) + Campaign Planning agents — `f995c13`
+
+| Phase | Status | Migration | Completed |
+|-------|--------|-----------|-----------|
+| 07. Agent Foundation + Reporting | ✓ Deployed | 009 | 2026-07-16 |
+| 08. Segmentation | ✓ Deployed | 010 | 2026-07-16 |
+| 09. Email (approval-gated) | ✓ Deployed | — | 2026-07-16 |
+| 10. Research + Planning | ✓ Deployed | 011 | 2026-07-16 |
+
+*Verification: `.planning/AGENTS_MILESTONE_VERIFICATION.md`; per-phase summaries in `.planning/phases/07..10`. Weekly cron `/cron/run-agents` Mon 07:00 UTC.*
+*Remaining (human/ops): enable agents per tenant; Phase 6 Appendix A staging E2E + go/no-go sign-off.*
