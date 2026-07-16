@@ -65,6 +65,26 @@ Every part of the system is tenant-scoped from Phase 07:
 - Respects existing send-limits, warmup, unsubscribe, and verification pipelines.
 - Every agent action is an event row — full audit trail.
 
+## Delivery status — SHIPPED (2026-07-16)
+All phases built, tested, and deployed to production (Railway), dark by default.
+
+| Phase | Agent(s) | Status | Commit |
+|-------|----------|--------|--------|
+| 07 | Foundation (event bus, runner, cost log, approvals) + **Reporting** | deployed + verified live | `6051455` |
+| 08 | **Segmentation** (hot/warm/cool/cold) | deployed + verified live | `b675b9e` |
+| 09 | **Email** (draft → human approval → send) | deployed + verified live | `31ccf39` |
+| 10 | **Research** (enrichment) + **Planning** (monthly) | deployed + verified live | `f995c13` |
+
+Migrations 009/010/011 (all additive, idempotent). Each agent verified end-to-end
+against an ephemeral local Postgres (tenant isolation, cost accounting,
+idempotency, approval gate + suppression guards). Prod `/cron/run-agents` returns
+all 5 agents at `tenants:0` (nothing enabled until a tenant opts in via
+Settings → AI Agents). Weekly cron: Mondays 07:00 UTC.
+
+Prereq also closed this session: **Phase 6 (prelaunch hardening)** verification
+gap — tests, CI, HMAC hardening, monitoring, and `06-VERIFICATION.md` (conditional
+pass; staging E2E + go/no-go sign-off remain human/ops).
+
 ## Recommended starting point
 **Phase 0 + Phase 1 (Reporting agent).** Lowest risk, immediate value, and it forces us to
 build the event bus + runner that every other agent depends on.

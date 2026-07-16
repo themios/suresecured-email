@@ -5,7 +5,16 @@
 See: `.planning/PROJECT.md` · **Decisions:** `DECISIONS.md`
 
 **Core value:** Any business with a contact list and commissioned sales team can hand it to SalesPilot and start generating sales within days  
-**Current focus:** Pilot launch — Shopify + offline-cleaned CSV import + 500–1k send
+**Current focus:** v2 AI Agent System shipped (phases 07–10, deployed dark 2026-07-16). Pilot launch prerequisites (Phase 6 staging E2E + go/no-go) still pending human/ops.
+
+## v2 Milestone — AI Agent System (shipped 2026-07-16)
+Multi-tenant agent framework, disabled by default per tenant (Settings → AI Agents).
+- **07** Foundation (event bus, runner, cost log, approvals) + Reporting — deployed
+- **08** Segmentation (engagement tiers) — deployed
+- **09** Email (draft → human approval → send, with suppression guards) — deployed
+- **10** Research (lead enrichment) + Planning (monthly plan) — deployed
+Migrations 009–011 (additive/idempotent). Weekly cron Mon 07:00 UTC (`/cron/run-agents`).
+See `docs/AI_AGENT_SYSTEM_PLAN.md`.
 
 ## Current Position
 
