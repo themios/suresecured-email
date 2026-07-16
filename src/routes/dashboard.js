@@ -72,9 +72,11 @@ router.get('/', requireAuth, async (req, res) => {
     const formatDate     = d => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
     // ── KPI card helper ──────────────────────────────────────────────────────
-    function kpiCard({ icon, label, value, valueColor, note, borderColor, bgColor, iconColor }) {
+    function kpiCard({ icon, label, value, valueColor, note, borderColor, bgColor, iconColor, href }) {
+      const tag   = href ? 'a' : 'div';
+      const attrs = href ? `href="${href}"` : '';
       return `
-      <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex items-start gap-4 hover:shadow-md transition-shadow duration-200" style="border-left:4px solid ${borderColor}">
+      <${tag} ${attrs} class="bg-white rounded-xl shadow-sm border border-slate-100 p-5 flex items-start gap-4 hover:shadow-md ${href ? 'hover:border-slate-200 cursor-pointer' : ''} transition-shadow duration-200" style="border-left:4px solid ${borderColor}">
         <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style="background:${bgColor}; color:${iconColor}">
           ${icon}
         </div>
@@ -83,24 +85,24 @@ router.get('/', requireAuth, async (req, res) => {
           <p class="text-2xl font-extrabold mt-0.5 ${valueColor}">${value}</p>
           ${note ? `<p class="text-xs text-slate-400 mt-0.5">${note}</p>` : ''}
         </div>
-      </div>`;
+      </${tag}>`;
     }
 
     const primaryKpis = `
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-      ${kpiCard({ icon: ICONS.users,      label: 'Total Leads',        value: parseInt(totals.total_leads||0).toLocaleString(),    valueColor: 'text-slate-900', borderColor: '#0369a1', bgColor: '#eff6ff', iconColor: '#0369a1' })}
-      ${kpiCard({ icon: ICONS.mouseclick, label: 'Email Clicks',       value: parseInt(totals.total_clicks||0).toLocaleString(),   valueColor: 'text-sky-700',   borderColor: '#0ea5e9', bgColor: '#f0f9ff', iconColor: '#0ea5e9' })}
-      ${kpiCard({ icon: ICONS.dollar,     label: 'Total Revenue',      value: formatCurrency(totals.total_revenue),               valueColor: 'text-emerald-700', borderColor: '#059669', bgColor: '#ecfdf5', iconColor: '#059669' })}
-      ${kpiCard({ icon: ICONS.award,      label: 'Commissions Earned', value: formatCurrency(totals.total_commission),            valueColor: 'text-blue-700',  borderColor: '#2563eb', bgColor: '#eff6ff', iconColor: '#2563eb' })}
+      ${kpiCard({ icon: ICONS.users,      label: 'Total Leads',        value: parseInt(totals.total_leads||0).toLocaleString(),    valueColor: 'text-slate-900', borderColor: '#0369a1', bgColor: '#eff6ff', iconColor: '#0369a1', href: '/leads' })}
+      ${kpiCard({ icon: ICONS.mouseclick, label: 'Email Clicks',       value: parseInt(totals.total_clicks||0).toLocaleString(),   valueColor: 'text-sky-700',   borderColor: '#0ea5e9', bgColor: '#f0f9ff', iconColor: '#0ea5e9', href: '/clicks' })}
+      ${kpiCard({ icon: ICONS.dollar,     label: 'Total Revenue',      value: formatCurrency(totals.total_revenue),               valueColor: 'text-emerald-700', borderColor: '#059669', bgColor: '#ecfdf5', iconColor: '#059669', href: '/orders' })}
+      ${kpiCard({ icon: ICONS.award,      label: 'Commissions Earned', value: formatCurrency(totals.total_commission),            valueColor: 'text-blue-700',  borderColor: '#2563eb', bgColor: '#eff6ff', iconColor: '#2563eb', href: '/commissions' })}
     </div>`;
 
     const secondaryKpis = `
     <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-      ${kpiCard({ icon: ICONS.phone,       label: 'Phone Calls',     value: parseInt(totals.total_calls||0).toLocaleString(),     valueColor: 'text-violet-700', borderColor: '#7c3aed', bgColor: '#f5f3ff', iconColor: '#7c3aed' })}
-      ${kpiCard({ icon: ICONS.clipboard,   label: 'Form Submissions',value: parseInt(totals.total_forms||0).toLocaleString(),     valueColor: 'text-slate-900',  borderColor: '#64748b', bgColor: '#f8fafc', iconColor: '#64748b' })}
-      ${kpiCard({ icon: ICONS.shoppingbag, label: 'Orders',          value: parseInt(totals.total_orders||0).toLocaleString(),    valueColor: 'text-slate-900',  borderColor: '#64748b', bgColor: '#f8fafc', iconColor: '#64748b' })}
-      ${kpiCard({ icon: ICONS.eyeoff,      label: 'Suppressed',      value: parseInt(totals.total_suppressed||0).toLocaleString(), valueColor: 'text-slate-400', borderColor: '#cbd5e1', bgColor: '#f8fafc', iconColor: '#94a3b8', note: 'existing customers' })}
-      ${kpiCard({ icon: ICONS.msgcircle,   label: 'Replies',         value: parseInt(totals.total_replies||0).toLocaleString(),   valueColor: 'text-indigo-700', borderColor: '#4f46e5', bgColor: '#eef2ff', iconColor: '#4f46e5',
+      ${kpiCard({ icon: ICONS.phone,       label: 'Phone Calls',     value: parseInt(totals.total_calls||0).toLocaleString(),     valueColor: 'text-violet-700', borderColor: '#7c3aed', bgColor: '#f5f3ff', iconColor: '#7c3aed', href: '/calls' })}
+      ${kpiCard({ icon: ICONS.clipboard,   label: 'Form Submissions',value: parseInt(totals.total_forms||0).toLocaleString(),     valueColor: 'text-slate-900',  borderColor: '#64748b', bgColor: '#f8fafc', iconColor: '#64748b', href: '/form-submissions' })}
+      ${kpiCard({ icon: ICONS.shoppingbag, label: 'Orders',          value: parseInt(totals.total_orders||0).toLocaleString(),    valueColor: 'text-slate-900',  borderColor: '#64748b', bgColor: '#f8fafc', iconColor: '#64748b', href: '/orders' })}
+      ${kpiCard({ icon: ICONS.eyeoff,      label: 'Suppressed',      value: parseInt(totals.total_suppressed||0).toLocaleString(), valueColor: 'text-slate-400', borderColor: '#cbd5e1', bgColor: '#f8fafc', iconColor: '#94a3b8', note: 'existing customers', href: '/admin/suppression' })}
+      ${kpiCard({ icon: ICONS.msgcircle,   label: 'Replies',         value: parseInt(totals.total_replies||0).toLocaleString(),   valueColor: 'text-indigo-700', borderColor: '#4f46e5', bgColor: '#eef2ff', iconColor: '#4f46e5', href: '/leads?replied=1',
                   note: parseInt(totals.hot_leads||0) > 0 ? `<span class="inline-flex items-center gap-1 text-red-500 font-semibold">${ICONS.flame} ${totals.hot_leads} hot</span>` : '' })}
     </div>`;
 

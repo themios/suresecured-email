@@ -19,6 +19,7 @@ const adminRouter     = require('./routes/admin');
 const portalRouter    = require('./routes/portal');
 const sequencesRouter = require('./routes/sequences');
 const leadsRouter     = require('./routes/leads');
+const activityRouter  = require('./routes/activity');
 const gmailOAuthRouter = require('./routes/gmail-oauth');
 const cronRouter        = require('./routes/cron');
 const unsubscribeRouter = require('./routes/unsubscribe');
@@ -88,6 +89,9 @@ app.use('/portal', portalRouter);
 
 // CRM leads
 app.use('/leads', leadsRouter);
+
+// Dashboard KPI drill-down pages (orders, commissions, calls, clicks, form submissions)
+app.use('/', activityRouter);
 
 // Email sequences
 app.use('/sequences', sequencesRouter);

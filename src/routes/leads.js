@@ -22,6 +22,8 @@ const STAGE_LABELS = {
 router.get('/', requireAuth, async (req, res) => {
   const stage    = req.query.stage  || '';
   const search   = req.query.search || '';
+  const replied  = req.query.replied || '';
+  const urgency  = req.query.urgency || '';
   const page     = Math.max(1, parseInt(req.query.page) || 1);
   const pageSize = 50;
   const offset   = (page - 1) * pageSize;
@@ -36,6 +38,13 @@ router.get('/', requireAuth, async (req, res) => {
   if (search) {
     params.push(`%${search}%`);
     where.push(`(l.first_name ILIKE $${params.length} OR l.last_name ILIKE $${params.length} OR l.email ILIKE $${params.length} OR l.phone ILIKE $${params.length})`);
+  }
+  if (replied) {
+    where.push(`l.reply_classified_at IS NOT NULL`);
+  }
+  if (urgency) {
+    params.push(urgency);
+    where.push(`l.reply_urgency = $${params.length}`);
   }
 
   const whereClause = where.join(' AND ');
@@ -82,7 +91,10 @@ router.get('/', requireAuth, async (req, res) => {
     <div class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-2xl font-bold text-slate-900">Leads</h1>
-        <p class="text-sm text-slate-500 mt-0.5">${totalCount.toLocaleString()} total contacts</p>
+        <p class="text-sm text-slate-500 mt-0.5">
+          ${totalCount.toLocaleString()} ${replied ? 'replied' : urgency ? esc(urgency) + '-urgency' : 'total'} contact${totalCount === 1 ? '' : 's'}
+          ${(replied || urgency) ? `<a href="/leads" class="text-sky-600 hover:text-sky-700 ml-2 font-medium">Clear filter</a>` : ''}
+        </p>
       </div>
     </div>
 
@@ -177,8 +189,8 @@ router.get('/', requireAuth, async (req, res) => {
       <div class="px-4 py-3 border-t border-slate-100 flex justify-between items-center text-sm text-slate-500">
         <span>Page ${page} of ${totalPages}</span>
         <div class="flex gap-2">
-          ${page > 1 ? `<a href="?${new URLSearchParams({ ...(stage ? { stage } : {}), ...(search ? { search } : {}), page: page - 1 }).toString()}" class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">&larr; Prev</a>` : ''}
-          ${page < totalPages ? `<a href="?${new URLSearchParams({ ...(stage ? { stage } : {}), ...(search ? { search } : {}), page: page + 1 }).toString()}" class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Next &rarr;</a>` : ''}
+          ${page > 1 ? `<a href="?${new URLSearchParams({ ...(stage ? { stage } : {}), ...(search ? { search } : {}), ...(replied ? { replied } : {}), ...(urgency ? { urgency } : {}), page: page - 1 }).toString()}" class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">&larr; Prev</a>` : ''}
+          ${page < totalPages ? `<a href="?${new URLSearchParams({ ...(stage ? { stage } : {}), ...(search ? { search } : {}), ...(replied ? { replied } : {}), ...(urgency ? { urgency } : {}), page: page + 1 }).toString()}" class="px-3 py-1 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">Next &rarr;</a>` : ''}
         </div>
       </div>` : ''}
     </div>
