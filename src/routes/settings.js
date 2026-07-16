@@ -78,8 +78,8 @@ function pageShell(title, active, body, msg, ok) {
 const AGENT_CATALOG = [
   { key: 'reporting',    label: 'Reporting Agent',    live: true,
     desc: 'Weekly cross-agent summary of what is working and what needs attention, delivered to this dashboard and Telegram. Read-only — never sends or spends.' },
-  { key: 'segmentation', label: 'Segmentation Agent', live: false,
-    desc: 'Sorts your contacts into engagement tiers so messaging can differ by group.' },
+  { key: 'segmentation', label: 'Segmentation Agent', live: true,
+    desc: 'Sorts your contacts into engagement tiers (hot / warm / cool / cold) so messaging can differ by group. Read-only — labels contacts, never sends.' },
   { key: 'email',        label: 'Email Agent',        live: false,
     desc: 'Drafts campaigns and follow-ups for your approval before anything is sent.' },
   { key: 'research',     label: 'Lead Research Agent', live: false,

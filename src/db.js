@@ -77,6 +77,14 @@ async function initDb() {
   );
   await pool.query(migration009Sql);
 
+  // Lead segmentation (idempotent) — engagement tier label written by the
+  // Segmentation agent.
+  const migration010Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/010_lead_segment.sql'),
+    'utf8'
+  );
+  await pool.query(migration010Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,

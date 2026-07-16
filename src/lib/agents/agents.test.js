@@ -7,6 +7,7 @@ const { test } = require('node:test');
 
 const { isoWeekKey, buildPrompt, fallbackSummary } = require('./reporting');
 const { estimateCost } = require('./costs');
+const { segmentForScore, resolveThresholds } = require('./segmentation');
 
 test('isoWeekKey formats ISO week correctly', () => {
   // 2026-01-01 is a Thursday -> ISO week 01 of 2026
@@ -67,4 +68,32 @@ test('estimateCost computes from usage and known pricing', () => {
 
 test('estimateCost is zero for unknown models (never blocks a run)', () => {
   assert.strictEqual(estimateCost('some/unknown-model', { prompt_tokens: 999, completion_tokens: 999 }), 0);
+});
+
+test('segmentForScore buckets across the four default tiers', () => {
+  assert.strictEqual(segmentForScore(100), 'hot');
+  assert.strictEqual(segmentForScore(50),  'hot');   // boundary inclusive
+  assert.strictEqual(segmentForScore(49),  'warm');
+  assert.strictEqual(segmentForScore(25),  'warm');  // boundary inclusive
+  assert.strictEqual(segmentForScore(24),  'cool');
+  assert.strictEqual(segmentForScore(1),   'cool');  // boundary inclusive
+  assert.strictEqual(segmentForScore(0),   'cold');
+});
+
+test('segmentForScore treats null/undefined score as cold', () => {
+  assert.strictEqual(segmentForScore(null), 'cold');
+  assert.strictEqual(segmentForScore(undefined), 'cold');
+});
+
+test('resolveThresholds honours valid config and ignores garbage', () => {
+  assert.deepStrictEqual(resolveThresholds({ thresholds: { hot: 70, warm: 40, cool: 5 } }), { hot: 70, warm: 40, cool: 5 });
+  // garbage falls back to defaults
+  assert.deepStrictEqual(resolveThresholds({ thresholds: { hot: 'x' } }), { hot: 50, warm: 25, cool: 1 });
+  assert.deepStrictEqual(resolveThresholds({}), { hot: 50, warm: 25, cool: 1 });
+});
+
+test('custom thresholds re-bucket scores', () => {
+  const cfg = { thresholds: { hot: 80, warm: 40, cool: 10 } };
+  assert.strictEqual(segmentForScore(70, cfg), 'warm');
+  assert.strictEqual(segmentForScore(5, cfg),  'cold');
 });
