@@ -2,10 +2,13 @@ const express    = require('express');
 const router     = express.Router();
 const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
+const crypto     = require('crypto');
+const { google } = require('googleapis');
 const { pool }   = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { shell } = require('../lib/layout');
 const { encrypt, decrypt } = require('../lib/crypto');
+const { signOAuthState, verifyOAuthState } = require('../lib/gmail');
 
 const PROVIDERS = {
   ionos:     { label: 'IONOS',                smtp_host: 'smtp.ionos.com',                        smtp_port: 587, imap_host: 'imap.ionos.com',             imap_port: 993, note: 'Use your full IONOS email as username.' },
@@ -44,6 +47,7 @@ function settingsNav(active) {
     { key: 'business', label: 'Business Info' },
     { key: 'email',    label: 'Email' },
     { key: 'phone',    label: 'Phone & SMS' },
+    { key: 'email-sources', label: 'Email Sources' },
     { key: 'theme',    label: 'Theme & Branding' },
     { key: 'agents',   label: 'AI Agents' },
   ];
@@ -212,6 +216,262 @@ router.post('/agents/proposals/:id/reject', requireAuth, async (req, res) => {
   const { rejectDraft } = require('../lib/agents/email');
   const r = await rejectDraft(id, clientId, decidedBy);
   res.redirect(`/settings/agents?ok=1&msg=${encodeURIComponent(r.ok ? 'Draft rejected.' : 'Draft already decided.')}`);
+});
+
+// ─── Email Sources (multiple intake inboxes + sender rules) ───────────────────
+// Per-tenant. Connect several Gmail (OAuth) or IMAP inboxes as lead sources,
+// each with a capture policy and sender rules. Credentials are encrypted and
+// scoped by client_id. Polling happens in the cron (next increment).
+
+function sourceRedirectUri(req) {
+  if (process.env.GOOGLE_SOURCE_REDIRECT_URI) return process.env.GOOGLE_SOURCE_REDIRECT_URI;
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+  return `${proto}://${req.get('host')}/settings/email-sources/gmail/callback`;
+}
+function sourceOAuthClient(req) {
+  return new google.auth.OAuth2(process.env.GMAIL_CLIENT_ID, process.env.GMAIL_CLIENT_SECRET, sourceRedirectUri(req));
+}
+const gmailSourceEnabled = () => !!(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET);
+
+function renderRule(r, salespeople, sequences) {
+  const seq = sequences.find(s => String(s.id) === String(r.sequence_id));
+  const sp  = salespeople.find(s => String(s.id) === String(r.assign_salesperson_id));
+  const bits = [];
+  if (r.action === 'ignore') bits.push('ignore');
+  else {
+    bits.push('capture');
+    if (seq) bits.push(`→ sequence “${esc(seq.name)}”`);
+    if (sp)  bits.push(`→ assign ${esc(sp.name)}`);
+    if (r.tag) bits.push(`→ tag “${esc(r.tag)}”`);
+  }
+  return `
+  <div class="flex items-center justify-between gap-3 text-sm py-1.5 border-t border-slate-100 first:border-0">
+    <div class="text-slate-600">
+      <span class="font-mono text-xs bg-slate-100 rounded px-1.5 py-0.5">${esc(r.match_type)}</span>
+      <span class="font-medium text-slate-800">${esc(r.match_value)}</span>
+      <span class="text-slate-400">${bits.join(' ')}</span>
+    </div>
+    <form method="post" action="/settings/email-sources/rules/${r.id}/delete">
+      <button class="text-xs text-red-500 hover:text-red-600">remove</button>
+    </form>
+  </div>`;
+}
+
+function ruleForm(sourceId, salespeople, sequences) {
+  const spOpts  = salespeople.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const seqOpts = sequences.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const inp = 'border border-slate-200 rounded px-2 py-1 text-xs';
+  return `
+  <form method="post" action="/settings/email-sources/${sourceId}/rules" class="flex flex-wrap items-end gap-2 mt-2 pt-2 border-t border-slate-100">
+    <select name="match_type" class="${inp}"><option value="domain">domain</option><option value="email">email</option></select>
+    <input name="match_value" placeholder="cargurus.com" required class="${inp}" style="min-width:150px">
+    <select name="action" class="${inp}"><option value="capture">capture</option><option value="ignore">ignore</option></select>
+    <select name="sequence_id" class="${inp}"><option value="">— sequence —</option>${seqOpts}</select>
+    <select name="assign_salesperson_id" class="${inp}"><option value="">— assign —</option>${spOpts}</select>
+    <input name="tag" placeholder="tag" class="${inp}" style="width:80px">
+    <button class="text-xs font-semibold bg-slate-700 text-white rounded px-3 py-1.5 hover:bg-slate-800">Add rule</button>
+  </form>`;
+}
+
+function renderSource(src, rules, salespeople, sequences) {
+  const typeBadge = src.type === 'gmail'
+    ? '<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-red-50 text-red-600">Gmail</span>'
+    : '<span class="text-xs font-medium px-2 py-0.5 rounded-full bg-sky-50 text-sky-600">IMAP</span>';
+  const on = src.enabled;
+  const srcRules = rules.filter(r => String(r.source_id) === String(src.id) || r.source_id === null);
+  return `
+  <div class="border border-slate-200 rounded-xl p-4 ${on ? '' : 'opacity-60'}">
+    <div class="flex items-center justify-between gap-3">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-slate-900 truncate">${esc(src.label)}</span> ${typeBadge}
+          ${src.last_error ? `<span class="text-xs text-red-500" title="${esc(src.last_error)}">⚠ error</span>` : ''}
+        </div>
+        <div class="text-xs text-slate-400 mt-0.5">${esc(src.email_address || src.imap_user || '')}
+          · last poll ${src.last_polled_at ? new Date(src.last_polled_at).toLocaleString('en-US') : 'never'}</div>
+      </div>
+      <div class="flex items-center gap-2 shrink-0">
+        <form method="post" action="/settings/email-sources/${src.id}/policy">
+          <select name="capture_policy" onchange="this.form.submit()" class="text-xs border border-slate-200 rounded px-2 py-1">
+            <option value="allowlist" ${src.capture_policy === 'allowlist' ? 'selected' : ''}>Only allowlisted senders</option>
+            <option value="all" ${src.capture_policy === 'all' ? 'selected' : ''}>Capture all senders</option>
+          </select>
+        </form>
+        <form method="post" action="/settings/email-sources/${src.id}/toggle">
+          <button class="text-xs font-semibold px-3 py-1.5 rounded-lg ${on ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}">${on ? 'On' : 'Off'}</button>
+        </form>
+        <form method="post" action="/settings/email-sources/${src.id}/delete" onsubmit="return confirm('Remove this email source?')">
+          <button class="text-xs text-red-500 hover:text-red-600 px-2">Remove</button>
+        </form>
+      </div>
+    </div>
+    <div class="mt-3">
+      <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Sender rules</div>
+      ${srcRules.length ? srcRules.map(r => renderRule(r, salespeople, sequences)).join('') : '<p class="text-xs text-slate-400">No rules yet. With “Only allowlisted senders,” add a capture rule so this inbox pulls in leads.</p>'}
+      ${ruleForm(src.id, salespeople, sequences)}
+    </div>
+  </div>`;
+}
+
+router.get('/email-sources', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const [{ rows: sources }, { rows: rules }, { rows: salespeople }, { rows: sequences }] = await Promise.all([
+    pool.query('SELECT * FROM email_sources WHERE client_id = $1 ORDER BY id', [clientId]),
+    pool.query('SELECT * FROM email_source_rules WHERE client_id = $1 ORDER BY source_id NULLS FIRST, priority, id', [clientId]),
+    pool.query('SELECT id, name FROM salespeople WHERE client_id = $1 AND active = true ORDER BY name', [clientId]),
+    pool.query('SELECT id, name FROM sequences WHERE client_id = $1 OR client_id IS NULL ORDER BY name', [clientId]),
+  ]);
+
+  const body = `
+  <p class="text-sm text-slate-500 mb-5">Connect one or more inboxes to pull in leads. For each, choose whether to capture
+    every sender or only the senders you allow, and add rules to route or ignore specific senders. You can add as many as you need.</p>
+
+  <div class="flex flex-wrap gap-3 mb-6">
+    ${gmailSourceEnabled() ? `
+    <a href="/settings/email-sources/gmail/connect"
+      class="inline-flex items-center gap-2 border border-slate-300 rounded-lg px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+      <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+      Connect a Gmail inbox
+    </a>` : ''}
+  </div>
+
+  <details class="mb-6 border border-slate-200 rounded-xl p-4">
+    <summary class="text-sm font-medium text-slate-700 cursor-pointer">Add an IMAP inbox (IONOS, Outlook, other)</summary>
+    <form method="post" action="/settings/email-sources/imap" class="grid grid-cols-2 gap-3 mt-4">
+      <div><label class="block text-xs text-slate-500 mb-1">Label</label><input name="label" required placeholder="Sales inbox" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+      <div><label class="block text-xs text-slate-500 mb-1">Email address</label><input name="email_address" type="email" placeholder="sales@example.com" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+      <div><label class="block text-xs text-slate-500 mb-1">IMAP host</label><input name="imap_host" required placeholder="imap.ionos.com" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+      <div><label class="block text-xs text-slate-500 mb-1">Port</label><input name="imap_port" type="number" value="993" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+      <div><label class="block text-xs text-slate-500 mb-1">Username</label><input name="imap_user" required placeholder="sales@example.com" class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+      <div><label class="block text-xs text-slate-500 mb-1">Password</label><input name="imap_pass" type="password" required class="w-full border rounded-lg px-3 py-2 text-sm"></div>
+      <div class="col-span-2 flex justify-end"><button class="bg-sky-600 text-white rounded-lg px-5 py-2 text-sm font-medium hover:bg-sky-700">Add IMAP inbox</button></div>
+    </form>
+  </details>
+
+  <div class="space-y-4">
+    ${sources.length ? sources.map(s => renderSource(s, rules, salespeople, sequences)).join('') : '<p class="text-sm text-slate-400">No inboxes connected yet. Add one above to start pulling in leads.</p>'}
+  </div>`;
+
+  res.send(pageShell('Email Sources', 'email-sources', body, req.query.msg, req.query.ok));
+});
+
+// Add an IMAP source
+router.post('/email-sources/imap', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const { label, email_address, imap_host, imap_port, imap_user, imap_pass } = req.body;
+  if (!clientId || !label || !imap_host || !imap_user || !imap_pass) {
+    return res.redirect('/settings/email-sources?ok=0&msg=' + encodeURIComponent('Missing required IMAP fields.'));
+  }
+  await pool.query(
+    `INSERT INTO email_sources (client_id, label, type, email_address, imap_host, imap_port, imap_user, imap_pass_enc)
+     VALUES ($1, $2, 'imap', $3, $4, $5, $6, $7)`,
+    [clientId, label.trim(), (email_address || imap_user).trim(), imap_host.trim(),
+     parseInt(imap_port, 10) || 993, imap_user.trim(), encrypt(imap_pass)]
+  );
+  res.redirect('/settings/email-sources?ok=1&msg=' + encodeURIComponent('IMAP inbox added.'));
+});
+
+// Toggle enabled
+router.post('/email-sources/:id/toggle', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  await pool.query('UPDATE email_sources SET enabled = NOT enabled, updated_at = NOW() WHERE id = $1 AND client_id = $2',
+    [parseInt(req.params.id, 10), clientId]);
+  res.redirect('/settings/email-sources');
+});
+
+// Set capture policy
+router.post('/email-sources/:id/policy', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const policy = req.body.capture_policy === 'all' ? 'all' : 'allowlist';
+  await pool.query('UPDATE email_sources SET capture_policy = $1, updated_at = NOW() WHERE id = $2 AND client_id = $3',
+    [policy, parseInt(req.params.id, 10), clientId]);
+  res.redirect('/settings/email-sources');
+});
+
+// Delete a source
+router.post('/email-sources/:id/delete', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  await pool.query('DELETE FROM email_sources WHERE id = $1 AND client_id = $2', [parseInt(req.params.id, 10), clientId]);
+  res.redirect('/settings/email-sources?ok=1&msg=' + encodeURIComponent('Inbox removed.'));
+});
+
+// Add a sender rule
+router.post('/email-sources/:id/rules', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const sourceId = parseInt(req.params.id, 10);
+  const { match_type, match_value, action, sequence_id, assign_salesperson_id, tag } = req.body;
+  // Confirm the source belongs to this tenant before attaching a rule.
+  const { rows } = await pool.query('SELECT id FROM email_sources WHERE id = $1 AND client_id = $2', [sourceId, clientId]);
+  if (!rows.length || !match_value) return res.redirect('/settings/email-sources?ok=0&msg=' + encodeURIComponent('Could not add rule.'));
+  await pool.query(
+    `INSERT INTO email_source_rules (client_id, source_id, match_type, match_value, action, sequence_id, assign_salesperson_id, tag)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [clientId, sourceId,
+     match_type === 'email' ? 'email' : 'domain',
+     String(match_value).toLowerCase().trim(),
+     action === 'ignore' ? 'ignore' : 'capture',
+     sequence_id ? parseInt(sequence_id, 10) : null,
+     assign_salesperson_id ? parseInt(assign_salesperson_id, 10) : null,
+     tag ? String(tag).trim() : null]
+  );
+  res.redirect('/settings/email-sources?ok=1&msg=' + encodeURIComponent('Rule added.'));
+});
+
+// Delete a rule
+router.post('/email-sources/rules/:ruleId/delete', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  await pool.query('DELETE FROM email_source_rules WHERE id = $1 AND client_id = $2', [parseInt(req.params.ruleId, 10), clientId]);
+  res.redirect('/settings/email-sources');
+});
+
+// Start Gmail-source OAuth (read-only, offline for refresh token)
+router.get('/email-sources/gmail/connect', requireAuth, (req, res) => {
+  if (!gmailSourceEnabled()) return res.redirect('/settings/email-sources?ok=0&msg=' + encodeURIComponent('Gmail connect is not configured.'));
+  const nonce = crypto.randomBytes(16).toString('hex');
+  res.cookie('es_gmail_nonce', nonce, { maxAge: 10 * 60 * 1000, httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
+  const url = sourceOAuthClient(req).generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: ['https://www.googleapis.com/auth/gmail.readonly', 'openid', 'email'],
+    state: signOAuthState(nonce),
+  });
+  res.redirect(url);
+});
+
+// Gmail-source OAuth callback → store tokens on a new source row
+router.get('/email-sources/gmail/callback', requireAuth, async (req, res) => {
+  if (!gmailSourceEnabled()) return res.redirect('/settings/email-sources?ok=0&msg=' + encodeURIComponent('Gmail connect is not configured.'));
+  const clientId = await resolveClientId(req);
+  try {
+    const { code, state } = req.query;
+    const stateNonce = verifyOAuthState(state);
+    const cookieNonce = req.cookies?.es_gmail_nonce;
+    res.clearCookie('es_gmail_nonce');
+    if (!code || !stateNonce || stateNonce !== cookieNonce) {
+      return res.redirect('/settings/email-sources?ok=0&msg=' + encodeURIComponent('Google connection failed, please retry.'));
+    }
+    const oauth = sourceOAuthClient(req);
+    const { tokens } = await oauth.getToken(String(code));
+    let email = '';
+    if (tokens.id_token) {
+      const ticket = await oauth.verifyIdToken({ idToken: tokens.id_token, audience: process.env.GMAIL_CLIENT_ID });
+      email = String(ticket.getPayload()?.email || '').toLowerCase();
+    }
+    if (!tokens.refresh_token) {
+      return res.redirect('/settings/email-sources?ok=0&msg=' + encodeURIComponent('No refresh token returned — remove app access in your Google account and reconnect.'));
+    }
+    await pool.query(
+      `INSERT INTO email_sources (client_id, label, type, email_address, oauth_refresh_enc, oauth_access_enc, oauth_expiry)
+       VALUES ($1, $2, 'gmail', $3, $4, $5, $6)`,
+      [clientId, email || 'Gmail inbox', email,
+       encrypt(tokens.refresh_token), tokens.access_token ? encrypt(tokens.access_token) : null,
+       tokens.expiry_date ? new Date(tokens.expiry_date) : null]
+    );
+    res.redirect('/settings/email-sources?ok=1&msg=' + encodeURIComponent(`Connected ${email || 'Gmail inbox'}.`));
+  } catch (err) {
+    console.error('[email-sources] gmail connect error:', err.message);
+    res.redirect('/settings/email-sources?ok=0&msg=' + encodeURIComponent('Google connection failed, please retry.'));
+  }
 });
 
 // ─── Business Info ────────────────────────────────────────────────────────────
