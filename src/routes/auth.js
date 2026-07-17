@@ -31,6 +31,34 @@ function issueSession(res, user) {
 
 const googleLoginEnabled = () => !!(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET);
 
+// Auto-provision a Google-verified user when their email domain is registered to
+// exactly one tenant. Returns the user row to sign in, or null to reject.
+// The new user has no usable password (Google-only); role comes from the tenant.
+async function provisionByDomain(email, domain) {
+  const { rows: dom } = await pool.query(
+    `SELECT c.id AS client_id, c.organization_id, d.default_role
+       FROM client_auth_domains d JOIN clients c ON c.id = d.client_id
+      WHERE d.domain = $1 AND c.active = TRUE`,
+    [domain.toLowerCase()]
+  );
+  if (dom.length !== 1) return null; // unregistered or (impossible) ambiguous
+  const { client_id, organization_id, default_role } = dom[0];
+  const { rows } = await pool.query(
+    `INSERT INTO users (email, password_hash, role, client_id, organization_id, active)
+     VALUES ($1, '', $2, $3, $4, TRUE)
+     ON CONFLICT (email) DO NOTHING
+     RETURNING id, email, role, client_id, organization_id`,
+    [email, default_role, client_id, organization_id]
+  );
+  if (rows[0]) return rows[0];
+  // Lost an insert race — fetch the now-existing active user.
+  const { rows: existing } = await pool.query(
+    `SELECT id, email, role, client_id, organization_id FROM users WHERE LOWER(email) = $1 AND active = TRUE`,
+    [email]
+  );
+  return existing[0] || null;
+}
+
 // ─── Login page ────────────────────────────────────────────────────────────
 
 router.get('/login', (req, res) => {
@@ -205,10 +233,20 @@ router.get('/auth/google/callback', async (req, res) => {
        WHERE LOWER(email) = $1 AND active = TRUE`,
       [email]
     );
-    if (result.rows.length === 0) return res.redirect('/login?error=google_no_account');
+    if (result.rows.length > 0) {
+      issueSession(res, result.rows[0]);
+      return res.redirect('/dashboard');
+    }
 
-    issueSession(res, result.rows[0]);
-    return res.redirect('/dashboard');
+    // No existing user: auto-join only if this email's domain is registered to
+    // exactly one tenant (UNIQUE(domain) enforces that at the DB level).
+    const domain = email.split('@')[1] || '';
+    const provisioned = domain ? await provisionByDomain(email, domain) : null;
+    if (provisioned) {
+      issueSession(res, provisioned);
+      return res.redirect('/dashboard');
+    }
+    return res.redirect('/login?error=google_no_account');
   } catch (err) {
     console.error('[google-login] callback error:', err.message);
     return res.redirect('/login?error=google_failed');

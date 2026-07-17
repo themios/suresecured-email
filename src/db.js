@@ -99,6 +99,13 @@ async function initDb() {
   );
   await pool.query(migration012Sql);
 
+  // Per-tenant Google sign-in domains for auto-join (idempotent).
+  const migration013Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/013_auth_domains.sql'),
+    'utf8'
+  );
+  await pool.query(migration013Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,

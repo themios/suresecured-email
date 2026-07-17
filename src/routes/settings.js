@@ -480,6 +480,9 @@ router.get('/business', requireAuth, async (req, res) => {
   const { rows } = await pool.query('SELECT brand_config, integration_settings FROM clients WHERE id = $1', [clientId]);
   const bc = rows[0]?.brand_config || {};
   const isg = rows[0]?.integration_settings || {};
+  const { rows: authDomains } = await pool.query(
+    'SELECT id, domain, default_role FROM client_auth_domains WHERE client_id = $1 ORDER BY domain', [clientId]
+  );
 
   const body = `
   <form method="POST" action="/settings/business">
@@ -573,9 +576,62 @@ router.get('/business', requireAuth, async (req, res) => {
     <div class="flex justify-end mt-4">
       <button type="submit" class="bg-sky-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-sky-700">Save Business Info</button>
     </div>
-  </form>`;
+  </form>
+
+  <div class="mt-6 bg-white rounded-xl shadow-sm p-6">
+    <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide mb-1">Team Google Sign-in</h2>
+    <p class="text-xs text-slate-500 mb-4">Anyone with an email on these domains can sign in with Google and automatically get a seat on your account.
+      Leave empty to require that each teammate be added manually first. Public providers (gmail.com, outlook.com, etc.) can’t be used.</p>
+    <div class="space-y-2 mb-4">
+      ${authDomains.map(d => `
+      <div class="flex items-center justify-between border border-slate-100 rounded-lg px-3 py-2 text-sm">
+        <span><span class="font-medium text-slate-800">@${esc(d.domain)}</span> <span class="text-slate-400">→ joins as ${esc(d.default_role)}</span></span>
+        <form method="post" action="/settings/business/auth-domains/${d.id}/delete"><button class="text-xs text-red-500 hover:text-red-600">remove</button></form>
+      </div>`).join('') || '<p class="text-xs text-slate-400">No domains yet — teammates must be added manually.</p>'}
+    </div>
+    <form method="post" action="/settings/business/auth-domains" class="flex flex-wrap items-end gap-2">
+      <div><label class="block text-xs text-slate-500 mb-1">Domain</label><input name="domain" required placeholder="yourcompany.com" class="border rounded-lg px-3 py-2 text-sm"></div>
+      <div><label class="block text-xs text-slate-500 mb-1">Joins as</label>
+        <select name="default_role" class="border rounded-lg px-3 py-2 text-sm">
+          <option value="salesperson">Salesperson</option><option value="operator">Operator</option><option value="owner">Owner</option><option value="admin">Admin</option>
+        </select></div>
+      <button class="bg-slate-700 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800">Add domain</button>
+    </form>
+  </div>`;
 
   res.send(pageShell('Business Info', 'business', body, req.query.msg, req.query.ok));
+});
+
+// Public/free email providers can't be claimed as auto-join domains.
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com',
+  'live.com', 'msn.com', 'aol.com', 'icloud.com', 'me.com', 'mac.com', 'proton.me',
+  'protonmail.com', 'gmx.com', 'zoho.com', 'yandex.com', 'mail.com',
+]);
+
+router.post('/business/auth-domains', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const domain = String(req.body.domain || '').toLowerCase().trim()
+    .replace(/^@/, '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  const role = ['salesperson', 'operator', 'owner', 'admin'].includes(req.body.default_role) ? req.body.default_role : 'salesperson';
+  if (!clientId || !domain || !domain.includes('.') || /\s/.test(domain)) {
+    return res.redirect('/settings/business?ok=0&msg=' + encodeURIComponent('Enter a valid company domain.'));
+  }
+  if (PUBLIC_EMAIL_DOMAINS.has(domain)) {
+    return res.redirect('/settings/business?ok=0&msg=' + encodeURIComponent('Public email providers can’t be used for auto-join.'));
+  }
+  try {
+    await pool.query('INSERT INTO client_auth_domains (client_id, domain, default_role) VALUES ($1, $2, $3)', [clientId, domain, role]);
+    res.redirect('/settings/business?ok=1&msg=' + encodeURIComponent(`Domain @${domain} added.`));
+  } catch (err) {
+    res.redirect('/settings/business?ok=0&msg=' + encodeURIComponent(`@${domain} is already registered.`));
+  }
+});
+
+router.post('/business/auth-domains/:id/delete', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  await pool.query('DELETE FROM client_auth_domains WHERE id = $1 AND client_id = $2', [parseInt(req.params.id, 10), clientId]);
+  res.redirect('/settings/business?ok=1&msg=' + encodeURIComponent('Domain removed.'));
 });
 
 router.post('/business', requireAuth, async (req, res) => {
