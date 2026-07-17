@@ -1,5 +1,5 @@
 const assert = require('node:assert');
-const { resolveSalespersonForOrder, normalizePhone } = require('./attribution');
+const { resolveSalespersonForOrder, normalizePhone, fuzzyNameMatch } = require('./attribution');
 
 // Minimal mock pg client. Routes queries by a substring of the SQL to a handler.
 function makeDb(handlers) {
@@ -73,6 +73,30 @@ assert.strictEqual(normalizePhone(''), null, 'empty → null');
   );
   assert.strictEqual(r.salespersonId, 8, 'first-touch owner wins over cart');
   assert.ok(r.path.startsWith('lead:attributed'), 'path notes first-touch');
+})();
+
+// ── Fuzzy name match (Feature C) — suggestions only, never auto-credit ──────
+(() => {
+  const leads = [
+    { id: 1, first_name: 'John', last_name: 'Smith', salesperson_id: 5, attributed_salesperson_id: null },
+    { id: 2, first_name: 'Jane', last_name: 'Doe',   salesperson_id: null, attributed_salesperson_id: 8 },
+    { id: 3, first_name: 'Bob',  last_name: 'Jones', salesperson_id: null, attributed_salesperson_id: null }, // no owner
+  ];
+  assert.deepStrictEqual(fuzzyNameMatch('John Smith', leads), { leadId: 1, salespersonId: 5 }, 'exact match suggests owner');
+  assert.deepStrictEqual(fuzzyNameMatch('jane  DOE!', leads), { leadId: 2, salespersonId: 8 }, 'case/punct-insensitive, attributed owner');
+  assert.deepStrictEqual(fuzzyNameMatch('Smith John', leads), { leadId: 1, salespersonId: 5 }, 'token order does not matter');
+  assert.strictEqual(fuzzyNameMatch('John', leads), null, 'single token too weak');
+  assert.strictEqual(fuzzyNameMatch('Bob Jones', leads), null, 'owner-less lead never suggested');
+  assert.strictEqual(fuzzyNameMatch('Nobody Here', leads), null, 'unknown name → null');
+})();
+
+// Ambiguous (same name owned by two reps) → null, never guess
+(() => {
+  const leads = [
+    { id: 1, first_name: 'Chris', last_name: 'Lee', salesperson_id: 5 },
+    { id: 2, first_name: 'Chris', last_name: 'Lee', salesperson_id: 9 },
+  ];
+  assert.strictEqual(fuzzyNameMatch('Chris Lee', leads), null, 'two owners for same name → no suggestion');
 })();
 
 console.log('attribution.test.js: all assertions passed');

@@ -66,6 +66,7 @@ async function resolveSalespersonForOrder({
   cartSalespersonId,
   customerEmail,
   customerPhone,
+  customerName,
   clientId,
 }, db = pool) {
   // 1. Tracking token on order (server-issued, cannot be forged by the buyer)
@@ -167,7 +168,69 @@ async function resolveSalespersonForOrder({
     }
   }
 
-  return { salespersonId: null, path: 'unresolved', status: 'pending_review', leadId: lead?.id || null };
+  // 7. Fuzzy name match — a LOW-confidence signal. Never auto-credits; only
+  //    suggests a rep for a human to confirm from the review queue.
+  let suggested = null;
+  if (customerName && clientId) {
+    const tokens = normalizeName(customerName).split(' ').filter(Boolean);
+    const lastTok = tokens[tokens.length - 1];
+    if (tokens.length >= 2 && lastTok) {
+      // Prefilter to owned, named leads that share the last (or first) token,
+      // so we never scan the whole leads table per order.
+      const { rows: candidates } = await db.query(
+        `SELECT id, first_name, last_name, salesperson_id, attributed_salesperson_id
+           FROM leads
+          WHERE client_id = $1
+            AND (salesperson_id IS NOT NULL OR attributed_salesperson_id IS NOT NULL)
+            AND (LOWER(last_name) = $2 OR LOWER(first_name) = $2)
+          LIMIT 200`,
+        [clientId, lastTok]
+      );
+      suggested = fuzzyNameMatch(customerName, candidates);
+    }
+  }
+
+  return {
+    salespersonId: null,
+    path: suggested ? `name_suggestion:${suggested.salespersonId}` : 'unresolved',
+    status: 'pending_review',
+    leadId: suggested?.leadId || lead?.id || null,
+    suggestedSalespersonId: suggested?.salespersonId || null,
+  };
+}
+
+/** Normalize a person name to lowercase alpha tokens for comparison. */
+function normalizeName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Fuzzy-match an order's customer name against owned leads. Deliberately
+ * conservative: requires first AND last name to line up, and returns a match
+ * ONLY when every strong match points to the same rep (otherwise ambiguous →
+ * null, never guess). Pure function; exported for tests.
+ * @returns {{leadId:number, salespersonId:number}|null}
+ */
+function fuzzyNameMatch(customerName, leads = []) {
+  const cn = normalizeName(customerName);
+  const cTokens = new Set(cn.split(' ').filter(Boolean));
+  if (cTokens.size < 2) return null; // need at least first + last
+
+  const matches = [];
+  for (const lead of leads) {
+    const owner = lead.attributed_salesperson_id || lead.salesperson_id;
+    if (!owner) continue;
+    const ln = normalizeName(`${lead.first_name || ''} ${lead.last_name || ''}`);
+    const lTokens = new Set(ln.split(' ').filter(Boolean));
+    if (lTokens.size < 2) continue;
+    let overlap = 0;
+    for (const t of lTokens) if (cTokens.has(t)) overlap++;
+    if (ln === cn || overlap >= 2) matches.push({ leadId: lead.id, salespersonId: owner });
+  }
+  if (!matches.length) return null;
+  const owners = new Set(matches.map(m => m.salespersonId));
+  if (owners.size !== 1) return null; // ambiguous — don't guess
+  return matches[0];
 }
 
 async function logCommissionEvent({
@@ -186,5 +249,7 @@ module.exports = {
   resolveSalespersonForOrder,
   logCommissionEvent,
   normalizePhone,
+  normalizeName,
+  fuzzyNameMatch,
   validateSalesperson,
 };

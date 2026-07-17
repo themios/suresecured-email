@@ -106,6 +106,13 @@ async function initDb() {
   );
   await pool.query(migration013Sql);
 
+  // Name-based attribution suggestion on orders (idempotent).
+  const migration014Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/014_order_suggested_salesperson.sql'),
+    'utf8'
+  );
+  await pool.query(migration014Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,

@@ -5,8 +5,54 @@ const router  = express.Router();
 const { pool } = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
+const { calculateCommission } = require('../lib/commissions');
 
 const PAGE_SIZE = 50;
+
+// Assign an uncredited order to a rep (e.g. accepting a name suggestion) and
+// credit the commission identically to the webhook path.
+router.post('/orders/:id/assign', requireAuth, express.urlencoded({ extended: false }), async (req, res) => {
+  const orderId = parseInt(req.params.id, 10);
+  const salespersonId = parseInt(req.body.salesperson_id, 10);
+  if (!orderId || !salespersonId) return res.redirect('/orders');
+
+  const { rows: ord } = await pool.query(
+    'SELECT id, client_id, amount, commission_status FROM orders WHERE id = $1', [orderId]);
+  const order = ord[0];
+  if (!order || order.commission_status === 'credited' || !order.client_id) return res.redirect('/orders');
+
+  // The rep must belong to this order's tenant.
+  const { rows: sp } = await pool.query(
+    `SELECT s.commission_rate, c.commission_rules
+       FROM salespeople s JOIN clients c ON c.id = s.client_id
+      WHERE s.id = $1 AND s.client_id = $2`,
+    [salespersonId, order.client_id]);
+  if (!sp[0]) return res.redirect('/orders');
+
+  const { rows: unitsRows } = await pool.query(
+    `SELECT COUNT(*) AS units FROM orders
+      WHERE salesperson_id = $1 AND client_id = $2
+        AND DATE_TRUNC('month', ordered_at) = DATE_TRUNC('month', NOW()) AND id != $3`,
+    [salespersonId, order.client_id, orderId]);
+
+  const { rate, earned, bonusesTriggered } = calculateCommission(
+    Number(order.amount), parseInt(unitsRows[0].units || 0), sp[0].commission_rules || {}, sp[0].commission_rate || 100);
+
+  await pool.query(
+    `UPDATE orders SET salesperson_id = $1, commission_status = 'credited', suggested_salesperson_id = NULL WHERE id = $2`,
+    [salespersonId, orderId]);
+  await pool.query(
+    `INSERT INTO commissions (salesperson_id, client_id, source_type, source_id, sale_amount, commission_rate, commission_earned)
+     VALUES ($1, $2, 'shopify_order', $3, $4, $5, $6)`,
+    [salespersonId, order.client_id, orderId, Number(order.amount), rate, earned]);
+  for (const bonus of bonusesTriggered || []) {
+    await pool.query(
+      `INSERT INTO commissions (salesperson_id, client_id, source_type, source_id, sale_amount, commission_rate, commission_earned)
+       VALUES ($1, $2, 'bonus', $3, 0, 0, $4)`,
+      [salespersonId, order.client_id, orderId, bonus.amount]);
+  }
+  res.redirect('/orders');
+});
 
 function getPage(req) {
   return Math.max(1, parseInt(req.query.page) || 1);
@@ -68,8 +114,11 @@ router.get('/orders', requireAuth, async (req, res) => {
   const [rowsResult, countResult] = await Promise.all([
     pool.query(`
       SELECT o.id, o.shopify_order_id, o.customer_email, o.amount, o.currency,
-             o.commission_status, o.ordered_at, s.name AS salesperson_name
-      FROM orders o LEFT JOIN salespeople s ON s.id = o.salesperson_id
+             o.commission_status, o.ordered_at, s.name AS salesperson_name,
+             o.suggested_salesperson_id, ss.name AS suggested_name
+      FROM orders o
+      LEFT JOIN salespeople s  ON s.id  = o.salesperson_id
+      LEFT JOIN salespeople ss ON ss.id = o.suggested_salesperson_id
       ORDER BY o.ordered_at DESC
       LIMIT $1 OFFSET $2
     `, [PAGE_SIZE, offset]),
@@ -90,7 +139,15 @@ router.get('/orders', requireAuth, async (req, res) => {
       <td class="px-4 py-3 text-slate-700 font-mono text-xs">${esc(o.shopify_order_id || '—')}</td>
       <td class="px-4 py-3 text-slate-700">${esc(o.customer_email || '—')}</td>
       <td class="px-4 py-3 font-semibold text-emerald-700">${formatCurrency(o.amount)}</td>
-      <td class="px-4 py-3">${o.salesperson_name ? esc(o.salesperson_name) : '<span class="text-red-400 text-xs">Unassigned</span>'}</td>
+      <td class="px-4 py-3">${o.salesperson_name
+        ? esc(o.salesperson_name)
+        : (o.suggested_name
+          ? `<form method="post" action="/orders/${o.id}/assign" class="flex items-center gap-1">
+               <input type="hidden" name="salesperson_id" value="${o.suggested_salesperson_id}">
+               <span class="text-slate-400 text-xs">Suggested:</span>
+               <button class="text-xs text-sky-600 hover:text-sky-700 font-medium underline decoration-dotted" title="Assign this order to the suggested rep and credit the commission">${esc(o.suggested_name)} — assign</button>
+             </form>`
+          : '<span class="text-red-400 text-xs">Unassigned</span>')}</td>
       <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-medium ${statusCls}">${esc((o.commission_status || 'credited').replace('_', ' '))}</span></td>
     </tr>`;
   });

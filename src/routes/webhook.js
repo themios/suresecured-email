@@ -44,6 +44,10 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
       || order.billing_address?.phone
       || order.shipping_address?.phone
       || null;
+    const customerName = [order.customer?.first_name, order.customer?.last_name].filter(Boolean).join(' ')
+      || order.billing_address?.name
+      || order.shipping_address?.name
+      || '';
     const orderAmount = parseFloat(order.total_price);
     const shopifyOrderId = String(order.id);
 
@@ -76,6 +80,7 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
       cartSalespersonId,
       customerEmail,
       customerPhone,
+      customerName,
       clientId,
     });
 
@@ -142,6 +147,10 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
         );
       }
     } else if (orderResult.rows.length > 0 && commissionStatus === 'pending_review') {
+      if (resolution.suggestedSalespersonId) {
+        await pool.query('UPDATE orders SET suggested_salesperson_id = $1 WHERE id = $2',
+          [resolution.suggestedSalespersonId, orderResult.rows[0].id]);
+      }
       console.warn(`Webhook: order ${orderResult.rows[0].id} pending_review — no commission (${resolution.path})`);
     } else if (orderResult.rows.length > 0 && resolvedSalespersonId && !clientId) {
       console.warn(`Webhook: order ${orderResult.rows[0].id} recorded but commission skipped — no client_id resolved.`);
