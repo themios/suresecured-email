@@ -1,7 +1,16 @@
 // Unit tests for the sender-rule engine (Phase: email sources).
 // Pure logic, no DB. Run: node src/lib/emailSources.test.js
 const assert = require('node:assert');
-const { parseFrom, ruleMatches, evaluateSender } = require('./emailSources');
+const { parseFrom, parseFromHeader, ruleMatches, evaluateSender } = require('./emailSources');
+
+// ── parseFromHeader: "Name <email>" variants ────────────────────────────────
+{
+  assert.deepStrictEqual(parseFromHeader('Jane Doe <jane@x.com>'), { email: 'jane@x.com', name: 'Jane Doe' });
+  assert.deepStrictEqual(parseFromHeader('"Sales, Team" <sales@x.com>'), { email: 'sales@x.com', name: 'Sales, Team' });
+  assert.deepStrictEqual(parseFromHeader('bare@x.com'), { email: 'bare@x.com', name: '' });
+  assert.deepStrictEqual(parseFromHeader('LEAD@X.COM'), { email: 'lead@x.com', name: '' });
+  assert.deepStrictEqual(parseFromHeader(''), { email: '', name: '' });
+}
 
 // ── parseFrom ──────────────────────────────────────────────────────────────
 {

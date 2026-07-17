@@ -868,6 +868,27 @@ router.post('/run-agents', cronAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /cron/poll-email-sources
+ * Polls every enabled email intake source across all tenants and ingests leads
+ * per each source's sender rules. No-op until a tenant connects a source.
+ * Auth: Authorization: Bearer <CRON_SECRET>
+ */
+router.post('/poll-email-sources', cronAuth, async (req, res) => {
+  try {
+    const { pollAllSources } = require('../lib/emailSourcePoller');
+    const results = await pollAllSources();
+    const errs = results.filter(r => r.error).length;
+    if (errs > 0) {
+      sendTelegram(`⚠️ <b>Cron poll-email-sources</b>: ${errs} source error(s) this run.`).catch(() => {});
+    }
+    res.json({ ok: true, results, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[poll-email-sources] failed:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/test-telegram', cronAuth, async (req, res) => {
   const token  = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;

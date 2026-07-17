@@ -14,6 +14,16 @@ function parseFrom(fromAddress) {
   return { email, domain: at >= 0 ? email.slice(at + 1) : '' };
 }
 
+/** Parse a raw "Name <email>" From header into { email, name }. */
+function parseFromHeader(fromHeader) {
+  const raw = String(fromHeader || '');
+  const m = raw.match(/<([^>]+)>/) || raw.match(/([^\s"]+@[^\s">]+)/);
+  const email = (m ? m[1] : '').toLowerCase().trim();
+  const nameMatch = raw.match(/^\s*"?([^"<]+?)"?\s*</);
+  const name = nameMatch ? nameMatch[1].trim() : '';
+  return { email, name };
+}
+
 /** Does a single rule match this sender? Domain rules also match subdomains. */
 function ruleMatches(rule, from) {
   const val = String(rule.match_value || '').toLowerCase().trim();
@@ -77,4 +87,4 @@ async function rulesForSource(clientId, sourceId) {
   return rows;
 }
 
-module.exports = { parseFrom, ruleMatches, evaluateSender, listEnabledSources, rulesForSource };
+module.exports = { parseFrom, parseFromHeader, ruleMatches, evaluateSender, listEnabledSources, rulesForSource };

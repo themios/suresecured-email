@@ -24,3 +24,9 @@ command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/score-leads -H \"
 [[cron]]
 schedule = "0 7 * * 1"
 command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/run-agents -H \"Authorization: Bearer $CRON_SECRET\""
+
+# Email intake sources — poll connected inboxes for new leads every 15 minutes.
+# No-op until a tenant connects a source under Settings -> Email Sources.
+[[cron]]
+schedule = "*/15 * * * *"
+command = "curl -s -X POST https://$RAILWAY_PUBLIC_DOMAIN/cron/poll-email-sources -H \"Authorization: Bearer $CRON_SECRET\""
