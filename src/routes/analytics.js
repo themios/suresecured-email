@@ -264,6 +264,23 @@ router.get('/', requireAuth, async (req, res) => {
     charts[id] = new Chart(document.getElementById(id), config);
   }
 
+  // ── Drill-down helpers ──────────────────────────────────────────────────
+  // Show a pointer cursor over clickable chart elements.
+  function cursorPointer(e, els) {
+    var c = e.native && e.native.target;
+    if (c) c.style.cursor = els.length ? 'pointer' : 'default';
+  }
+  // Click a salesperson's bar → filter the whole page to that rep.
+  function drillToSalesperson(name) {
+    var sel = document.getElementById('sp-filter');
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].textContent === name) { sel.value = sel.options[i].value; loadData(activeDays); return; }
+    }
+  }
+  function barDrill(labels) {
+    return function (e, els) { if (els.length) drillToSalesperson(labels[els[0].index]); };
+  }
+
   function loadData(days) {
     if (days) activeDays = days;
     // Update active period button
@@ -333,6 +350,8 @@ router.get('/', requireAuth, async (req, res) => {
       },
       options: {
         responsive: true,
+        onHover: cursorPointer,
+        onClick: barDrill(rows.map(function (r) { return r.name; })),
         plugins: {
           legend: { position: 'top' },
           tooltip: {
@@ -444,7 +463,9 @@ router.get('/', requireAuth, async (req, res) => {
       options: {
         indexAxis: 'y',
         responsive: true,
-        plugins: { legend: { display: false } },
+        onHover: cursorPointer,
+        onClick: barDrill(rows.map(function (r) { return r.name; })),
+        plugins: { legend: { display: false }, tooltip: { callbacks: { afterBody: function () { return 'Click to filter to this rep'; } } } },
         scales: {
           x: { ticks: { callback: v => '$'+v.toLocaleString() }, beginAtZero: true },
         }
@@ -475,6 +496,8 @@ router.get('/', requireAuth, async (req, res) => {
       },
       options: {
         responsive: true,
+        onHover: cursorPointer,
+        onClick: barDrill(rows.map(function (r) { return r.name; })),
         plugins: { legend: { position: 'top' } },
         scales: {
           y: { ticks: { callback: v => '$'+v.toLocaleString() }, beginAtZero: true }
@@ -497,6 +520,8 @@ router.get('/', requireAuth, async (req, res) => {
       options: {
         responsive: true,
         cutout: '65%',
+        onHover: cursorPointer,
+        onClick: function () { window.location.href = '/leads'; },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: ctx => ctx.label+': '+ctx.raw.toLocaleString()+' ('+pct(ctx.raw,total)+')' } }
@@ -527,6 +552,8 @@ router.get('/', requireAuth, async (req, res) => {
       options: {
         responsive: true,
         cutout: '55%',
+        onHover: cursorPointer,
+        onClick: function () { window.location.href = '/leads'; },
         plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 12 } } } }
       }
     });
