@@ -92,6 +92,13 @@ async function initDb() {
   );
   await pool.query(migration011Sql);
 
+  // Multiple email intake sources + sender rules (idempotent).
+  const migration012Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/012_email_sources.sql'),
+    'utf8'
+  );
+  await pool.query(migration012Sql);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS salespeople (
       id SERIAL PRIMARY KEY,
