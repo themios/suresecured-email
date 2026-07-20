@@ -52,40 +52,93 @@ const CLASS_COPY = {
 };
 
 /**
- * Health of the tenant's sending identity.
+ * Health of the tenant's sending identity. Shared by the banner endpoint and
+ * the /undelivered page so the two can never disagree about whether sending is
+ * broken.
  *
- * "Healthy" deliberately means consecutive_failures === 0 rather than "no
- * failures ever". A single bad recipient must not raise a site-wide alarm, and
- * a mailbox that starts working again clears itself on the next success (see
- * recordIdentitySuccess) without anyone dismissing a banner.
+ * "Healthy" means no failures since the last SUCCESSFUL send -- not "no
+ * failures ever". A mailbox that starts working again clears itself on the next
+ * success, without anyone dismissing a banner.
  */
-router.get('/api/sending-health', requireAuth, requireTenantContext, async (req, res) => {
-  try {
+async function getSendingHealth(clientId) {
+  {
+    // Health is DERIVED from the send log, not read from a counter alone.
+    //
+    // consecutive_failures only starts counting from the moment migration 016
+    // added it, so a mailbox that was already broken before deploy reports a
+    // perfectly healthy 0 while nothing is being delivered. That is exactly the
+    // silence this feature exists to end, so the counter cannot be the only
+    // signal. Trailing failures since the last successful send are the ground
+    // truth: they survive deploys, need no backfill, and cannot go stale.
+    //
+    // The counter still matters -- it reacts within one send attempt, whereas
+    // the derived count needs a row written. Take whichever is worse.
+    // NOTE: this CTE was originally named `trailing`, which is a Postgres
+    // reserved word (TRIM(TRAILING ...)). It raised a syntax error that the
+    // catch below converted into {healthy:true}, so a broken mailbox reported
+    // healthy and the banner never rendered. Keep CTE names non-reserved.
     const { rows } = await pool.query(
-      `SELECT consecutive_failures, last_error, last_error_class, last_success_at
-       FROM client_email_config WHERE client_id = $1`,
-      [req.user.client_id]
+      `WITH last_ok AS (
+         SELECT MAX(sent_at) AS at
+         FROM email_sends
+         WHERE client_id = $1 AND status = 'sent'
+       ),
+       failures_since_ok AS (
+         SELECT COUNT(*)::int AS failures,
+                MAX(COALESCE(failed_at, sent_at)) AS last_at
+         FROM email_sends
+         WHERE client_id = $1
+           AND status = 'failed'
+           AND COALESCE(failed_at, sent_at) > COALESCE((SELECT at FROM last_ok), '-infinity'::timestamptz)
+       ),
+       latest AS (
+         SELECT failure_class, failure_reason
+         FROM email_sends
+         WHERE client_id = $1 AND status = 'failed'
+         ORDER BY COALESCE(failed_at, sent_at) DESC
+         LIMIT 1
+       )
+       SELECT
+         COALESCE(cfg.consecutive_failures, 0)              AS counter_failures,
+         COALESCE(t.failures, 0)                            AS trailing_failures,
+         COALESCE(cfg.last_error_class, l.failure_class)    AS failure_class,
+         COALESCE(cfg.last_error, l.failure_reason)         AS last_error,
+         COALESCE(cfg.last_success_at, (SELECT at FROM last_ok)) AS last_success_at
+       FROM failures_since_ok t
+       LEFT JOIN latest l ON TRUE
+       LEFT JOIN client_email_config cfg ON cfg.client_id = $1`,
+      [clientId]
     );
 
-    const cfg = rows[0];
-    // No config row means sending was never set up. That is a setup task, not
-    // an outage, so it must not render the red "sending is down" banner.
-    if (!cfg || cfg.consecutive_failures === 0) {
-      return res.json({ healthy: true });
-    }
+    const h = rows[0];
+    const failureCount = Math.max(h?.counter_failures || 0, h?.trailing_failures || 0);
 
-    res.json({
+    // Zero failures since the last success means sending is working, including
+    // the case where it was never set up -- that is a setup task, not an outage,
+    // and must not paint the red banner.
+    if (!h || failureCount === 0) return { healthy: true };
+
+    return {
       healthy: false,
-      failureClass: cfg.last_error_class || 'unknown',
-      failureCount: cfg.consecutive_failures,
-      lastError: cfg.last_error,
-      lastSuccessAt: cfg.last_success_at,
-    });
+      failureClass: h.failure_class || 'unknown',
+      failureCount,
+      lastError: h.last_error,
+      lastSuccessAt: h.last_success_at,
+    };
+  }
+}
+
+router.get('/api/sending-health', requireAuth, requireTenantContext, async (req, res) => {
+  try {
+    res.json(await getSendingHealth(req.user.client_id));
   } catch (err) {
     console.error('[sending-health] error:', err.message);
-    // Fail closed toward "healthy": a broken health check must never paint a
-    // false outage banner across every page.
-    res.json({ healthy: true });
+    // Fail closed toward "healthy" so a broken health check never paints a false
+    // outage across every page. But report `degraded` so the failure is VISIBLE
+    // in the response: a bare {healthy:true} here already hid a SQL error once,
+    // and a monitor that silently reports "fine" when it is broken is the exact
+    // failure mode this whole feature exists to eliminate.
+    res.json({ healthy: true, degraded: true, error: err.message });
   }
 });
 
@@ -103,21 +156,16 @@ router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) =
          LIMIT 200`,
         [req.user.client_id]
       ),
-      pool.query(
-        `SELECT consecutive_failures, last_error, last_error_class
-         FROM client_email_config WHERE client_id = $1`,
-        [req.user.client_id]
-      ),
+      getSendingHealth(req.user.client_id),
     ]);
 
-    const cfg = health.rows[0];
-    const banner = cfg && cfg.consecutive_failures > 0
+    const banner = !health.healthy
       ? `<div class="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
            <div class="font-semibold text-red-800 text-sm">
-             Sending is currently failing — ${cfg.consecutive_failures} consecutive ${cfg.consecutive_failures === 1 ? 'failure' : 'failures'}
+             Sending is currently failing — ${health.failureCount} ${health.failureCount === 1 ? 'message' : 'messages'} not delivered since the last successful send
            </div>
-           <p class="text-red-700 text-sm mt-1">${esc((CLASS_COPY[cfg.last_error_class] || CLASS_COPY.unknown).hint)}</p>
-           ${cfg.last_error ? `<p class="text-xs text-red-500 mt-2 font-mono">${esc(cfg.last_error)}</p>` : ''}
+           <p class="text-red-700 text-sm mt-1">${esc((CLASS_COPY[health.failureClass] || CLASS_COPY.unknown).hint)}</p>
+           ${health.lastError ? `<p class="text-xs text-red-500 mt-2 font-mono">${esc(health.lastError)}</p>` : ''}
            <a href="/settings/email" class="inline-block mt-3 bg-red-600 text-white text-sm rounded-lg px-4 py-2 hover:bg-red-700">Open email settings</a>
          </div>`
       : `<div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-6 text-sm text-emerald-800">
