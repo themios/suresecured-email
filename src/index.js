@@ -29,6 +29,7 @@ const telnyxRouter      = require('./routes/telnyx');
 const pixelRouter       = require('./routes/pixel');
 const emailClickRouter  = require('./routes/email-click');
 const marketingRouter   = require('./routes/marketing');
+const deliverabilityRouter = require('./routes/deliverability');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -114,6 +115,12 @@ app.use('/unsubscribe', unsubscribeRouter);
 // Tenant settings
 app.use('/settings', settingsRouter);
 
+// Delivery feedback: /api/sending-health (banner) + /undelivered (list).
+// Mounted at root because it owns both an /api path and a top-level page.
+// Must come before the /api rate limiter's catch-all handlers do anything
+// surprising — it is a cheap authenticated read polled once per page load.
+app.use('/', deliverabilityRouter);
+
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
@@ -123,7 +130,17 @@ async function start() {
     console.log(`Sales Tracker running on port ${PORT}`);
   });
 
-  // Run email cron every 15 minutes
+  // THIS IS THE ONLY SCHEDULER. The [[cron]] blocks in railway.toml look like
+  // they schedule these jobs, but that is not a real Railway config key (cron is
+  // a per-service `cronSchedule`, and a cron service runs its start command
+  // instead of serving HTTP). Those blocks are inert — do not delete this
+  // node-cron block on the assumption railway.toml covers it. Verified against
+  // production logs: '[cron] send-sequences' fires once per 15-min window, and
+  // the four other jobs railway.toml claims to schedule never run at all.
+  //
+  // Known gaps, tracked separately: no locking (two instances would double-send,
+  // so keep this service at one replica), and daily-digest / score-leads /
+  // run-agents / poll-email-sources have no working schedule.
   cron.schedule('*/15 * * * *', async () => {
     try {
       const res = await fetch(`http://localhost:${PORT}/cron/send-sequences`, {

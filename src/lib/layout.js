@@ -156,6 +156,44 @@ const SHARED_HEAD = `
   </style>`;
 
 const SHARED_JS = `
+<!-- Sending-health banner.
+     Injected here rather than passed through shell(opts) so it appears on every
+     authenticated page without touching ~20 existing call sites. The failure it
+     exists to prevent is silence: sending was broken for days while the UI
+     showed sends "succeeding", because the send path recorded status='failed'
+     with no reason and nothing surfaced it. -->
+<div id="_sending_health" style="display:none"></div>
+<script>
+(function () {
+  var box = document.getElementById('_sending_health');
+  if (!box) return;
+  fetch('/api/sending-health', { credentials: 'same-origin' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (h) {
+      if (!h || h.healthy) return;
+      var cls = {
+        auth:       ['Email sending is down', 'Your mail server rejected the username or password.'],
+        connection: ['Email sending is down', 'We could not reach your mail server.'],
+        config:     ['Email sending is down', 'Your sending address is not authorised by the mail provider.']
+      }[h.failureClass] || ['Email delivery problem', 'Recent messages could not be delivered.'];
+      // Fixed to the top because SHARED_JS renders at the end of <body>; this
+      // must be the first thing the operator sees, not the last.
+      box.style.display = 'block';
+      box.innerHTML =
+        '<div style="position:fixed;top:0;left:0;right:0;z-index:9999;' +
+        'background:#7f1d1d;color:#fff;padding:10px 20px;font-size:13px;' +
+        'box-shadow:0 2px 8px rgba(0,0,0,.25);' +
+        'display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+        '<strong>' + cls[0] + '</strong>' +
+        '<span style="opacity:.9">' + cls[1] +
+        ' ' + h.failureCount + ' message' + (h.failureCount === 1 ? '' : 's') + ' not delivered.</span>' +
+        '<a href="/undelivered" style="color:#fff;text-decoration:underline;margin-left:auto">See what failed</a>' +
+        '<a href="/settings/email" style="color:#fff;text-decoration:underline">Fix settings</a>' +
+        '</div>';
+    })
+    .catch(function () { /* banner is advisory; never break the page over it */ });
+})();
+</script>
 <div id="_toast_box"></div>
 <div id="_modal_overlay" style="display:none">
   <div class="_modal_box">

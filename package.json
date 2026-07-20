@@ -8,7 +8,7 @@
     "setup": "node src/setup.js",
     "dev": "node --watch src/index.js",
     "seed:contacts": "node scripts/seed-contacts.js",
-    "test": "node src/lib/commissions.test.js && node src/lib/attribution.test.js && node src/lib/unsubscribe.test.js && node src/routes/webhook.test.js && node src/lib/emailSources.test.js && node --test src/lib/agents/"
+    "test": "node src/lib/commissions.test.js && node src/lib/attribution.test.js && node src/lib/unsubscribe.test.js && node src/routes/webhook.test.js && node src/lib/emailSources.test.js && node --test src/lib/sendFailures.test.js && node --test src/lib/agents/"
   },
   "engines": {
     "node": ">=18"

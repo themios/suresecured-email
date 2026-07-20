@@ -292,6 +292,70 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
 </html>`;
 }
 
+// Failure classes where the SENDING IDENTITY is broken, not the recipient.
+// Nothing will deliver for anyone until an operator fixes the config, so these
+// escalate to the tenant rather than being filed against one lead.
+const OPERATOR_FAILURE_CLASSES = new Set(['auth', 'connection', 'config']);
+
+/**
+ * Bucket a send error so the UI can say something useful instead of dumping a
+ * raw SMTP string at a dealership owner.
+ *
+ * Ordering matters: nodemailer sets err.code for transport-level problems, and
+ * those are checked first because their messages sometimes also contain words
+ * that the recipient-level regexes would match.
+ */
+function classifySendFailure(err, isBounce) {
+  const code = err?.code || '';
+  const msg = String(err?.message || '').toLowerCase();
+  const status = err?.responseCode ?? err?.status ?? err?.code;
+
+  if (code === 'EAUTH' || /535|534|invalid login|authentication (failed|credentials)|username and password not accepted/.test(msg)) {
+    return 'auth';
+  }
+  if (['ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', ' EHOSTUNREACH', 'ENOTFOUND', 'ESOCKET', 'EDNS'].includes(code)
+      || /connection (timed out|refused|closed)|getaddrinfo|self.signed certificate|tls/.test(msg)) {
+    return 'connection';
+  }
+  // Gmail API rejects a From header that is not a verified "Send As" alias.
+  if (status === 403 || /precondition check failed|invalid from header|not authorized to send as|delegation denied/.test(msg)) {
+    return 'config';
+  }
+  if (/quota|rate limit|too many|429|throttl|4\.7\.0/.test(msg)) return 'quota';
+  if (isBounce) return 'bounce';
+  if (/recipient|550|551|553|mailbox (unavailable|full)|does not exist|no such user/.test(msg)) return 'recipient';
+  return 'unknown';
+}
+
+/**
+ * Record an identity-level failure against the tenant's email config.
+ *
+ * consecutive_failures is what makes this actionable: one failure is noise, a
+ * run of them means no mail is going out at all. Reset to 0 on the next success
+ * (see recordIdentitySuccess) so a recovered mailbox stops alerting by itself.
+ */
+async function recordIdentityFailure(clientId, msg, failureClass) {
+  if (!clientId) return;
+  await pool.query(
+    `UPDATE client_email_config
+     SET last_error = $1, last_error_class = $2, last_tested_at = NOW(),
+         consecutive_failures = consecutive_failures + 1
+     WHERE client_id = $3`,
+    [String(msg).slice(0, 500), failureClass, clientId]
+  ).catch(err => console.error('[send] identity failure record error:', err.message));
+}
+
+async function recordIdentitySuccess(clientId) {
+  if (!clientId) return;
+  await pool.query(
+    `UPDATE client_email_config
+     SET last_error = NULL, last_error_class = NULL, alerted_at = NULL,
+         consecutive_failures = 0, last_success_at = NOW(), last_tested_at = NOW()
+     WHERE client_id = $1`,
+    [clientId]
+  ).catch(err => console.error('[send] identity success record error:', err.message));
+}
+
 async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, vars, enrollmentId, stepId, leadId, preview }, brandConfig = {}) {
   // Always need Gmail auth — for reply-to address even when sending via SES
   const auth = await getAuthedClient(salespersonId);
@@ -427,24 +491,30 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
       'UPDATE email_accounts SET last_error = NULL WHERE salesperson_id = $1',
       [salespersonId]
     );
+    // Clears consecutive_failures and the alert gate, so a mailbox that starts
+    // working again stops warning the operator without anyone dismissing it.
+    await recordIdentitySuccess(clientId);
 
     return { ok: true };
   } catch (err) {
     const msg = err.message || 'Unknown error';
-
-    // Update status to 'failed' — row already exists from pre-send INSERT
-    await pool.query(
-      `UPDATE email_sends SET status = 'failed' WHERE id = $1`,
-      [emailSendId]
-    ).catch(() => {}); // ignore secondary failure
-
-    // Detect permanent bounce and mark the email_sends row
     const isBounce = isPermanentBounce(msg);
+    const failureClass = classifySendFailure(err, isBounce);
+
+    // Persist the reason for EVERY failure class, not just bounces. The previous
+    // version only recorded a reason when isPermanentBounce() was true, so an
+    // SMTP auth rejection landed as status='failed' with a NULL reason and the
+    // operator had no way to learn why nothing was arriving.
+    await pool.query(
+      `UPDATE email_sends
+       SET status = 'failed', failure_reason = $1, failure_class = $2, failed_at = NOW()
+       WHERE id = $3`,
+      [msg.slice(0, 500), failureClass, emailSendId]
+    ).catch(err2 => console.error('[send] failure record error:', err2.message));
+
     if (isBounce) {
       await pool.query(
-        `UPDATE email_sends
-         SET bounced = TRUE, bounce_error = $1
-         WHERE id = $2`,
+        `UPDATE email_sends SET bounced = TRUE, bounce_error = $1 WHERE id = $2`,
         [msg.slice(0, 500), emailSendId]
       ).catch(err2 => console.error('[bounce] db update error:', err2.message));
     }
@@ -452,9 +522,17 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
     await pool.query(
       'UPDATE email_accounts SET last_error = $1 WHERE salesperson_id = $2',
       [msg.slice(0, 500), salespersonId]
-    );
+    ).catch(() => {});
 
-    return { ok: false, error: msg, permanentBounce: isBounce };
+    // Operator-level classes mean the sending identity itself is broken, so
+    // nothing will deliver until a human fixes it. Record that against the
+    // config the Settings page reads, and count consecutive failures so the
+    // alert fires on a real outage rather than one flaky recipient.
+    if (OPERATOR_FAILURE_CLASSES.has(failureClass)) {
+      await recordIdentityFailure(clientId, msg, failureClass);
+    }
+
+    return { ok: false, error: msg, failureClass, permanentBounce: isBounce };
   }
 }
 
@@ -785,4 +863,6 @@ module.exports = {
   sendReplyNotification,
   getAuthedClient, buildRawMessage,
   getClientEmailConfig,
+  classifySendFailure, recordIdentityFailure, recordIdentitySuccess,
+  OPERATOR_FAILURE_CLASSES,
 };
