@@ -786,8 +786,14 @@ router.post('/change-password', express.urlencoded({ extended: true }), requireA
 
 // ─── Client Management ─────────────────────────────────────────────────────
 
+// Tenant CRUD is a PLATFORM action, not a tenant action. requireAdminAuth alone
+// admits 'admin', which is a tenant-level role every customer hands out — that
+// let any customer admin list and edit every other tenant. Gate on the platform
+// roles only, matching /admin/agency and /provision-voice below.
+const requirePlatformAdmin = [requireAdminAuth, requireRole('operator', 'owner')];
+
 // GET /admin/clients — list all clients with org name
-router.get('/clients', requireAdminAuth, async (req, res) => {
+router.get('/clients', requirePlatformAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT c.id, c.name, c.slug, c.active, o.name AS org_name
@@ -842,7 +848,7 @@ router.get('/clients', requireAdminAuth, async (req, res) => {
 });
 
 // GET /admin/clients/new — blank create form
-router.get('/clients/new', requireAdminAuth, async (req, res) => {
+router.get('/clients/new', requirePlatformAdmin, async (req, res) => {
   try {
     const { rows: orgs } = await pool.query('SELECT id, name FROM organizations ORDER BY name');
     const orgOptions = orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
@@ -854,7 +860,7 @@ router.get('/clients/new', requireAdminAuth, async (req, res) => {
 });
 
 // POST /admin/clients — create new client
-router.post('/clients', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
+router.post('/clients', express.urlencoded({ extended: true }), requirePlatformAdmin, async (req, res) => {
   const { organization_id, name, slug, brand_config, commission_rules, integration_settings } = req.body;
   const voice_extension = (req.body.voice_extension || '').trim() || null;
   const errors = [];
@@ -895,7 +901,7 @@ router.post('/clients', express.urlencoded({ extended: true }), requireAdminAuth
 });
 
 // GET /admin/clients/:id/edit — pre-populated edit form
-router.get('/clients/:id/edit', requireAdminAuth, async (req, res) => {
+router.get('/clients/:id/edit', requirePlatformAdmin, async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM clients WHERE id = $1', [req.params.id]);
     if (!rows.length) return res.status(404).send('Client not found');
@@ -910,7 +916,7 @@ router.get('/clients/:id/edit', requireAdminAuth, async (req, res) => {
 });
 
 // POST /admin/clients/:id — update existing client
-router.post('/clients/:id', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
+router.post('/clients/:id', express.urlencoded({ extended: true }), requirePlatformAdmin, async (req, res) => {
   const { name, slug, brand_config, commission_rules, integration_settings, active } = req.body;
   const voice_extension = (req.body.voice_extension || '').trim() || null;
   const brandJson = parseJsonField(brand_config, {});

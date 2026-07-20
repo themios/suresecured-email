@@ -26,4 +26,18 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { requireAuth, requireRole };
+// Guards routes whose every query must be scoped to a tenant. A session without
+// a client_id (platform operator, or a user row predating tenancy) has no tenant
+// to act within, so the request is refused instead of falling back to a default
+// client — that fallback silently attributes one tenant's writes to another.
+function requireTenantContext(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  if (!req.user.client_id) {
+    return res.status(403).json({
+      error: 'No tenant context. This account is not attached to a client.',
+    });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireRole, requireTenantContext };

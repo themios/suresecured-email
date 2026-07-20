@@ -5,7 +5,7 @@ const { ImapFlow } = require('imapflow');
 const crypto     = require('crypto');
 const { google } = require('googleapis');
 const { pool }   = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole, requireTenantContext } = require('../middleware/auth');
 const { shell } = require('../lib/layout');
 const { encrypt, decrypt } = require('../lib/crypto');
 const { signOAuthState, verifyOAuthState } = require('../lib/gmail');
@@ -29,12 +29,18 @@ function esc(s) {
 router.use(express.urlencoded({ extended: true }));
 router.use(express.json());
 
-// Resolve client_id: prefer JWT claim, fall back to first client in DB.
-// This handles admin users created before tenancy was fully wired up.
-async function resolveClientId(req) {
-  if (req.user?.client_id) return req.user.client_id;
-  const { rows } = await pool.query('SELECT id FROM clients ORDER BY id LIMIT 1');
-  return rows[0]?.id || null;
+// Every route in this file is authenticated and tenant-scoped, so establish both
+// once here rather than per-route. The tenant check is the important half: these
+// handlers write client_email_config, auth domains, and integration secrets, and
+// a request that reaches them without a client_id has nowhere legitimate to write.
+router.use(requireAuth, requireTenantContext);
+
+// Resolve the caller's tenant. Never guesses: a session with no client_id is
+// rejected upstream by requireTenantContext rather than silently defaulting to
+// the lowest-numbered client, which would write one user's settings into an
+// unrelated tenant's account.
+function resolveClientId(req) {
+  return req.user.client_id;
 }
 
 // ─── GET /settings — hub page ────────────────────────────────────────────────
@@ -591,10 +597,7 @@ router.get('/business', requireAuth, async (req, res) => {
     </div>
     <form method="post" action="/settings/business/auth-domains" class="flex flex-wrap items-end gap-2">
       <div><label class="block text-xs text-slate-500 mb-1">Domain</label><input name="domain" required placeholder="yourcompany.com" class="border rounded-lg px-3 py-2 text-sm"></div>
-      <div><label class="block text-xs text-slate-500 mb-1">Joins as</label>
-        <select name="default_role" class="border rounded-lg px-3 py-2 text-sm">
-          <option value="salesperson">Salesperson</option><option value="operator">Operator</option><option value="owner">Owner</option><option value="admin">Admin</option>
-        </select></div>
+      <div class="text-xs text-slate-400 pb-2">Joins as <span class="font-medium text-slate-600">Salesperson</span>. Promote individually after they sign in.</div>
       <button class="bg-slate-700 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800">Add domain</button>
     </form>
   </div>`;
@@ -609,11 +612,17 @@ const PUBLIC_EMAIL_DOMAINS = new Set([
   'protonmail.com', 'gmx.com', 'zoho.com', 'yandex.com', 'mail.com',
 ]);
 
-router.post('/business/auth-domains', requireAuth, async (req, res) => {
+// Auto-join grants a seat to anyone who controls a mailbox on the domain, so
+// creating one is a tenant-admin action, not something any seat holder can do.
+// The role it grants is capped at 'salesperson': elevated roles must be assigned
+// deliberately per user. Without the cap, a seat holder could mint an auto-join
+// rule granting 'admin' and then sign in with a second mailbox on that domain to
+// escalate — and 'admin' reaches the cross-tenant routes in admin.js.
+router.post('/business/auth-domains', requireAuth, requireRole('operator', 'owner', 'admin'), async (req, res) => {
   const clientId = await resolveClientId(req);
   const domain = String(req.body.domain || '').toLowerCase().trim()
     .replace(/^@/, '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-  const role = ['salesperson', 'operator', 'owner', 'admin'].includes(req.body.default_role) ? req.body.default_role : 'salesperson';
+  const role = 'salesperson';
   if (!clientId || !domain || !domain.includes('.') || /\s/.test(domain)) {
     return res.redirect('/settings/business?ok=0&msg=' + encodeURIComponent('Enter a valid company domain.'));
   }
