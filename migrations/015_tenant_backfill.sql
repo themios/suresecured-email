@@ -1,5 +1,7 @@
--- Migration 015: attach existing data to its tenant, and stop global unique
--- indexes from blocking a second one. Additive and idempotent.
+-- Migration 015: attach existing data to its tenant, and add the indexes the
+-- tenant-scoped queries will need. Strictly additive and idempotent -- nothing
+-- here drops a constraint or an index (see section 3 for why that was split
+-- out).
 --
 -- Context: tenancy was added by 001 as a nullable column and never backfilled,
 -- so every pre-existing row carries client_id IS NULL. Once route queries are
@@ -81,85 +83,70 @@ BEGIN
     AND (SELECT COUNT(*) FROM users) = 1;
 END $$;
 
--- ── 3. Scope global unique indexes to the tenant ───────────────────────────
+-- ── 3. DEFERRED: converting global unique indexes to per-tenant ────────────
 --
--- Each of these currently spans all tenants, so tenant B cannot insert a row
--- tenant A already has. Verified against production: zero duplicate phone
--- values, so these conversions cannot fail on existing data. This is strictly
--- a RELAXATION of each constraint — it only ever permits more rows — and it
--- gets harder to do safely with every tenant added, which is why it happens now.
+-- This migration originally dropped the global unique constraints below and
+-- replaced them with (client_id, ...) composites. That is the correct end state
+-- -- without it a second tenant cannot hold a customer the first tenant already
+-- has -- but shipping it alone BREAKS PRODUCTION, because ~10 code paths use
+-- `ON CONFLICT (<col>)` and Postgres resolves that against a matching unique
+-- index. Drop the index and every one of them raises:
 --
--- Deliberately NOT converted:
---   client_auth_domains.domain  — global uniqueness is the point; it guarantees
---                                 a domain maps to exactly one tenant.
---   clients.slug, organizations.slug — tenant identifiers, must stay global.
---   *_token, *_pixel_token      — UUIDs, no collision risk.
---   phone_calls.callrail_id, call_logs.retell_call_id — external vendor ids.
+--     ERROR: there is no unique or exclusion constraint matching the
+--            ON CONFLICT specification
+--
+-- Verified against a production schema clone. The breakage is not theoretical:
+--
+--   suppression_list_email_key   unsubscribe.js:10, leads.js:719, admin.js:600,
+--                                api.js:245, sequences.js:319
+--                                -> unsubscribe stops working (compliance)
+--   orders_shopify_order_id_key  webhook.js:94
+--                                -> Shopify orders stop being ingested (revenue)
+--   idx_leads_phone              retell.js:136 (whose comment names the index)
+--                                -> inbound call handling breaks
+--   users_email_key              auth.js:49, auth.js:275, setup.js:18
+--                                -> Google auto-provisioning breaks
+--   salespeople_email_key        no current ON CONFLICT, but same class of risk
+--
+-- The conversion must land in ONE change together with rewriting each of those
+-- call sites to target the composite index and to supply client_id -- work that
+-- naturally belongs with the tenant-scoping pass over the query layer, since
+-- those same statements are being rewritten there anyway.
+--
+-- Doing it now is cheap ONLY while a single tenant exists (verified: zero
+-- duplicate phone values), so it should happen early in that pass rather than
+-- being left until real conflicting data exists. Tracked as P0-8.
+--
+-- What stays below is additive and safe: non-unique indexes that the
+-- tenant-scoped queries will need regardless.
 
+CREATE INDEX IF NOT EXISTS idx_leads_client_email_lookup
+  ON leads (client_id, LOWER(email));
+
+-- When the conversion above is eventually done, these stay GLOBAL on purpose:
+--   client_auth_domains.domain       global uniqueness is the point; it
+--                                    guarantees a domain maps to one tenant
+--   clients.slug, organizations.slug tenant identifiers
+--   *_token, *_pixel_token           UUIDs, no collision risk
+--   phone_calls.callrail_id,
+--   call_logs.retell_call_id         external vendor ids
+
+-- ── 4. Indexes the tenant-scoped queries will need ─────────────────────────
 -- Every statement below is wrapped in a table-existence guard. Migration 001
--- does NOT do this — its DO block checks for the COLUMN but not the TABLE, so it
--- hard-fails on an empty database (the base tables are created by db.js's inline
--- SQL, which runs AFTER the migrations). That makes a from-scratch bootstrap
--- impossible today. This migration refuses to add a second instance of that bug:
--- on a fresh database it no-ops cleanly instead of aborting the boot.
+-- does NOT do this -- its DO block checks for the COLUMN but not the TABLE. All
+-- of these are plain additive indexes: no constraint is dropped, so no
+-- ON CONFLICT target changes meaning (see the deferral note above).
 DO $$
-DECLARE
-  has_clients BOOLEAN := to_regclass('public.clients') IS NOT NULL;
 BEGIN
-  -- leads.phone
-  IF to_regclass('public.leads') IS NOT NULL AND has_clients THEN
-    DROP INDEX IF EXISTS idx_leads_phone;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_client_phone
-      ON leads (client_id, phone) WHERE phone IS NOT NULL;
-
-    -- leads.email is queried constantly by the unsubscribe and ingestion paths
-    -- and has no index at all today. Non-unique: a tenant legitimately re-imports
-    -- the same address.
-    CREATE INDEX IF NOT EXISTS idx_leads_client_email
-      ON leads (client_id, LOWER(email));
-
+  IF to_regclass('public.leads') IS NOT NULL THEN
     CREATE INDEX IF NOT EXISTS idx_leads_client_stage ON leads (client_id, stage);
   END IF;
-
-  -- users.email — one human may hold a seat at more than one tenant.
-  IF to_regclass('public.users') IS NOT NULL THEN
-    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_client_email
-      ON users (client_id, LOWER(email));
-  END IF;
-
-  -- salespeople.email — same reasoning; a rep can work for two dealerships.
   IF to_regclass('public.salespeople') IS NOT NULL THEN
-    ALTER TABLE salespeople DROP CONSTRAINT IF EXISTS salespeople_email_key;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_salespeople_client_email
-      ON salespeople (client_id, LOWER(email));
     CREATE INDEX IF NOT EXISTS idx_salespeople_client ON salespeople (client_id, active);
   END IF;
-
-  -- orders.shopify_order_id — two tenants running separate Shopify stores can
-  -- legitimately produce the same numeric order id.
   IF to_regclass('public.orders') IS NOT NULL THEN
-    ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_shopify_order_id_key;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_client_shopify
-      ON orders (client_id, shopify_order_id) WHERE shopify_order_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_orders_client_ordered_at ON orders (client_id, ordered_at DESC);
   END IF;
-
-  -- suppression_list.email — currently global, so unsubscribing from one tenant
-  -- silently suppresses the address for every other tenant. Scoping it makes
-  -- suppression per-tenant, which is what the UI already implies.
-  -- NOTE: if a global do-not-contact list is what you legally want, revert this
-  -- block and document the choice.
-  IF to_regclass('public.suppression_list') IS NOT NULL THEN
-    ALTER TABLE suppression_list DROP CONSTRAINT IF EXISTS suppression_list_email_key;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_suppression_client_email
-      ON suppression_list (client_id, LOWER(email));
-  END IF;
-
-  -- ── Indexes the tenant-scoped queries will need ──────────────────────────
-  -- Every list/analytics query becomes `WHERE client_id = $1 AND <time> >= ...`.
-  -- Without these, scoping just turns full scans into slightly smaller ones.
-  -- client_id leads each composite since it is always an equality predicate.
   IF to_regclass('public.clicks') IS NOT NULL THEN
     CREATE INDEX IF NOT EXISTS idx_clicks_client_clicked_at ON clicks (client_id, clicked_at DESC);
   END IF;
