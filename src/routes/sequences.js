@@ -466,7 +466,7 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
 
   for (const step of steps) {
     try {
-      await sendSequenceEmail({
+      const result = await sendSequenceEmail({
         salespersonId: spId,
         to:            email,
         subject:       `[PREVIEW Step ${step.step_number}] ${step.subject}`,
@@ -476,10 +476,14 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
         stepId:        step.id,
         leadId:        null,
       });
-      results.push({ step: step.step_number, ok: true });
-      // Small pause so Gmail doesn't rate-limit
-      await new Promise(r => setTimeout(r, 1500));
+      if (result && result.ok === false) {
+        results.push({ step: step.step_number, ok: false, error: result.error || 'send returned not-ok' });
+      } else {
+        results.push({ step: step.step_number, ok: true });
+        await new Promise(r => setTimeout(r, 1500));
+      }
     } catch (err) {
+      console.error(`Preview step ${step.step_number} failed:`, err.message);
       results.push({ step: step.step_number, ok: false, error: err.message });
     }
   }
@@ -953,7 +957,8 @@ router.get('/', requireAuth, async (req, res) => {
 
   async function previewSequence(seqId) {
     var email = await showPrompt('Email address to send all sequence steps to:', '', 'Preview Sequence');
-    if (!email) return;
+    if (!email || !email.trim()) return;
+    email = email.trim();
     showToast('Sending preview emails… this may take a moment', 'info', 8000);
     fetch('/sequences/api/sequences/' + seqId + '/preview', {
       method: 'POST',
@@ -962,13 +967,27 @@ router.get('/', requireAuth, async (req, res) => {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (data.ok) {
-        showToast('Sent ' + data.sent + ' of ' + data.total + ' steps to ' + email, 'success');
+      if (!data.ok) {
+        showToast('Preview failed: ' + (data.error || 'Unknown error'), 'error', 8000);
+        return;
+      }
+      if (data.sent === 0) {
+        // Build a useful message from the first failure
+        var firstErr = data.results && data.results.find(function(r) { return !r.ok; });
+        var reason = firstErr ? firstErr.error : 'no emails sent';
+        showToast('Preview sent 0 steps. Reason: ' + reason, 'error', 8000);
+        return;
+      }
+      var msg = 'Sent ' + data.sent + ' of ' + data.total + ' step(s) to ' + email;
+      if (data.sent < data.total) {
+        var failErr = data.results && data.results.find(function(r) { return !r.ok; });
+        msg += failErr ? ' — some failed: ' + failErr.error : ' — some failed';
+        showToast(msg, 'warn', 8000);
       } else {
-        showToast('Error: ' + (data.error || 'Unknown'), 'error');
+        showToast(msg, 'success');
       }
     })
-    .catch(function() { showToast('Request failed', 'error'); });
+    .catch(function(e) { showToast('Request failed: ' + e.message, 'error'); });
   }
 
   function verifyBatch() {
