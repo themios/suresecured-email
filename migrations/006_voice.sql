@@ -57,7 +57,21 @@ ALTER TABLE sequence_steps
 -- Phone number on leads (required for SMS dispatch and call-ended lead upsert)
 ALTER TABLE leads
   ADD COLUMN IF NOT EXISTS phone VARCHAR(50);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
+-- Phone uniqueness is per-tenant, not global — see migration 015, which replaces
+-- this index with idx_leads_client_phone ON leads (client_id, phone).
+--
+-- This must stay conditional. Migrations re-run on every boot, so without the
+-- guard 006 would recreate the GLOBAL unique index that 015 just dropped, and
+-- the next boot would fail with "could not create unique index idx_leads_phone"
+-- the moment two tenants legitimately hold the same phone number. Two
+-- dealerships sharing a prospect is normal, so that is a real outage, not a
+-- hypothetical.
+DO $$
+BEGIN
+  IF to_regclass('public.idx_leads_client_phone') IS NULL THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
+  END IF;
+END $$;
 
 -- client_id and replied_at on contact_enrollments (may already exist from prior migrations — safe to re-add)
 ALTER TABLE contact_enrollments

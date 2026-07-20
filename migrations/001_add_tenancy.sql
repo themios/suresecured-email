@@ -46,6 +46,17 @@ DECLARE
   ];
 BEGIN
   FOREACH tbl IN ARRAY tbls LOOP
+    -- Skip tables that do not exist YET. db.js runs this file twice: once as a
+    -- bootstrap pass to create clients/organizations/users on an empty database
+    -- (when none of the tables below exist), then again after the base tables
+    -- have been created, at which point these ALTERs actually apply.
+    --
+    -- Without this guard the file hard-fails on a fresh database with
+    -- `relation "salespeople" does not exist`, and because the file executes as
+    -- one implicit transaction that rolls back the clients table it just
+    -- created — leaving zero tables and an app that cannot boot.
+    CONTINUE WHEN to_regclass('public.' || tbl) IS NULL;
+
     IF NOT EXISTS (
       SELECT 1 FROM information_schema.columns
       WHERE table_name = tbl AND column_name = 'client_id'
@@ -56,9 +67,16 @@ BEGIN
 END $$;
 
 -- 5. Partial index for cron scale (idempotent)
-CREATE INDEX IF NOT EXISTS idx_contact_enrollments_active_next
-  ON contact_enrollments (next_send_at)
-  WHERE status = 'active';
+-- Guarded for the same reason as the ALTER loop above: on the bootstrap pass
+-- contact_enrollments does not exist yet.
+DO $$
+BEGIN
+  IF to_regclass('public.contact_enrollments') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_contact_enrollments_active_next
+      ON contact_enrollments (next_send_at)
+      WHERE status = 'active';
+  END IF;
+END $$;
 
 -- 6. Seed operator account and SureSecured org+client (idempotent)
 INSERT INTO organizations (name, slug) VALUES ('SureSecured', 'suresecured')
