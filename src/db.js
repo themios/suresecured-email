@@ -275,6 +275,15 @@ async function initDb() {
     ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS send_service VARCHAR(20) DEFAULT 'gmail';
   `);
 
+  // Email tracking columns (open/click pixel, bounce handling)
+  await pool.query(`
+    ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS pixel_token VARCHAR(255);
+    ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS open_count INTEGER DEFAULT 0;
+    ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS click_count INTEGER DEFAULT 0;
+    ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS bounced BOOLEAN DEFAULT false;
+    ALTER TABLE email_sends ADD COLUMN IF NOT EXISTS bounce_error TEXT;
+  `);
+
   // Full reply text storage on lead
   await pool.query(`
     ALTER TABLE leads ADD COLUMN IF NOT EXISTS reply_text TEXT;

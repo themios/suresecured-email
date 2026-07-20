@@ -292,7 +292,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
 </html>`;
 }
 
-async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, vars, enrollmentId, stepId, leadId }, brandConfig = {}) {
+async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, vars, enrollmentId, stepId, leadId, preview }, brandConfig = {}) {
   // Always need Gmail auth — for reply-to address even when sending via SES
   const auth = await getAuthedClient(salespersonId);
   if (!auth) return { ok: false, error: 'no_account' };
@@ -327,10 +327,12 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
     ? (clientCfg.from_email || account?.email)
     : (sesEnabled() ? (process.env.SES_FROM_EMAIL || account.email) : (clientCfg?.from_email || account.email));
 
-  // Warmup / daily cap gate — protects domain reputation
-  const reservation = await reserveSend(sendIdentity);
-  if (!reservation.ok) {
-    return { ok: false, error: 'daily_limit', limited: true, identity: sendIdentity, limit: reservation.limit };
+  // Warmup / daily cap gate — protects domain reputation (skipped for previews)
+  if (!preview) {
+    const reservation = await reserveSend(sendIdentity);
+    if (!reservation.ok) {
+      return { ok: false, error: 'daily_limit', limited: true, identity: sendIdentity, limit: reservation.limit };
+    }
   }
 
   // One-click unsubscribe headers (Gmail/Yahoo bulk sender requirement)

@@ -226,38 +226,38 @@ router.get('/api/email-accounts', requireAuth, async (req, res) => {
 // Join path: sequences -> contact_enrollments -> email_sends
 // Scoped to req.user.client_id for multi-tenant isolation
 router.get('/api/sequences/report', requireAuth, async (req, res) => {
-  const clientId = req.user?.client_id || null;
-
-  const { rows } = await pool.query(
-    `SELECT
-       seq.id            AS sequence_id,
-       seq.name          AS sequence_name,
-       COUNT(es.id)      AS total_sends,
-       COUNT(es.id) FILTER (WHERE es.open_count  > 0)    AS opened_sends,
-       COUNT(es.id) FILTER (WHERE es.click_count > 0)    AS clicked_sends,
-       COUNT(es.id) FILTER (WHERE es.bounced = TRUE)     AS bounced_sends,
-       ROUND(
-         100.0 * COUNT(es.id) FILTER (WHERE es.open_count  > 0)
-         / NULLIF(COUNT(es.id), 0), 1
-       ) AS open_rate_pct,
-       ROUND(
-         100.0 * COUNT(es.id) FILTER (WHERE es.click_count > 0)
-         / NULLIF(COUNT(es.id), 0), 1
-       ) AS click_rate_pct,
-       ROUND(
-         100.0 * COUNT(es.id) FILTER (WHERE es.bounced = TRUE)
-         / NULLIF(COUNT(es.id), 0), 1
-       ) AS bounce_rate_pct
-     FROM sequences seq
-     LEFT JOIN contact_enrollments ce ON ce.sequence_id = seq.id
-     LEFT JOIN email_sends es ON es.enrollment_id = ce.id
-     WHERE seq.client_id = $1
-     GROUP BY seq.id, seq.name
-     ORDER BY seq.created_at DESC`,
-    [clientId]
-  );
-
-  res.json(rows);
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        seq.id            AS sequence_id,
+        seq.name          AS sequence_name,
+        COUNT(es.id)      AS total_sends,
+        COUNT(es.id) FILTER (WHERE es.open_count  > 0)   AS opened_sends,
+        COUNT(es.id) FILTER (WHERE es.click_count > 0)   AS clicked_sends,
+        COUNT(es.id) FILTER (WHERE es.bounced = TRUE)    AS bounced_sends,
+        ROUND(
+          100.0 * COUNT(es.id) FILTER (WHERE es.open_count  > 0)
+          / NULLIF(COUNT(es.id), 0), 1
+        ) AS open_rate_pct,
+        ROUND(
+          100.0 * COUNT(es.id) FILTER (WHERE es.click_count > 0)
+          / NULLIF(COUNT(es.id), 0), 1
+        ) AS click_rate_pct,
+        ROUND(
+          100.0 * COUNT(es.id) FILTER (WHERE es.bounced = TRUE)
+          / NULLIF(COUNT(es.id), 0), 1
+        ) AS bounce_rate_pct
+      FROM sequences seq
+      LEFT JOIN contact_enrollments ce ON ce.sequence_id = seq.id
+      LEFT JOIN email_sends es ON es.enrollment_id = ce.id
+      GROUP BY seq.id, seq.name
+      ORDER BY seq.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Sequences report error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Contact list for enrollment - all leads with suppression check
@@ -475,6 +475,7 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
         enrollmentId:  null,
         stepId:        step.id,
         leadId:        null,
+        preview:       true,
       });
       if (result && result.ok === false) {
         results.push({ step: step.step_number, ok: false, error: result.error || 'send returned not-ok' });
