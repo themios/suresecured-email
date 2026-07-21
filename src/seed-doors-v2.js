@@ -215,6 +215,7 @@ And if you ever want a straight answer on securing a door or window, you know wh
 Sure Secured`],
 ];
 
-rebuildSequence(SEQUENCE_NAME, STEPS)
+rebuildSequence(SEQUENCE_NAME, STEPS,
+  '10-email door sequence for prior inquirers. Qualify, prove, close over ~70 days.')
   .then(() => pool.end())
   .catch(e => { console.error(e.message); process.exit(1); });

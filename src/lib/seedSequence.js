@@ -11,10 +11,14 @@
  */
 const { pool } = require('../db');
 
-async function rebuildSequence(sequenceName, steps) {
+async function rebuildSequence(sequenceName, steps, description) {
   const { rows } = await pool.query('SELECT id FROM sequences WHERE name = $1', [sequenceName]);
   if (!rows.length) { console.error(`Sequence not found: ${sequenceName}`); process.exit(1); }
   const seqId = rows[0].id;
+
+  if (description) {
+    await pool.query('UPDATE sequences SET description = $1 WHERE id = $2', [description, seqId]);
+  }
 
   const active = await pool.query(
     `SELECT COUNT(*)::int AS n FROM contact_enrollments WHERE sequence_id = $1 AND status = 'active'`,

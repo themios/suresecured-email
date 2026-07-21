@@ -517,8 +517,13 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
 
 router.get('/', requireAuth, async (req, res) => {
   const [seqRows, spRows] = await Promise.all([
-    pool.query(`SELECT s.*, COUNT(ss.id) AS step_count,
-                  COUNT(ce.id) FILTER (WHERE ce.status='active') AS active_enrollments
+    // COUNT(DISTINCT ...) so the two LEFT JOINs do not multiply each other
+    // (steps x enrollments was inflating the step count, e.g. 20 steps x 2
+    // enrollments = 40). Only ACTIVE steps count, so retired steps from a
+    // shortened sequence are not shown.
+    pool.query(`SELECT s.*,
+                  COUNT(DISTINCT ss.id) FILTER (WHERE ss.active) AS step_count,
+                  COUNT(DISTINCT ce.id) FILTER (WHERE ce.status='active') AS active_enrollments
                 FROM sequences s
                 LEFT JOIN sequence_steps ss ON ss.sequence_id = s.id
                 LEFT JOIN contact_enrollments ce ON ce.sequence_id = s.id
