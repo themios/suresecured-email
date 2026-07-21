@@ -191,13 +191,26 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
 
   const phoneDigits = phone.replace(/\D/g, '');
 
-  const paragraphs = body.split(/\n\n+/).map(p =>
-    `<p style="margin:0 0 18px 0;color:${primary_color};font-size:15px;line-height:1.75">` +
-    p.split('\n').map(line =>
-      line.replace(/(https?:\/\/[^\s<>"]+)/g, `<a href="$1" style="color:${accent_color};font-weight:600;text-decoration:underline">$1</a>`)
-    ).join('<br>') +
-    '</p>'
-  ).join('\n');
+  // Inline images: a paragraph that is exactly [[img:URL]] (optionally
+  // [[img:URL|alt text]]) renders as a centered, responsive image instead of a
+  // text paragraph. Lets sequence copy embed product/install photos without a
+  // schema change -- the marker lives in the step's body like any other line.
+  const IMG_RE = /^\[\[img:\s*(\S+?)(?:\s*\|\s*([^\]]+))?\]\]$/;
+  const paragraphs = body.split(/\n\n+/).map(p => {
+    const m = p.trim().match(IMG_RE);
+    if (m) {
+      const src = m[1].startsWith('//') ? `https:${m[1]}` : m[1];
+      const alt = (m[2] || 'Sure Secured').replace(/"/g, '&quot;');
+      return `<p style="margin:0 0 18px 0;text-align:center">` +
+        `<img src="${src}" alt="${alt}" width="520" ` +
+        `style="width:100%;max-width:520px;height:auto;border-radius:6px;border:1px solid #d8d6d2"></p>`;
+    }
+    return `<p style="margin:0 0 18px 0;color:${primary_color};font-size:15px;line-height:1.75">` +
+      p.split('\n').map(line =>
+        line.replace(/(https?:\/\/[^\s<>"]+)/g, `<a href="$1" style="color:${accent_color};font-weight:600;text-decoration:underline">$1</a>`)
+      ).join('<br>') +
+      '</p>';
+  }).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">

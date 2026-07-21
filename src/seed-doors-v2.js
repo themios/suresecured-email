@@ -96,7 +96,9 @@ Our screens do not read that way. The mesh is thin and dark, so from a few feet 
 
 The difference is this one does not tear when someone leans into it.
 
-If you want to see what it looks like on a real home, reply and I will send you a few photos from jobs around LA County.
+[[img://suresecured.com/cdn/shop/files/sh-installed.png?width=1200|Sure Secured security screen door installed on a home]]
+
+If you want to see what it looks like on a real home, reply and I will send you a few more photos from jobs around LA County.
 
 {salesperson_name}
 Sure Secured`],
@@ -127,6 +129,8 @@ Frame: aluminum, triple interlock, three connection points with a security clamp
 Lock: multi point, so it holds along the whole edge, not just one spot.
 Fit: measured and built for your exact opening. Not a one size box off a shelf.
 Airflow and light: the weave is open, so it is built to keep the breeze and the view.
+
+[[img://suresecured.com/cdn/shop/files/mesh.png?width=1200|316 marine grade stainless steel mesh close up]]
 
 Free shipping anywhere in the country. If you are in LA County, we install it for you.
 
