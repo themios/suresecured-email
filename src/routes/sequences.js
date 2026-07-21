@@ -466,46 +466,51 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
   };
 
   const { sendSequenceEmail } = require('../lib/gmail');
+  const clientId = req.user.client_id;
 
-  // Preview sends the FIRST step only, not the whole sequence.
+  // Preview sends EVERY step in the sequence to the given address, in the
+  // BACKGROUND. We respond immediately and keep sending after the response, so
+  // the request can never hit the gateway timeout regardless of step count.
   //
-  // The old loop sent every step synchronously with a 1.5s sleep between each.
-  // Sequence 7 has 20 steps, so one Preview click meant ~20 real SMTP sends plus
-  // ~30s of sleeps inside a single HTTP request -- it blew Railway's gateway
-  // timeout (the 502) and, if it had finished, would have dumped 20 emails into
-  // the tester's inbox. One representative email is what a preview is for.
-  const step = steps[0];
-  let result;
-  try {
-    result = await sendSequenceEmail({
-      salespersonId: spId,
-      // clientId was NOT passed before, so getClientEmailConfig(undefined)
-      // returned null and preview never used the tenant's configured mailbox
-      // (the now-working IONOS SMTP). Pass it so preview sends the same way a
-      // real sequence send does.
-      clientId:      req.user.client_id,
-      to:            email,
-      subject:       `[PREVIEW Step ${step.step_number}] ${step.subject}`,
-      body:          step.body,
-      vars,
-      enrollmentId:  null,
-      stepId:        step.id,
-      leadId:        null,
-      preview:       true,
-    });
-  } catch (err) {
-    console.error(`Preview step ${step.step_number} failed:`, err.message);
-    return res.status(502).json({ ok: false, step: step.step_number, error: err.message });
-  }
+  // Why background and not synchronous: sending all steps in the request is what
+  // produced the original 502 -- sequence 7 has 20 steps, and 20 sends inside
+  // one HTTP request is slow enough to be killed by the proxy. Gmail API sends
+  // are ~0.5s each, but 20+ of them still shouldn't block a response. Each send
+  // records its own row in email_sends, so failures surface on /undelivered and
+  // the sending-health banner even though the caller already got its 200.
+  res.json({
+    ok: true,
+    queued: steps.length,
+    note: `Sending ${steps.length} preview email${steps.length === 1 ? '' : 's'} to ${email}. They'll arrive over the next minute.`,
+  });
 
-  if (result && result.ok === false) {
-    // A send that failed cleanly (auth, bounce, etc.) is a 200 carrying the
-    // reason -- the send path already recorded it, and the caller wants to show
-    // it, not treat it as a transport error.
-    return res.json({ ok: false, step: step.step_number, error: result.error || 'send returned not-ok', failureClass: result.failureClass });
-  }
-
-  res.json({ ok: true, sent: 1, total: steps.length, note: `Sent step ${step.step_number} of ${steps.length} to ${email}` });
+  ;(async () => {
+    let sent = 0, failed = 0;
+    for (const step of steps) {
+      try {
+        const r = await sendSequenceEmail({
+          salespersonId: spId,
+          clientId,
+          to:            email,
+          subject:       `[PREVIEW Step ${step.step_number}] ${step.subject}`,
+          body:          step.body,
+          vars,
+          enrollmentId:  null,
+          stepId:        step.id,
+          leadId:        null,
+          preview:       true,
+        });
+        if (r && r.ok === false) { failed++; console.warn(`[preview] step ${step.step_number} not sent: ${r.error}`); }
+        else sent++;
+      } catch (err) {
+        failed++;
+        console.error(`[preview] step ${step.step_number} failed:`, err.message);
+      }
+      // Space sends slightly so a 20-step preview doesn't burst the Gmail API.
+      await new Promise(r => setTimeout(r, 800));
+    }
+    console.log(`[preview] done: ${sent} sent, ${failed} failed, seq ${seqId} -> ${email}`);
+  })();
 });
 
 // -- Sequences UI page ------------------------------------------------------
@@ -973,10 +978,9 @@ router.get('/', requireAuth, async (req, res) => {
   }
 
   async function previewSequence(seqId) {
-    var email = await showPrompt('Send a test of step 1 to which email?', '', 'Preview Sequence');
+    var email = await showPrompt('Send the full sequence (every step) to which email?', '', 'Preview Sequence');
     if (!email || !email.trim()) return;
     email = email.trim();
-    showToast('Sending preview…', 'info', 6000);
     fetch('/sequences/api/sequences/' + seqId + '/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -988,7 +992,8 @@ router.get('/', requireAuth, async (req, res) => {
         showToast('Preview failed: ' + (data.error || 'Unknown error'), 'error', 8000);
         return;
       }
-      showToast(data.note || ('Sent a preview to ' + email), 'success');
+      // Sends run in the background; the emails arrive over the next minute.
+      showToast(data.note || ('Sending previews to ' + email), 'success', 8000);
     })
     .catch(function(e) { showToast('Request failed: ' + e.message, 'error'); });
   }
