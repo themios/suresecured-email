@@ -199,6 +199,7 @@ And if you ever want a straight answer on securing a window or door, you know wh
 Sure Secured`],
 ];
 
-rebuildSequence('B2C — Security Screen Windows', STEPS)
+rebuildSequence('B2C — Security Screen Windows', STEPS,
+  '10-email window sequence for prior inquirers. Qualify, prove, close over ~70 days.')
   .then(() => pool.end())
   .catch(e => { console.error(e.message); process.exit(1); });

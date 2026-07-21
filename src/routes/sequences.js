@@ -620,12 +620,12 @@ router.get('/', requireAuth, async (req, res) => {
               </td>
               <td class="px-4 py-3">
                 <div class="flex gap-2 flex-wrap">
-                  <button onclick="editSequence(${s.id})" class="text-xs px-2.5 py-1 rounded-lg border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors">Edit Steps</button>
-                  <button onclick="enrollContacts(${s.id}, '${esc(s.name)}')" class="text-xs px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors">Enroll</button>
-                  <button onclick="autoEnroll(${s.id}, '${esc(s.name)}', '${esc(s.audience_type)}')" class="text-xs px-2.5 py-1 rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors">Auto-Enroll</button>
-                  <button onclick="previewSequence(${s.id})" class="text-xs px-2.5 py-1 rounded-lg border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">Preview</button>
-                  <button onclick="viewEnrollments(${s.id}, '${esc(s.name)}')" class="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">View</button>
-                  <button onclick="deleteSeq(${s.id})" class="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Delete</button>
+                  <button onclick="editSequence(${s.id})" title="Edit the emails in this sequence: add, remove, reword, or reorder the steps" class="text-xs px-2.5 py-1 rounded-lg border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors">Edit Steps</button>
+                  <button onclick="enrollContacts(${s.id}, '${esc(s.name)}')" title="Hand-pick specific contacts to start receiving this sequence" class="text-xs px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors">Enroll</button>
+                  <button onclick="autoEnroll(${s.id}, '${esc(s.name)}', '${esc(s.audience_type)}')" title="Automatically enroll every send-ready lead that matches this audience (${esc(s.audience_type)})" class="text-xs px-2.5 py-1 rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors">Auto-Enroll</button>
+                  <button onclick="previewSequence(${s.id})" title="Send yourself every email in this sequence right now, so you can review it before sending to leads" class="text-xs px-2.5 py-1 rounded-lg border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">Preview</button>
+                  <button onclick="viewEnrollments(${s.id}, '${esc(s.name)}')" title="See who is enrolled and which step of the sequence each contact is on" class="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">View</button>
+                  <button onclick="deleteSeq(${s.id})" title="Permanently delete this sequence" class="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Delete</button>
                 </div>
               </td>
             </tr>`).join('')}

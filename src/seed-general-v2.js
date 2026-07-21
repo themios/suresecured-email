@@ -198,6 +198,7 @@ And if you ever want a straight answer on securing your home, you know where to 
 Sure Secured`],
 ];
 
-rebuildSequence('B2C — General Home Security', STEPS)
+rebuildSequence('B2C — General Home Security', STEPS,
+  '10-email doors + windows sequence for prior inquirers. Qualify, prove, close over ~70 days.')
   .then(() => pool.end())
   .catch(e => { console.error(e.message); process.exit(1); });

@@ -178,6 +178,7 @@ And if you ever want to talk it through, call or text me direct at (747) 688-999
 Sure Secured`],
 ];
 
-rebuildSequence('B2B — Become a Dealer', STEPS)
+rebuildSequence('B2B — Become a Dealer', STEPS,
+  '10-email dealer sequence. Opportunity, proof, partnership, close over ~55 days.')
   .then(() => pool.end())
   .catch(e => { console.error(e.message); process.exit(1); });
