@@ -776,18 +776,20 @@ async function sendViaSes({ fromName, fromAddress, replyTo, to, subject, textBod
   });
 }
 
+// Retry SMTP sends whose FIRST failure is a transient connection problem.
+// Observed: IONOS from Railway's long-running web service occasionally times out
+// connecting, while a standalone probe authenticates 4/4 in ~0.6s. So the host
+// is reachable and a fresh connection almost always succeeds -- the failure is
+// transient, exactly the case a bounded retry is for. Auth/recipient errors are
+// NOT retried; only connection/greeting/socket timeouts and resets.
+const SMTP_RETRYABLE = /timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ESOCKET|greeting|connection/i;
+
 /**
  * Send via a client's saved SMTP config (from client_email_config table).
  * clientCfg comes from getClientEmailConfig().
  */
 async function sendViaClientSmtp(clientCfg, { fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, headers }) {
-  const transport = nodemailer.createTransport({
-    host:   clientCfg.smtp_host,
-    port:   clientCfg.smtp_port || 587,
-    secure: clientCfg.smtp_secure || false,
-    auth:   { user: clientCfg.smtp_user, pass: clientCfg.smtp_pass },
-  });
-  await transport.sendMail({
+  const mail = {
     from:    `"${fromName || clientCfg.from_name}" <${fromAddress || clientCfg.from_email}>`,
     replyTo: replyTo || clientCfg.reply_to || fromAddress || clientCfg.from_email,
     to,
@@ -795,7 +797,40 @@ async function sendViaClientSmtp(clientCfg, { fromName, fromAddress, replyTo, to
     text:    textBody,
     html:    htmlBody,
     headers: headers || undefined,
-  });
+  };
+
+  const attempts = 3;
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    // Fresh transport per attempt with explicit timeouts. Without these a hung
+    // connection never resolves, which left send rows stuck in 'sending' forever
+    // and hung the HTTP request until the gateway killed it.
+    const transport = nodemailer.createTransport({
+      host:   clientCfg.smtp_host,
+      port:   clientCfg.smtp_port || 587,
+      secure: clientCfg.smtp_secure || false,
+      auth:   { user: clientCfg.smtp_user, pass: clientCfg.smtp_pass },
+      connectionTimeout: 12000,
+      greetingTimeout:   12000,
+      socketTimeout:     20000,
+    });
+    try {
+      await transport.sendMail(mail);
+      return; // sent
+    } catch (err) {
+      lastErr = err;
+      const retryable = SMTP_RETRYABLE.test(err.message || '') || SMTP_RETRYABLE.test(err.code || '');
+      if (i < attempts && retryable) {
+        console.warn(`[smtp] attempt ${i}/${attempts} failed (${err.message}); retrying`);
+        await new Promise(r => setTimeout(r, 1000 * i)); // 1s, 2s backoff
+        continue;
+      }
+      throw err; // non-retryable, or out of attempts
+    } finally {
+      transport.close();
+    }
+  }
+  throw lastErr;
 }
 
 // ── Reply detection by lead email address (works for SES + Gmail sends) ─────
