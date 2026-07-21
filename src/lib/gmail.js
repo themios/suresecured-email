@@ -409,10 +409,16 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
   // This is required: email_tracking_tokens has NOT NULL FK to email_sends.id
   const insertResult = await pool.query(
     `INSERT INTO email_sends
-       (enrollment_id, step_id, salesperson_id, lead_id, to_email, subject, status, pixel_token)
-     VALUES ($1,$2,$3,$4,$5,$6,'sending',$7)
+       (enrollment_id, step_id, salesperson_id, lead_id, to_email, subject, status, pixel_token, client_id)
+     VALUES ($1,$2,$3,$4,$5,$6,'sending',$7,$8)
      RETURNING id`,
-    [enrollmentId, stepId, salespersonId, leadId, to, resolvedSubject, pixelToken]
+    // client_id was missing from this INSERT, so every send row was created with
+    // client_id = NULL. Migration 015 backfilled the pre-existing rows, but new
+    // sends stayed NULL -- which meant the tenant-scoped health/undelivered
+    // queries (WHERE client_id = $1) could not see any send after the migration.
+    // A successful send therefore never cleared the banner, and new failures
+    // never appeared on /undelivered.
+    [enrollmentId, stepId, salespersonId, leadId, to, resolvedSubject, pixelToken, clientId || null]
   );
   const emailSendId = insertResult.rows[0].id;
 
@@ -424,6 +430,15 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
 
   // Plain-text fallback has no styled signature block, so it needs the signature appended.
   const rewrittenBodyText = rewrittenBody + (signature ? `\n\n${signature}` : '');
+
+  // Which service we ATTEMPTED, tracked so the failure path can record it. The
+  // column defaults to 'gmail' and was only ever set on success, so a failed
+  // IONOS/SES send showed send_service='gmail' and made diagnosis point at the
+  // wrong provider.
+  let attemptedService = sesEnabled() ? 'ses' : 'gmail';
+  if (clientCfg?.smtp_host && clientCfg?.smtp_user && clientCfg?.smtp_pass) {
+    attemptedService = clientCfg.provider || 'smtp';
+  }
 
   try {
     if (clientCfg?.smtp_host && clientCfg?.smtp_user && clientCfg?.smtp_pass) {
@@ -507,9 +522,9 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
     // operator had no way to learn why nothing was arriving.
     await pool.query(
       `UPDATE email_sends
-       SET status = 'failed', failure_reason = $1, failure_class = $2, failed_at = NOW()
+       SET status = 'failed', failure_reason = $1, failure_class = $2, failed_at = NOW(), send_service = $4
        WHERE id = $3`,
-      [msg.slice(0, 500), failureClass, emailSendId]
+      [msg.slice(0, 500), failureClass, emailSendId, attemptedService]
     ).catch(err2 => console.error('[send] failure record error:', err2.message));
 
     if (isBounce) {
