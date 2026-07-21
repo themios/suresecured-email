@@ -204,6 +204,14 @@ async function runMigrations() {
     'utf8'
   );
   await pool.query(migration016Sql);
+
+  // Retire sequence steps without deleting them (active flag), so a shortened
+  // sequence keeps its send history (idempotent).
+  const migration017Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/017_step_active.sql'),
+    'utf8'
+  );
+  await pool.query(migration017Sql);
 }
 
 // ── PHASE 1: base tables ──────────────────────────────────────────────────

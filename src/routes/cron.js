@@ -323,10 +323,12 @@ async function sendSequencesHandler(req, res) {
     for (const row of rows) {
       const nextStepNum = row.current_step + 1;
 
-      // Get next step in the sequence
+      // Get next step in the sequence. `active = true` so retired steps (from a
+      // shortened sequence) are skipped: if the next number is a retired step,
+      // no row comes back and the enrollment is marked complete below.
       const { rows: steps } = await client.query(
         `SELECT * FROM sequence_steps
-         WHERE sequence_id = $1 AND step_number = $2`,
+         WHERE sequence_id = $1 AND step_number = $2 AND active = true`,
         [row.sequence_id, nextStepNum]
       );
 
@@ -528,7 +530,7 @@ async function sendSequencesHandler(req, res) {
       if (sendResult.ok) {
         // Check if this was the last step
         const { rows: nextSteps } = await client.query(
-          `SELECT id FROM sequence_steps WHERE sequence_id = $1 AND step_number > $2 LIMIT 1`,
+          `SELECT id FROM sequence_steps WHERE sequence_id = $1 AND step_number > $2 AND active = true LIMIT 1`,
           [row.sequence_id, nextStepNum]
         );
 

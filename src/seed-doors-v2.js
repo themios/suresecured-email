@@ -19,6 +19,7 @@
  * month.
  */
 require('dotenv').config();
+const { rebuildSequence } = require('./lib/seedSequence');
 const { pool } = require('./db');
 
 const SEQUENCE_NAME = 'B2C — Security Screen Doors';
@@ -214,56 +215,6 @@ And if you ever want a straight answer on securing a door or window, you know wh
 Sure Secured`],
 ];
 
-async function run() {
-  const { rows } = await pool.query('SELECT id FROM sequences WHERE name = $1', [SEQUENCE_NAME]);
-  if (!rows.length) { console.error(`Sequence not found: ${SEQUENCE_NAME}`); process.exit(1); }
-  const seqId = rows[0].id;
-
-  // Guard: do not rewrite a sequence people are actively moving through.
-  const active = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM contact_enrollments WHERE sequence_id = $1 AND status = 'active'`,
-    [seqId]
-  );
-  if (active.rows[0].n > 0) {
-    console.error(`Refusing: ${active.rows[0].n} active enrollment(s) on this sequence. Pause them first.`);
-    process.exit(1);
-  }
-
-  // Update steps 1-10 in place rather than delete-and-reinsert. A step that has
-  // already been sent is referenced by email_sends.step_id, so deleting it
-  // violates that foreign key (and would orphan send history). Upserting keeps
-  // each step's id stable, so historical sends stay attached to their step.
-  for (const [n, delay, subject, body] of STEPS) {
-    await pool.query(
-      `INSERT INTO sequence_steps (sequence_id, step_number, delay_days, subject, body)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (sequence_id, step_number)
-       DO UPDATE SET delay_days = $3, subject = $4, body = $5`,
-      [seqId, n, delay, subject, body]
-    );
-  }
-  // Retire the old steps 11-20. Safe to delete only because none of them have
-  // send history; if any did, this would need an `active` flag instead of a
-  // delete. Guarded so we never remove a retired step that was actually sent.
-  const orphanRefs = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM email_sends es
-     JOIN sequence_steps ss ON ss.id = es.step_id
-     WHERE ss.sequence_id = $1 AND ss.step_number > $2`,
-    [seqId, STEPS.length]
-  );
-  if (orphanRefs.rows[0].n > 0) {
-    console.error(`Refusing: ${orphanRefs.rows[0].n} send(s) reference steps beyond ${STEPS.length}. Needs an active flag, not a delete.`);
-    process.exit(1);
-  }
-  await pool.query(
-    'DELETE FROM sequence_steps WHERE sequence_id = $1 AND step_number > $2',
-    [seqId, STEPS.length]
-  );
-
-  const check = await pool.query(
-    'SELECT COUNT(*)::int AS n FROM sequence_steps WHERE sequence_id = $1', [seqId]);
-  console.log(`Doors sequence (id ${seqId}) rebuilt: ${check.rows[0].n} steps.`);
-  await pool.end();
-}
-
-run().catch(e => { console.error(e.message); process.exit(1); });
+rebuildSequence(SEQUENCE_NAME, STEPS)
+  .then(() => pool.end())
+  .catch(e => { console.error(e.message); process.exit(1); });
