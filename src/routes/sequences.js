@@ -619,14 +619,18 @@ router.get('/', requireAuth, async (req, res) => {
                   : `<span class="text-slate-400 text-xs">Inactive</span>`}
               </td>
               <td class="px-4 py-3">
-                <div class="flex gap-2 flex-wrap">
-                  <button onclick="editSequence(${s.id})" title="Edit the emails in this sequence: add, remove, reword, or reorder the steps" class="text-xs px-2.5 py-1 rounded-lg border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100 transition-colors">Edit Steps</button>
-                  <button onclick="enrollContacts(${s.id}, '${esc(s.name)}')" title="Hand-pick specific contacts to start receiving this sequence" class="text-xs px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-colors">Enroll</button>
-                  <button onclick="autoEnroll(${s.id}, '${esc(s.name)}', '${esc(s.audience_type)}')" title="Automatically enroll every send-ready lead that matches this audience (${esc(s.audience_type)})" class="text-xs px-2.5 py-1 rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 transition-colors">Auto-Enroll</button>
-                  <button onclick="previewSequence(${s.id})" title="Send yourself every email in this sequence right now, so you can review it before sending to leads" class="text-xs px-2.5 py-1 rounded-lg border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors">Preview</button>
-                  <button onclick="viewEnrollments(${s.id}, '${esc(s.name)}')" title="See who is enrolled and which step of the sequence each contact is on" class="text-xs px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">View</button>
-                  <button onclick="deleteSeq(${s.id})" title="Permanently delete this sequence" class="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Delete</button>
-                </div>
+                <details class="seq-actions relative inline-block">
+                  <summary class="cursor-pointer select-none text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 inline-flex items-center gap-1">Actions <span class="text-[9px]">&#9660;</span></summary>
+                  <div class="absolute right-0 mt-1 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-30 py-1 text-left">
+                    <button onclick="closeActions(this); editSequence(${s.id})" title="Add, remove, reword, or reorder the emails in this sequence" class="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-sky-50">Edit Steps</button>
+                    <button onclick="closeActions(this); enrollContacts(${s.id}, '${esc(s.name)}')" title="Hand-pick specific contacts to start receiving this sequence" class="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-emerald-50">Enroll contacts</button>
+                    <button onclick="closeActions(this); autoEnroll(${s.id}, '${esc(s.name)}', '${esc(s.audience_type)}')" title="Automatically enroll every send-ready ${esc(s.audience_type)} lead into this sequence" class="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-violet-50">Auto-enroll all matching leads</button>
+                    <button onclick="closeActions(this); previewSequence(${s.id})" title="Send yourself every email in this sequence now, to review before sending to leads" class="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-amber-50">Preview (send to me)</button>
+                    <button onclick="closeActions(this); viewEnrollments(${s.id}, '${esc(s.name)}')" title="See who is enrolled and which step each contact is on" class="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">View enrollments</button>
+                    <div class="border-t border-slate-100 my-1"></div>
+                    <button onclick="closeActions(this); deleteSeq(${s.id})" title="Permanently delete this sequence" class="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50">Delete sequence</button>
+                  </div>
+                </details>
               </td>
             </tr>`).join('')}
           </tbody>
@@ -791,7 +795,25 @@ router.get('/', requireAuth, async (req, res) => {
     </div>
   </div>
 
+  <style>
+    /* Hide the default disclosure triangle on the Actions dropdown */
+    details.seq-actions > summary { list-style: none; }
+    details.seq-actions > summary::-webkit-details-marker { display: none; }
+  </style>
   <script>
+  // Close the Actions dropdown a menu item belongs to (called before its action).
+  function closeActions(el) {
+    var d = el.closest('details');
+    if (d) d.removeAttribute('open');
+  }
+  // Clicking anywhere outside an open Actions menu closes it, and opening one
+  // closes any other that is open, so menus never stack or linger.
+  document.addEventListener('click', function (e) {
+    document.querySelectorAll('details.seq-actions[open]').forEach(function (d) {
+      if (!d.contains(e.target)) d.removeAttribute('open');
+    });
+  });
+
   var activeSeqId = null;
   var allLeads    = [];
 
