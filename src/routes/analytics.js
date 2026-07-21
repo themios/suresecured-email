@@ -188,6 +188,7 @@ router.get('/', requireAuth, async (req, res) => {
         <h2 class="font-semibold text-slate-700 mb-4 text-xs uppercase tracking-widest">Email Clicks, Forms &amp; Calls</h2>
         <div class="skeleton h-48 mb-2" id="eng-skeleton"></div>
         <canvas id="engagementChart" height="200" style="display:none"></canvas>
+        <div id="eng-no-data" class="hidden text-center text-slate-400 text-sm py-12">No email clicks, form submissions, or phone calls in this period yet.</div>
       </div>
     </div>
 
@@ -425,6 +426,23 @@ router.get('/', requireAuth, async (req, res) => {
     const cl = fillDates(clicks, 'date', 'clicks', days);
     const fo = fillDates(forms,  'date', 'forms',  days);
     const ca = fillDates(calls,  'date', 'calls',  days);
+
+    // This chart never cleared its skeleton (no showChart call), so it showed a
+    // gray placeholder forever. Clear it, and when there is nothing to plot show
+    // an empty state instead of blank axes.
+    const total = [].concat(cl.values, fo.values, ca.values)
+      .reduce(function (a, b) { return a + (parseFloat(b) || 0); }, 0);
+    const sk = document.getElementById('eng-skeleton'); if (sk) sk.style.display = 'none';
+    const canvas = document.getElementById('engagementChart');
+    const noData = document.getElementById('eng-no-data');
+    if (!total) {
+      if (canvas) canvas.style.display = 'none';
+      if (noData) noData.classList.remove('hidden');
+      return;
+    }
+    if (noData) noData.classList.add('hidden');
+    showChart('engagementChart', 'eng-skeleton');
+
     makeChart('engagementChart', {
       type: 'bar',
       data: {
