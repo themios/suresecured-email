@@ -191,13 +191,36 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
 
   const phoneDigits = phone.replace(/\D/g, '');
 
-  // Inline images: a paragraph that is exactly [[img:URL]] (optionally
-  // [[img:URL|alt text]]) renders as a centered, responsive image instead of a
-  // text paragraph. Lets sequence copy embed product/install photos without a
-  // schema change -- the marker lives in the step's body like any other line.
-  const IMG_RE = /^\[\[img:\s*(\S+?)(?:\s*\|\s*([^\]]+))?\]\]$/;
+  // Inline media tokens, each on its own paragraph, so sequence copy can embed
+  // photos and video without a schema change -- the marker lives in the step
+  // body like any other line.
+  //   [[img:URL]]            centered responsive image
+  //   [[img:URL|alt text]]   with alt text
+  //   [[video:YOUTUBE_URL]]  thumbnail + Watch button linking to the video
+  //                          (email can't play video inline, so it links out)
+  const IMG_RE   = /^\[\[img:\s*(\S+?)(?:\s*\|\s*([^\]]+))?\]\]$/;
+  const VIDEO_RE = /^\[\[video:\s*(\S+?)\]\]$/;
+  const ytId = (u) => (u.match(/(?:shorts\/|watch\?v=|youtu\.be\/|embed\/)([A-Za-z0-9_-]{11})/) || [])[1];
+
   const paragraphs = body.split(/\n\n+/).map(p => {
-    const m = p.trim().match(IMG_RE);
+    const trimmed = p.trim();
+
+    const vid = trimmed.match(VIDEO_RE);
+    if (vid) {
+      const id = ytId(vid[1]);
+      if (id) {
+        const watch = `https://www.youtube.com/watch?v=${id}`;
+        return `<p style="margin:0 0 18px 0;text-align:center">` +
+          `<a href="${watch}" style="text-decoration:none">` +
+          `<img src="https://img.youtube.com/vi/${id}/hqdefault.jpg" alt="Watch the demo" width="520" ` +
+          `style="width:100%;max-width:520px;height:auto;border-radius:6px;border:1px solid #d8d6d2"><br>` +
+          `<span style="display:inline-block;margin-top:12px;background:${accent_color};color:#ffffff;` +
+          `font-weight:700;font-size:14px;padding:11px 22px;border-radius:6px">&#9654;&nbsp; Watch the demo</span>` +
+          `</a></p>`;
+      }
+    }
+
+    const m = trimmed.match(IMG_RE);
     if (m) {
       const src = m[1].startsWith('//') ? `https:${m[1]}` : m[1];
       const alt = (m[2] || 'Sure Secured').replace(/"/g, '&quot;');
@@ -205,6 +228,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
         `<img src="${src}" alt="${alt}" width="520" ` +
         `style="width:100%;max-width:520px;height:auto;border-radius:6px;border:1px solid #d8d6d2"></p>`;
     }
+
     return `<p style="margin:0 0 18px 0;color:${primary_color};font-size:15px;line-height:1.75">` +
       p.split('\n').map(line =>
         line.replace(/(https?:\/\/[^\s<>"]+)/g, `<a href="$1" style="color:${accent_color};font-weight:600;text-decoration:underline">$1</a>`)

@@ -79,7 +79,11 @@ Most doors fail at the frame, not the lock. The wood splits, the strike plate te
 
 Our screen works differently. It is 316 marine grade stainless steel mesh in a triple interlock aluminum frame that connects at three points. There is no single weak spot that gives out and takes the rest with it.
 
-Want to see it take a beating? Reply and I will send you a short clip.
+Do not take my word for it. Here is one getting kicked and pried:
+
+[[video:https://www.youtube.com/shorts/z2JtbkNpPyA]]
+
+Have a specific door in mind? Reply with a photo and your ZIP and I will tell you what I would put on it.
 
 {salesperson_name}
 Sure Secured`],
