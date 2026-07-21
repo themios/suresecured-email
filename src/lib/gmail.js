@@ -181,10 +181,10 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
     accent_color  = '#E91111',
     bg_color      = '#EDEBE7',
     info_color    = '#CBDEE8',
-    name          = 'SureSecured',
+    name          = 'Sure Secured',
     phone         = '(747) 688-9992',
-    website       = 'suresecured.com',
-    address       = 'SureSecured, 1555 Simi Town Center Way, Simi Valley, CA 93065',
+    website       = 'SureSecured.com',
+    address       = 'Sure Secured, 1555 Simi Town Center Way, Simi Valley, CA 93065',
     cta_url       = 'https://suresecured.com/pages/request-a-quote',
     cta_label     = 'Request a Quote',
   } = brandConfig;
@@ -378,7 +378,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
   const pixelUrl    = `${trackerBase}/pixel/${pixelToken}`;
 
   const gmail          = google.gmail({ version: 'v1', auth: client });
-  const fromName       = vars.salesperson_name || `${brandConfig.name || 'SureSecured'} Team`;
+  const fromName       = vars.salesperson_name || `${brandConfig.name || 'Sure Secured'} Team`;
   const unsubscribeUrl = buildUnsubscribeUrl(to);
 
   // Load client SMTP config (DB takes priority over env vars) up front so we can

@@ -44,7 +44,7 @@ If it is easier, text a photo of the opening to (747) 688-9992.
 No pressure either way. I just do not want to send you things that do not fit what you actually need.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [2, 3,
 `The three openings we would check first`,
@@ -65,7 +65,7 @@ Here is the easiest way to find out which one matters most for your place. Text 
 Costs nothing and takes about two minutes.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [3, 4,
 `What a security screen can and cannot do`,
@@ -82,7 +82,7 @@ Our screen works differently. It is 316 marine grade stainless steel mesh in a t
 Want to see it take a beating? Reply and I will send you a short clip.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [4, 5,
 `Will it look like a jail?`,
@@ -99,7 +99,7 @@ The difference is this one does not tear when someone leans into it.
 If you want to see what it looks like on a real home, reply and I will send you a few photos from jobs around LA County.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [5, 6,
 `The morning after`,
@@ -114,7 +114,7 @@ That is the whole point. Not to scare anyone off your street. Just to make your 
 If you want, I will walk you through what we would put on your specific doors. Text a photo to (747) 688-9992 or reply here.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [6, 8,
 `What you are actually getting`,
@@ -133,7 +133,7 @@ Free shipping anywhere in the country. If you are in LA County, we install it fo
 Want the one page buyer checklist, so you know what to look for even if you shop around? Reply with the word checklist and I will send it.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [7, 9,
 `Screens vs bars vs an alarm`,
@@ -150,7 +150,7 @@ Honestly, a lot of homes are best with a screen on the main entry points and a c
 Reply with your biggest concern and I will give you a straight answer.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [8, 10,
 `What this actually costs`,
@@ -165,7 +165,7 @@ If paying all at once is not ideal, we have financing that breaks it into monthl
 The fastest way to a real number for your home is to text photos of your doors to (747) 688-9992. I will get you a range the same day.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [9, 11,
 `If it ever fails, that is on us`,
@@ -182,7 +182,7 @@ I am putting the risk on us on purpose. You should not have to gamble on whether
 Want to move forward, or just see the numbers? Reply here, or request a quote at suresecured.com/pages/request-a-quote.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 
   [10, 14,
 `Should I keep these coming?`,
@@ -203,7 +203,7 @@ Whatever you pick, I will respect it. If it is 5, you will not hear from me agai
 And if you ever want a straight answer on securing a door or window, you know where to find me. Text a photo to (747) 688-9992 anytime.
 
 {salesperson_name}
-SureSecured`],
+Sure Secured`],
 ];
 
 async function run() {
