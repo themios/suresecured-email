@@ -17,6 +17,48 @@ router.get('/api/sequences', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// NOTE: this MUST stay above the `/:id` route below. Express matches in
+// definition order, so `/api/sequences/report` otherwise binds to `:id`
+// = "report" and the handler runs WHERE id = 'report', which Postgres
+// rejects with "invalid input syntax for type integer". That was the 500.
+// Per-sequence deliverability report
+// Join path: sequences -> contact_enrollments -> email_sends
+// Scoped to req.user.client_id for multi-tenant isolation
+router.get('/api/sequences/report', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        seq.id            AS sequence_id,
+        seq.name          AS sequence_name,
+        COUNT(es.id)      AS total_sends,
+        COUNT(es.id) FILTER (WHERE es.open_count  > 0)   AS opened_sends,
+        COUNT(es.id) FILTER (WHERE es.click_count > 0)   AS clicked_sends,
+        COUNT(es.id) FILTER (WHERE es.bounced = TRUE)    AS bounced_sends,
+        ROUND(
+          100.0 * COUNT(es.id) FILTER (WHERE es.open_count  > 0)
+          / NULLIF(COUNT(es.id), 0), 1
+        ) AS open_rate_pct,
+        ROUND(
+          100.0 * COUNT(es.id) FILTER (WHERE es.click_count > 0)
+          / NULLIF(COUNT(es.id), 0), 1
+        ) AS click_rate_pct,
+        ROUND(
+          100.0 * COUNT(es.id) FILTER (WHERE es.bounced = TRUE)
+          / NULLIF(COUNT(es.id), 0), 1
+        ) AS bounce_rate_pct
+      FROM sequences seq
+      LEFT JOIN contact_enrollments ce ON ce.sequence_id = seq.id
+      LEFT JOIN email_sends es ON es.enrollment_id = ce.id
+      GROUP BY seq.id, seq.name
+      ORDER BY seq.created_at DESC
+    `);
+    res.json(rows);
+  } catch (err) {
+    console.error('Sequences report error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get one sequence with steps
 router.get('/api/sequences/:id', requireAuth, async (req, res) => {
   const [seq, steps] = await Promise.all([
@@ -222,44 +264,6 @@ router.get('/api/email-accounts', requireAuth, async (req, res) => {
   res.json(rows);
 });
 
-// Per-sequence deliverability report
-// Join path: sequences -> contact_enrollments -> email_sends
-// Scoped to req.user.client_id for multi-tenant isolation
-router.get('/api/sequences/report', requireAuth, async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT
-        seq.id            AS sequence_id,
-        seq.name          AS sequence_name,
-        COUNT(es.id)      AS total_sends,
-        COUNT(es.id) FILTER (WHERE es.open_count  > 0)   AS opened_sends,
-        COUNT(es.id) FILTER (WHERE es.click_count > 0)   AS clicked_sends,
-        COUNT(es.id) FILTER (WHERE es.bounced = TRUE)    AS bounced_sends,
-        ROUND(
-          100.0 * COUNT(es.id) FILTER (WHERE es.open_count  > 0)
-          / NULLIF(COUNT(es.id), 0), 1
-        ) AS open_rate_pct,
-        ROUND(
-          100.0 * COUNT(es.id) FILTER (WHERE es.click_count > 0)
-          / NULLIF(COUNT(es.id), 0), 1
-        ) AS click_rate_pct,
-        ROUND(
-          100.0 * COUNT(es.id) FILTER (WHERE es.bounced = TRUE)
-          / NULLIF(COUNT(es.id), 0), 1
-        ) AS bounce_rate_pct
-      FROM sequences seq
-      LEFT JOIN contact_enrollments ce ON ce.sequence_id = seq.id
-      LEFT JOIN email_sends es ON es.enrollment_id = ce.id
-      GROUP BY seq.id, seq.name
-      ORDER BY seq.created_at DESC
-    `);
-    res.json(rows);
-  } catch (err) {
-    console.error('Sequences report error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Contact list for enrollment - all leads with suppression check
 router.get('/api/leads/enrollable', requireAuth, async (req, res) => {
   const seqId = req.query.sequence_id;
@@ -462,34 +466,46 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
   };
 
   const { sendSequenceEmail } = require('../lib/gmail');
-  const results = [];
 
-  for (const step of steps) {
-    try {
-      const result = await sendSequenceEmail({
-        salespersonId: spId,
-        to:            email,
-        subject:       `[PREVIEW Step ${step.step_number}] ${step.subject}`,
-        body:          step.body,
-        vars,
-        enrollmentId:  null,
-        stepId:        step.id,
-        leadId:        null,
-        preview:       true,
-      });
-      if (result && result.ok === false) {
-        results.push({ step: step.step_number, ok: false, error: result.error || 'send returned not-ok' });
-      } else {
-        results.push({ step: step.step_number, ok: true });
-        await new Promise(r => setTimeout(r, 1500));
-      }
-    } catch (err) {
-      console.error(`Preview step ${step.step_number} failed:`, err.message);
-      results.push({ step: step.step_number, ok: false, error: err.message });
-    }
+  // Preview sends the FIRST step only, not the whole sequence.
+  //
+  // The old loop sent every step synchronously with a 1.5s sleep between each.
+  // Sequence 7 has 20 steps, so one Preview click meant ~20 real SMTP sends plus
+  // ~30s of sleeps inside a single HTTP request -- it blew Railway's gateway
+  // timeout (the 502) and, if it had finished, would have dumped 20 emails into
+  // the tester's inbox. One representative email is what a preview is for.
+  const step = steps[0];
+  let result;
+  try {
+    result = await sendSequenceEmail({
+      salespersonId: spId,
+      // clientId was NOT passed before, so getClientEmailConfig(undefined)
+      // returned null and preview never used the tenant's configured mailbox
+      // (the now-working IONOS SMTP). Pass it so preview sends the same way a
+      // real sequence send does.
+      clientId:      req.user.client_id,
+      to:            email,
+      subject:       `[PREVIEW Step ${step.step_number}] ${step.subject}`,
+      body:          step.body,
+      vars,
+      enrollmentId:  null,
+      stepId:        step.id,
+      leadId:        null,
+      preview:       true,
+    });
+  } catch (err) {
+    console.error(`Preview step ${step.step_number} failed:`, err.message);
+    return res.status(502).json({ ok: false, step: step.step_number, error: err.message });
   }
 
-  res.json({ ok: true, sent: results.filter(r => r.ok).length, total: steps.length, results });
+  if (result && result.ok === false) {
+    // A send that failed cleanly (auth, bounce, etc.) is a 200 carrying the
+    // reason -- the send path already recorded it, and the caller wants to show
+    // it, not treat it as a transport error.
+    return res.json({ ok: false, step: step.step_number, error: result.error || 'send returned not-ok', failureClass: result.failureClass });
+  }
+
+  res.json({ ok: true, sent: 1, total: steps.length, note: `Sent step ${step.step_number} of ${steps.length} to ${email}` });
 });
 
 // -- Sequences UI page ------------------------------------------------------
@@ -957,10 +973,10 @@ router.get('/', requireAuth, async (req, res) => {
   }
 
   async function previewSequence(seqId) {
-    var email = await showPrompt('Email address to send all sequence steps to:', '', 'Preview Sequence');
+    var email = await showPrompt('Send a test of step 1 to which email?', '', 'Preview Sequence');
     if (!email || !email.trim()) return;
     email = email.trim();
-    showToast('Sending preview emails… this may take a moment', 'info', 8000);
+    showToast('Sending preview…', 'info', 6000);
     fetch('/sequences/api/sequences/' + seqId + '/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -972,21 +988,7 @@ router.get('/', requireAuth, async (req, res) => {
         showToast('Preview failed: ' + (data.error || 'Unknown error'), 'error', 8000);
         return;
       }
-      if (data.sent === 0) {
-        // Build a useful message from the first failure
-        var firstErr = data.results && data.results.find(function(r) { return !r.ok; });
-        var reason = firstErr ? firstErr.error : 'no emails sent';
-        showToast('Preview sent 0 steps. Reason: ' + reason, 'error', 8000);
-        return;
-      }
-      var msg = 'Sent ' + data.sent + ' of ' + data.total + ' step(s) to ' + email;
-      if (data.sent < data.total) {
-        var failErr = data.results && data.results.find(function(r) { return !r.ok; });
-        msg += failErr ? ' — some failed: ' + failErr.error : ' — some failed';
-        showToast(msg, 'warn', 8000);
-      } else {
-        showToast(msg, 'success');
-      }
+      showToast(data.note || ('Sent a preview to ' + email), 'success');
     })
     .catch(function(e) { showToast('Request failed: ' + e.message, 'error'); });
   }
