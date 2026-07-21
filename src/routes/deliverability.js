@@ -185,7 +185,16 @@ router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) =
           <span class="text-xs font-medium px-2 py-1 rounded-full bg-red-50 text-red-700">${esc(copy.label)}</span>
         </td>
         <td class="px-4 py-3 text-xs text-slate-500 font-mono max-w-xs truncate" title="${esc(f.failure_reason || '')}">${esc(f.failure_reason || '—')}</td>
-        <td class="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">${f.when_failed ? new Date(f.when_failed).toLocaleString() : '—'}</td>
+        <td class="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">${
+          // Emit the raw UTC instant and let the browser format it in the
+          // VIEWER's timezone. Rendering the date server-side formatted it in
+          // Railway's timezone (UTC), which read as a "strange time" to anyone
+          // not on UTC. The <time datetime> is ISO so it degrades to a readable
+          // value even if the localizer script does not run.
+          f.when_failed
+            ? `<time datetime="${new Date(f.when_failed).toISOString()}" class="_localtime">${esc(new Date(f.when_failed).toISOString())}</time>`
+            : '—'
+        }</td>
       </tr>`;
     }).join('');
 
@@ -210,7 +219,21 @@ router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) =
             </tbody>
           </table>
         </div>
-      </div>`;
+      </div>
+      <script>
+        // Format each timestamp in the viewer's own timezone. The server emits
+        // UTC ISO strings; without this the table would show UTC to a Pacific
+        // user, which is the "strange time" this fixes.
+        for (const el of document.querySelectorAll('time._localtime')) {
+          const d = new Date(el.getAttribute('datetime'));
+          if (!isNaN(d)) {
+            el.textContent = d.toLocaleString(undefined, {
+              month: 'short', day: 'numeric', year: 'numeric',
+              hour: 'numeric', minute: '2-digit'
+            });
+          }
+        }
+      </script>`;
 
     res.send(shell('Undelivered', 'sequences', content, { user: req.user }));
   } catch (err) {
