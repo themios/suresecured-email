@@ -193,7 +193,7 @@ ${seoHead(origin)}
     </a>
     <nav class="nav-links">
       <a href="#how">How it works</a>
-      <a href="#deal">The deal</a>
+      <a href="#pricing">Pricing</a>
       <a href="/blog">Guides</a>
       <a href="/login" class="nav-signin">Client sign in</a>
       <a href="#apply" class="btn btn-small btn-ember">Get started</a>
@@ -315,13 +315,57 @@ ${seoHead(origin)}
   </section>
 
   <!-- DEAL -->
-  <section class="deal" id="deal">
+  <section class="pricing" id="pricing">
     <div class="wrap">
-      <div class="deal-card reveal">
-        <h2 class="section-title">The deal, plainly</h2>
-        <p>There's no monthly fee and nothing to buy. When a job closes because of this, we take a percentage of that sale. Typical structures start around 10% and improve the more jobs close in a month. You keep every dollar until then.</p>
-        <a href="#apply" class="btn btn-ink">Ask about your rate</a>
+      <h2 class="section-title reveal">Clear pricing. Pick how you want to work with us.</h2>
+      <p class="pricing-lede reveal">No long-term contract. No setup fee. Start with the one that fits, and change your mind later.</p>
+      <div class="tiers">
+
+        <div class="tier reveal">
+          <span class="tier-tag">Nothing to lose</span>
+          <h3>Pay as you close</h3>
+          <div class="tier-price"><span class="amt">$0</span><span class="per">/month</span></div>
+          <p class="tier-note">Plus a share of the jobs that close from your list, starting around 10%. Nothing sells, you owe nothing.</p>
+          <ul class="tier-list">
+            <li>We build and run the follow up</li>
+            <li>Your list cleaned and verified first</li>
+            <li>Replies routed straight to your team</li>
+            <li>No monthly fee, ever</li>
+          </ul>
+          <a href="#apply" class="btn btn-ink">Get my free list audit</a>
+        </div>
+
+        <div class="tier tier-featured reveal" style="--delay:80ms">
+          <span class="tier-tag">Most popular</span>
+          <h3>Managed</h3>
+          <div class="tier-price"><span class="amt">$499</span><span class="per">/month</span></div>
+          <p class="tier-note">We set it up, run it, and watch every send actually land. You just take the calls.</p>
+          <ul class="tier-list">
+            <li>Everything in Pay as you close</li>
+            <li>Email and text follow up</li>
+            <li>Delivery watched daily, so mail reaches the inbox</li>
+            <li>New leads captured and answered on their own</li>
+            <li>One flat price, no surprises</li>
+          </ul>
+          <a href="#apply" class="btn btn-ember">Get started</a>
+        </div>
+
+        <div class="tier reveal" style="--delay:160ms">
+          <span class="tier-tag">Coming soon</span>
+          <h3>Self-serve</h3>
+          <div class="tier-price"><span class="amt">$199</span><span class="per">/month</span></div>
+          <p class="tier-note">Run it yourself. The full platform, your own sending, our sequences and tools.</p>
+          <ul class="tier-list">
+            <li>The whole platform, in your hands</li>
+            <li>Unlimited contacts</li>
+            <li>Send from your own business inbox</li>
+            <li>You manage your own replies</li>
+          </ul>
+          <a href="#apply" class="btn btn-ink">Join the waitlist</a>
+        </div>
+
       </div>
+      <p class="pricing-foot reveal">Not sure which fits? Send your list and we will tell you honestly. <a href="#apply">Get the free audit &rarr;</a></p>
     </div>
   </section>
 
@@ -885,7 +929,33 @@ html.has-js .reveal.in-view{opacity:1;transform:translateY(0);}
   .apply-card{padding:32px 22px;}
   .deal-card{padding:36px 24px;}
   .nav-signin{display:none;}
+  .tier-featured{transform:none;}
 }
+
+/* Pricing */
+.pricing{background:var(--paper);padding:clamp(64px,9vw,112px) 0;}
+.pricing .section-title{text-align:center;}
+.pricing-lede{text-align:center;color:var(--ink-soft);max-width:52ch;margin:14px auto 0;font-size:1.05rem;line-height:1.6;}
+.tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:20px;max-width:1040px;margin:48px auto 0;align-items:stretch;}
+.tier{background:var(--paper-hi);border:1px solid var(--line);border-radius:18px;padding:32px 28px;display:flex;flex-direction:column;}
+.tier-featured{background:var(--ink);color:var(--paper-hi);border-color:var(--ink);box-shadow:0 26px 62px rgba(21,18,14,.30);transform:translateY(-8px);}
+.tier-tag{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--brass-dark);margin-bottom:16px;font-weight:600;}
+.tier-featured .tier-tag{color:var(--brass);}
+.tier h3{font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:1.85rem;margin:0 0 10px;line-height:1;}
+.tier-price{display:flex;align-items:baseline;gap:5px;margin-bottom:14px;}
+.tier-price .amt{font-family:'Big Shoulders Display',sans-serif;font-weight:900;font-size:3rem;line-height:1;letter-spacing:-.02em;}
+.tier-price .per{font-size:1rem;color:var(--ink-soft);font-weight:600;}
+.tier-featured .tier-price .per{color:rgba(250,246,234,.72);}
+.tier-note{font-size:.98rem;line-height:1.55;color:var(--ink-soft);margin:0 0 22px;}
+.tier-featured .tier-note{color:rgba(250,246,234,.84);}
+.tier-list{list-style:none;margin:0 0 26px;padding:0;display:flex;flex-direction:column;gap:11px;flex:1;}
+.tier-list li{position:relative;padding-left:26px;font-size:.96rem;line-height:1.45;}
+.tier-list li::before{content:"\\2713";position:absolute;left:0;top:0;color:var(--ember);font-weight:800;}
+.tier-featured .tier-list li::before{color:var(--brass);}
+.tier .btn{width:100%;justify-content:center;margin-top:auto;}
+.pricing-foot{text-align:center;color:var(--ink-soft);margin:34px auto 0;font-size:1rem;}
+.pricing-foot a{color:var(--ember);font-weight:700;text-decoration:none;}
+.pricing-foot a:hover{text-decoration:underline;}
 `;
 }
 
