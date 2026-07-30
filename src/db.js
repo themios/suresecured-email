@@ -134,6 +134,7 @@ const MIGRATION_FILES = [
   '016_delivery_feedback.sql',
   '017_step_active.sql',
   '018_tenant_unique_indexes.sql',
+  '019_audit_log.sql',
 ];
 
 async function runMigrations() {

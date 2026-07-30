@@ -5,6 +5,7 @@ const { requireRole } = require('../middleware/auth');
 const { requireAdminAuth } = require('../middleware/apiAuth');
 const { shell, ICONS, esc } = require('../lib/layout');
 const { createLlm, createAgent } = require('../lib/retell');
+const { logEvent, ipOf } = require('../lib/auditLog');
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -771,6 +772,10 @@ router.post('/salespeople/:id/portal-password', express.urlencoded({ extended: t
       [hash, req.params.id, req.user.client_id]
     );
     if (!rowCount) return res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Salesperson not found.'));
+    logEvent({
+      clientId: req.user.client_id, userId: req.user.id, actorEmail: req.user.email,
+      action: 'portal_password_set', targetType: 'salesperson', targetId: req.params.id, ip: ipOf(req),
+    });
     res.redirect('/admin?ok=1&msg=' + encodeURIComponent('Portal password set. Salesperson can now log in at /portal/login.'));
   } catch (err) {
     res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Failed to set portal password.'));
@@ -958,6 +963,10 @@ router.post('/clients/:id', express.urlencoded({ extended: true }), requirePlatf
         : [name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson), active === 'on', voice_extension, req.params.id, req.user.organization_id]
     );
     if (!rowCount) return res.status(404).send('Client not found');
+    logEvent({
+      userId: req.user.id, actorEmail: req.user.email, action: 'client_updated',
+      targetType: 'client', targetId: req.params.id, ip: ipOf(req),
+    });
     res.redirect('/admin/clients');
   } catch (err) {
     console.error('Update client error:', err);

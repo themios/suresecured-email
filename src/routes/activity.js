@@ -6,6 +6,7 @@ const { pool } = require('../db');
 const { requireAuth, requireTenantContext } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
 const { calculateCommission } = require('../lib/commissions');
+const { logEvent, ipOf } = require('../lib/auditLog');
 
 // Every drill-down here reads a tenant-owned table. Enforce identity + tenant
 // context once so no page can list another tenant's orders, commissions, calls,
@@ -57,6 +58,11 @@ router.post('/orders/:id/assign', express.urlencoded({ extended: false }), async
        VALUES ($1, $2, 'bonus', $3, 0, 0, $4)`,
       [salespersonId, order.client_id, orderId, bonus.amount]);
   }
+  logEvent({
+    clientId: order.client_id, userId: req.user.id, actorEmail: req.user.email,
+    action: 'order_assigned', targetType: 'order', targetId: orderId,
+    detail: { salespersonId, amount: Number(order.amount), commissionEarned: earned }, ip: ipOf(req),
+  });
   res.redirect('/orders');
 });
 

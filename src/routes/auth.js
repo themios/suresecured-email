@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { google } = require('googleapis');
 const { pool } = require('../db');
 const { signOAuthState, verifyOAuthState } = require('../lib/gmail');
+const { logEvent, ipOf } = require('../lib/auditLog');
 
 // Issue the app session cookie for an authenticated user row. Shared by the
 // password and Google login paths so both behave identically.
@@ -161,6 +162,7 @@ router.post(
       );
 
       if (result.rows.length === 0) {
+        logEvent({ actorEmail: email, action: 'login_failure', detail: { reason: 'unknown_email' }, ip: ipOf(req) });
         if (isJson) return res.status(401).json({ error: 'Invalid credentials' });
         return res.redirect('/login?error=1');
       }
@@ -168,11 +170,13 @@ router.post(
       const user = result.rows[0];
       const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) {
+        logEvent({ clientId: user.client_id, userId: user.id, actorEmail: email, action: 'login_failure', detail: { reason: 'bad_password' }, ip: ipOf(req) });
         if (isJson) return res.status(401).json({ error: 'Invalid credentials' });
         return res.redirect('/login?error=1');
       }
 
       issueSession(res, user);
+      logEvent({ clientId: user.client_id, userId: user.id, actorEmail: user.email, action: 'login_success', ip: ipOf(req) });
 
       if (isJson) return res.status(200).json({ role: user.role });
       return res.redirect('/dashboard');
@@ -257,6 +261,7 @@ router.get('/auth/google/callback', async (req, res) => {
     );
     if (result.rows.length > 0) {
       issueSession(res, result.rows[0]);
+      logEvent({ clientId: result.rows[0].client_id, userId: result.rows[0].id, actorEmail: email, action: 'login_success', detail: { via: 'google' }, ip: ipOf(req) });
       return res.redirect('/dashboard');
     }
 
@@ -266,6 +271,7 @@ router.get('/auth/google/callback', async (req, res) => {
     const provisioned = domain ? await provisionByDomain(email, domain) : null;
     if (provisioned) {
       issueSession(res, provisioned);
+      logEvent({ clientId: provisioned.client_id, userId: provisioned.id, actorEmail: email, action: 'login_success', detail: { via: 'google_autoprovision' }, ip: ipOf(req) });
       return res.redirect('/dashboard');
     }
     return res.redirect('/login?error=google_no_account');
