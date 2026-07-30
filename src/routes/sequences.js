@@ -449,6 +449,13 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
   const sp = spRows[0];
   if (!sp) return res.status(400).json({ error: 'Salesperson not found' });
 
+  const clientId = req.user.client_id;
+  // Load the tenant's saved branding so the preview matches real sends. Without
+  // this, sendSequenceEmail fell back to hardcoded default colors (red accent)
+  // and the preview never reflected the theme set in Settings > Theme.
+  const { rows: bcRows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
+  const brandConfig = bcRows[0]?.brand_config || {};
+
   const vars = {
     first_name: 'Preview',
     last_name:  'Recipient',
@@ -458,15 +465,14 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
     salesperson_email: sp.email || '',
     salesperson_phone: sp.phone || '',
     salesperson_title: sp.title || '',
-    company_name:    'SureSecured',
-    company_phone:   '(747) 688-9992',
-    company_website: 'suresecured.com',
-    company_address: 'Simi Valley, CA',
-    cta_url:         'https://suresecured.com/pages/request-a-quote',
+    company_name:    brandConfig.name    || 'Sure Secured',
+    company_phone:   brandConfig.phone   || '(747) 688-9992',
+    company_website: brandConfig.website || 'SureSecured.com',
+    company_address: brandConfig.address || 'Simi Valley, CA 93065',
+    cta_url:         brandConfig.cta_url || 'https://suresecured.com/pages/request-a-quote',
   };
 
   const { sendSequenceEmail } = require('../lib/gmail');
-  const clientId = req.user.client_id;
 
   // Preview sends EVERY step in the sequence to the given address, in the
   // BACKGROUND. We respond immediately and keep sending after the response, so
@@ -499,7 +505,7 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
           stepId:        step.id,
           leadId:        null,
           preview:       true,
-        });
+        }, brandConfig);
         if (r && r.ok === false) { failed++; console.warn(`[preview] step ${step.step_number} not sent: ${r.error}`); }
         else sent++;
       } catch (err) {
