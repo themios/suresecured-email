@@ -298,6 +298,7 @@ async function sendSequencesHandler(req, res) {
         ce.client_id,
         l.email            AS lead_email,
         l.phone            AS lead_phone,
+        l.consent_sms,
         l.first_name,
         l.last_name,
         l.city,
@@ -309,6 +310,7 @@ async function sendSequencesHandler(req, res) {
         s.phone            AS salesperson_phone,
         s.title            AS salesperson_title,
         c.brand_config,
+        c.telnyx_phone_number,
         COALESCE((SELECT SUM(es.open_count)  FROM email_sends es WHERE es.lead_id = l.id), 0) AS open_count,
         COALESCE((SELECT SUM(es.click_count) FROM email_sends es WHERE es.lead_id = l.id), 0) AS click_count
       FROM contact_enrollments ce
@@ -491,13 +493,31 @@ async function sendSequencesHandler(req, res) {
           continue;
         }
 
+        // TCPA: never text a lead who has not given prior express consent.
+        // This is not optional or a config toggle -- SMS marketing without
+        // consent carries per-message penalties. Pause rather than silently
+        // skip, so it surfaces as something to fix (get consent, or move this
+        // lead off the SMS-bearing sequence) rather than a silent no-op.
+        if (!row.consent_sms) {
+          await client.query(
+            `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'no_sms_consent' WHERE id = $1`,
+            [row.enrollment_id]
+          );
+          console.warn(`[cron] SMS step ${step.id} skipped — no consent_sms for lead ${row.lead_id}`);
+          skipped++;
+          continue;
+        }
+
         // Interpolate vars into body (same {{var}} substitution as email)
         let smsBody = step.body || '';
         for (const [k, v] of Object.entries(vars)) {
           smsBody = smsBody.replaceAll(`{${k}}`, v || '');
         }
 
-        const smsResult = await sendSms(row.lead_phone, smsBody);
+        // Per-tenant Telnyx number if the client has one configured, else the
+        // platform default. Mirrors the retell.js/telnyx.js voice pattern.
+        const fromNumber = row.telnyx_phone_number || process.env.TELNYX_PHONE_NUMBER;
+        const smsResult = await sendSms(row.lead_phone, smsBody, fromNumber);
         sendResult = smsResult;
 
         if (smsResult.ok) {
@@ -508,8 +528,19 @@ async function sendSequencesHandler(req, res) {
                 body, telnyx_message_id, status, sent_at)
              VALUES ($1,$2,$3,$4,'outbound',$5,$6,$7,$8,'sent',NOW())`,
             [row.enrollment_id, step.id, row.lead_id, row.client_id,
-             process.env.TELNYX_PHONE_NUMBER, row.lead_phone,
+             fromNumber, row.lead_phone,
              smsBody, smsResult.messageId]
+          );
+        } else {
+          // Record the failure the same way email failures are recorded, so
+          // an operator can see a broken SMS send instead of silence.
+          await client.query(
+            `INSERT INTO sms_messages
+               (enrollment_id, step_id, lead_id, client_id, direction, from_number, to_number,
+                body, status, error_reason, sent_at)
+             VALUES ($1,$2,$3,$4,'outbound',$5,$6,$7,'failed',$8,NOW())`,
+            [row.enrollment_id, step.id, row.lead_id, row.client_id,
+             fromNumber, row.lead_phone, smsBody, String(smsResult.error || '').slice(0, 500)]
           );
         }
       } else {

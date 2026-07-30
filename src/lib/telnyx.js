@@ -36,11 +36,13 @@ function telnyxRequest(method, path, body) {
  *
  * @param {string} to   - Recipient E.164 number e.g. '+13125550001'
  * @param {string} body - SMS message text
+ * @param {string} [from] - Sending number override (per-tenant Telnyx number).
+ *   Falls back to the platform default TELNYX_PHONE_NUMBER if not given.
  * @returns {{ ok: boolean, messageId?: string, error?: string }}
  */
-async function sendSms(to, body) {
+async function sendSms(to, body, from) {
   const result = await telnyxRequest('POST', '/messages', {
-    from: process.env.TELNYX_PHONE_NUMBER,
+    from: from || process.env.TELNYX_PHONE_NUMBER,
     to,
     text: body,
   });
