@@ -32,9 +32,16 @@ async function emailAuditCopy({ to, businessName, audit, origin }) {
   const sender = await platformSender();
   if (!sender) { console.warn('[marketing] no connected mailbox; skipping audit email'); return; }
   const { subject, html, text } = renderAuditEmail(audit, { businessName, origin });
+  // Platform identity (SalesWyze), configurable by env. PLATFORM_FROM_EMAIL is
+  // used as the From (sendAs) once that mailbox is connected or verified as a
+  // Send-As alias; until then it degrades to the connected mailbox but replies
+  // still route to support@saleswyze.com.
+  const fromName = process.env.PLATFORM_FROM_NAME || 'SalesWyze';
+  const fromEmail = process.env.PLATFORM_FROM_EMAIL || 'support@saleswyze.com';
   await sendDirectEmail({
-    fromName: 'Sure Secured',
-    replyTo: 'sales@suresecured.com',
+    fromName,
+    sendAs: process.env.PLATFORM_FROM_EMAIL || undefined,
+    replyTo: fromEmail,
     to,
     subject,
     htmlBody: html,

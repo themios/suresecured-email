@@ -917,19 +917,27 @@ async function checkForRepliesByAddress(salespersonId, leadEmail, afterDate) {
  * Send a direct (non-sequence) email via IONOS SMTP.
  * Used by the lead CRM reply composer.
  */
-async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, salespersonId, clientId }) {
+async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, salespersonId, clientId, sendAs }) {
   // Try Gmail OAuth first if a salesperson ID is provided
   if (salespersonId) {
     const authed = await getAuthedClient(salespersonId);
     if (authed) {
-      // Use configured from_email (e.g. sales@suresecured.com Send-As alias) if set
+      // Precedence for the From address:
+      //   1. sendAs   — an explicit platform identity (e.g. support@saleswyze.com).
+      //      Only honored by callers that pass it (the platform audit email), so
+      //      per-lead replies are unaffected. Gmail requires it to be the account
+      //      itself or a verified Send-As alias, else the API returns 403.
+      //   2. client_email_config.from_email — the tenant's configured alias.
+      //   3. the connected account's own address.
       let effectiveFrom = authed.account.email;
       let effectiveName = fromName || 'Sales';
       if (clientId) {
         const cfg = await getClientEmailConfig(clientId);
         if (cfg?.from_email) { effectiveFrom = cfg.from_email; effectiveName = cfg.from_name || effectiveName; }
       }
-      const raw = await buildRawMessage({ fromName: effectiveName, fromAddress: effectiveFrom, to, subject, textBody, htmlBody });
+      if (sendAs) { effectiveFrom = sendAs; effectiveName = fromName || effectiveName; }
+      const headers = replyTo ? { 'Reply-To': replyTo } : undefined;
+      const raw = await buildRawMessage({ fromName: effectiveName, fromAddress: effectiveFrom, to, subject, textBody, htmlBody, headers });
       const gmailApi = google.gmail({ version: 'v1', auth: authed.client });
       const sent = await gmailApi.users.messages.send({ userId: 'me', requestBody: { raw } });
       return { ok: true, via: 'gmail', threadId: sent.data.threadId, messageId: sent.data.id };

@@ -133,6 +133,12 @@ function escHtml(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// Platform sender identity for the CAN-SPAM footer. Configurable by env so the
+// SalesWyze brand, address, and support inbox can be set without a code change.
+const platformName  = process.env.PLATFORM_FROM_NAME || 'SalesWyze';
+const platformEmail = process.env.PLATFORM_FROM_EMAIL || 'support@saleswyze.com';
+const platformAddr  = process.env.PLATFORM_ADDRESS || '1555 Simi Town Center Way, Simi Valley, CA 93065';
+
 function renderAuditEmail(audit, { businessName, origin } = {}) {
   const { label, count, deal, rows, narrative, usedTheirValue } = audit;
   const who = businessName && businessName.trim() ? businessName.trim() : 'Your list';
@@ -172,7 +178,7 @@ function renderAuditEmail(audit, { businessName, origin } = {}) {
     <p style="margin:0 0 6px;">We can set this up for you. It runs from $199 a month plus a one-time $999 setup, or fully managed at $499 a month.</p>
     <p style="margin:0 0 20px;">Want to talk it through? Just reply to this email, or call or text (747) 688-9992.</p>
     <hr style="border:none;border-top:1px solid #e7ddd0;margin:24px 0;">
-    <p style="font-size:13px;color:#8a7960;margin:0;">Sure Secured, 1555 Simi Town Center Way, Simi Valley, CA 93065<br>sales@suresecured.com</p>
+    <p style="font-size:13px;color:#8a7960;margin:0;">${escHtml(platformName)}, ${escHtml(platformAddr)}<br>${escHtml(platformEmail)}</p>
   </div>
 </div>`;
 
@@ -191,7 +197,7 @@ function renderAuditEmail(audit, { businessName, origin } = {}) {
     'It runs from $199 a month plus a one-time $999 setup, or fully managed at $499 a month.',
     '',
     'Reply to this email, or call or text (747) 688-9992.',
-    'Sure Secured, 1555 Simi Town Center Way, Simi Valley, CA 93065 | sales@suresecured.com',
+    `${platformName}, ${platformAddr} | ${platformEmail}`,
   ].join('\n');
 
   return { subject, html, text };
