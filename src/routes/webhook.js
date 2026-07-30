@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { pool } = require('../db');
 const { calculateCommission } = require('../lib/commissions');
 const { resolveSalespersonForOrder, logCommissionEvent } = require('../lib/attribution');
+const { constructWebhookEvent } = require('../lib/stripe');
 
 // Verify the request actually came from Shopify
 function verifyShopifyWebhook(req) {
@@ -160,6 +161,88 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
   } catch (err) {
     console.error('Webhook error:', err);
     res.status(500).send('Error');
+  }
+});
+
+/**
+ * POST /webhooks/stripe
+ * Mirrors the tenant's subscription state from Stripe -- this table is a
+ * read-through cache of Stripe's own state, never a second source of truth.
+ * All four subscribed events resolve the tenant from metadata.client_id set
+ * at checkout-session creation time (see lib/stripe.js createCheckoutSession),
+ * which survives regardless of which object Stripe sends first.
+ */
+router.post('/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  let event;
+  try {
+    event = constructWebhookEvent(req.body, req.headers['stripe-signature']);
+  } catch (err) {
+    console.error('[webhook/stripe] signature verification failed:', err.message);
+    return res.status(400).send('Invalid signature');
+  }
+
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        const clientId = parseInt(session.client_reference_id || session.metadata?.client_id, 10);
+        const plan = session.metadata?.plan || null;
+        if (clientId) {
+          await pool.query(
+            `INSERT INTO client_subscriptions (client_id, plan, status, stripe_customer_id, stripe_subscription_id, setup_fee_paid, updated_at)
+             VALUES ($1, $2, 'active', $3, $4, true, NOW())
+             ON CONFLICT (client_id) DO UPDATE SET
+               plan = EXCLUDED.plan, status = 'active',
+               stripe_customer_id = EXCLUDED.stripe_customer_id,
+               stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+               setup_fee_paid = true, updated_at = NOW()`,
+            [clientId, plan, session.customer, session.subscription]
+          );
+        }
+        break;
+      }
+      case 'customer.subscription.updated': {
+        const sub = event.data.object;
+        const clientId = parseInt(sub.metadata?.client_id, 10);
+        if (clientId) {
+          await pool.query(
+            `UPDATE client_subscriptions
+             SET status = $2, current_period_end = to_timestamp($3), updated_at = NOW()
+             WHERE client_id = $1`,
+            [clientId, sub.status, sub.current_period_end]
+          );
+        }
+        break;
+      }
+      case 'customer.subscription.deleted': {
+        const sub = event.data.object;
+        const clientId = parseInt(sub.metadata?.client_id, 10);
+        if (clientId) {
+          await pool.query(
+            `UPDATE client_subscriptions SET status = 'canceled', updated_at = NOW() WHERE client_id = $1`,
+            [clientId]
+          );
+        }
+        break;
+      }
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object;
+        const customerId = invoice.customer;
+        await pool.query(
+          `UPDATE client_subscriptions SET status = 'past_due', updated_at = NOW() WHERE stripe_customer_id = $1`,
+          [customerId]
+        );
+        break;
+      }
+      default:
+        break; // ignore events we don't act on
+    }
+    res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('[webhook/stripe] handler error:', err.message);
+    // Still 200: Stripe retries on non-2xx, and a DB hiccup here should not
+    // cause Stripe to hammer the endpoint. The event is logged for follow-up.
+    res.status(200).json({ received: true, error: err.message });
   }
 });
 

@@ -483,10 +483,9 @@ router.get('/email-sources/gmail/callback', requireAuth, async (req, res) => {
 // ─── Business Info ────────────────────────────────────────────────────────────
 router.get('/business', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { rows } = await pool.query('SELECT brand_config, integration_settings, telnyx_phone_number FROM clients WHERE id = $1', [clientId]);
+  const { rows } = await pool.query('SELECT brand_config, integration_settings FROM clients WHERE id = $1', [clientId]);
   const bc = rows[0]?.brand_config || {};
   const isg = rows[0]?.integration_settings || {};
-  const telnyxNumber = rows[0]?.telnyx_phone_number || '';
   const { rows: authDomains } = await pool.query(
     'SELECT id, domain, default_role FROM client_auth_domains WHERE client_id = $1 ORDER BY domain', [clientId]
   );
@@ -578,17 +577,6 @@ router.get('/business', requireAuth, async (req, res) => {
           This links incoming orders to your account so sales and commissions get recorded. Required for commission tracking.
         </p>
       </div>
-
-      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Text Messaging (SMS)</h2>
-      <div>
-        <label class="block text-xs font-medium text-slate-500 mb-1">Telnyx phone number</label>
-        <input name="telnyx_phone_number" value="${esc(telnyxNumber)}" placeholder="+15551234567"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
-        <p class="text-xs text-slate-400 mt-1">
-          E.164 format (e.g. +15551234567). SMS steps in your sequences send from this number instead of the platform default.
-          Requires 10DLC Brand + Campaign registration in the Telnyx portal before outbound SMS will deliver to US numbers (3-7 day approval) — inbound replies and STOP/HELP work immediately.
-        </p>
-      </div>
     </div>
 
     <div class="flex justify-end mt-4">
@@ -661,29 +649,7 @@ router.post('/business', requireAuth, async (req, res) => {
   const existing = rows[0]?.brand_config || {};
   const existingIntegrations = rows[0]?.integration_settings || {};
 
-  const { name, website, phone, support_email, address_street, address_city, address_state, address_zip, address, cta_label, cta_url, shopify_domain, telnyx_phone_number } = req.body;
-
-  // Loose E.164 check: leading +, 8-15 digits. Reject rather than silently
-  // save something SMS sending would fail on with a confusing Telnyx error.
-  const cleanTelnyx = String(telnyx_phone_number || '').trim();
-  if (cleanTelnyx && !/^\+[1-9]\d{7,14}$/.test(cleanTelnyx)) {
-    return res.redirect('/settings/business?ok=0&msg=' + encodeURIComponent('Telnyx phone number must be in E.164 format, e.g. +15551234567.'));
-  }
-  if (cleanTelnyx) {
-    // telnyx_phone_number has no DB-level unique constraint, and both the SMS
-    // and voice (retell.js) inbound webhooks resolve the tenant by looking it
-    // up with no tiebreaker beyond LIMIT 1 -- so two tenants sharing a number
-    // would non-deterministically misroute each other's inbound messages/calls.
-    // This form is the only place a number gets assigned, so reject a collision
-    // here rather than let it happen silently.
-    const { rows: collision } = await pool.query(
-      'SELECT id FROM clients WHERE telnyx_phone_number = $1 AND active = true AND id != $2',
-      [cleanTelnyx, clientId]
-    );
-    if (collision.length) {
-      return res.redirect('/settings/business?ok=0&msg=' + encodeURIComponent('That Telnyx number is already assigned to another account.'));
-    }
-  }
+  const { name, website, phone, support_email, address_street, address_city, address_state, address_zip, address, cta_label, cta_url, shopify_domain } = req.body;
 
   const footerAddress = address?.trim() ||
     [name, [address_street, address_city, address_state, address_zip].filter(Boolean).join(', ')].filter(Boolean).join(' • ');
@@ -705,8 +671,8 @@ router.post('/business', requireAuth, async (req, res) => {
   const updatedIntegrations = { ...existingIntegrations, shopify_domain: normalizedDomain };
 
   await pool.query(
-    'UPDATE clients SET brand_config = $1, integration_settings = $2, telnyx_phone_number = $3 WHERE id = $4',
-    [JSON.stringify(updated), JSON.stringify(updatedIntegrations), cleanTelnyx || null, clientId]
+    'UPDATE clients SET brand_config = $1, integration_settings = $2 WHERE id = $3',
+    [JSON.stringify(updated), JSON.stringify(updatedIntegrations), clientId]
   );
   res.redirect('/settings/business?ok=1&msg=Business+info+saved.');
 });
@@ -1068,39 +1034,34 @@ router.post('/email/test-imap', requireAuth, async (req, res) => {
 // ─── Phone & SMS ──────────────────────────────────────────────────────────────
 router.get('/phone', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
+  const { rows } = await pool.query('SELECT brand_config, telnyx_phone_number FROM clients WHERE id = $1', [clientId]);
   const bc = rows[0]?.brand_config || {};
+  const telnyxNumber = rows[0]?.telnyx_phone_number || '';
 
   const body = `
   <form method="POST" action="/settings/phone">
     <div class="bg-white rounded-xl shadow-sm p-6 space-y-4">
-      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">SMS Provider (Telnyx)</h2>
-      <p class="text-xs text-slate-400">Used for outbound SMS sequences. Get your credentials from telnyx.com.</p>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">SMS &amp; Voice (Telnyx)</h2>
+      <p class="text-xs text-slate-400">Your own number for outbound SMS sequences and voice. SMS steps in your sequences send from this number instead of the platform default. Requires 10DLC Brand + Campaign registration in the Telnyx portal before outbound SMS delivers to US numbers (3-7 day approval) — inbound replies and STOP/HELP work immediately.</p>
       <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">Telnyx API Key</label>
-          <input name="telnyx_api_key" value="${esc(bc.telnyx_api_key)}" placeholder="KEY0..."
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
-        </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 mb-1">Telnyx Phone Number</label>
-          <input name="telnyx_phone" value="${esc(bc.telnyx_phone)}" placeholder="+17476889992"
+          <input name="telnyx_phone_number" value="${esc(telnyxNumber)}" placeholder="+17476889992"
             class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
-        </div>
-      </div>
-
-      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Business Phone</h2>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">Primary Phone (shown in emails)</label>
-          <input name="phone" value="${esc(bc.phone)}" placeholder="(747) 688-9992"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <p class="text-xs text-slate-400 mt-1">E.164 format, e.g. +15551234567.</p>
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-500 mb-1">10DLC Campaign ID (optional)</label>
           <input name="telnyx_campaign_id" value="${esc(bc.telnyx_campaign_id)}" placeholder="Campaign registered ID"
             class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
         </div>
+      </div>
+
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Business Phone</h2>
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Primary Phone (shown in emails)</label>
+        <input name="phone" value="${esc(bc.phone)}" placeholder="(747) 688-9992"
+          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
       </div>
     </div>
     <div class="flex justify-end mt-4">
@@ -1113,11 +1074,37 @@ router.get('/phone', requireAuth, async (req, res) => {
 
 router.post('/phone', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
+  const { phone, telnyx_phone_number, telnyx_campaign_id } = req.body;
+
+  // Loose E.164 check: leading +, 8-15 digits. Reject rather than silently
+  // save something SMS sending would fail on with a confusing Telnyx error.
+  const cleanTelnyx = String(telnyx_phone_number || '').trim();
+  if (cleanTelnyx && !/^\+[1-9]\d{7,14}$/.test(cleanTelnyx)) {
+    return res.redirect('/settings/phone?ok=0&msg=' + encodeURIComponent('Telnyx phone number must be in E.164 format, e.g. +15551234567.'));
+  }
+  if (cleanTelnyx) {
+    // telnyx_phone_number has no DB-level unique constraint, and both the SMS
+    // and voice (retell.js) inbound webhooks resolve the tenant by looking it
+    // up with no tiebreaker beyond LIMIT 1 -- so two tenants sharing a number
+    // would non-deterministically misroute each other's inbound messages/calls.
+    // This form is the only place a number gets assigned, so reject a collision
+    // here rather than let it happen silently.
+    const { rows: collision } = await pool.query(
+      'SELECT id FROM clients WHERE telnyx_phone_number = $1 AND active = true AND id != $2',
+      [cleanTelnyx, clientId]
+    );
+    if (collision.length) {
+      return res.redirect('/settings/phone?ok=0&msg=' + encodeURIComponent('That Telnyx number is already assigned to another account.'));
+    }
+  }
+
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const existing = rows[0]?.brand_config || {};
-  const { phone, telnyx_api_key, telnyx_phone, telnyx_campaign_id } = req.body;
-  const updated = { ...existing, phone, telnyx_api_key, telnyx_phone, telnyx_campaign_id };
-  await pool.query('UPDATE clients SET brand_config = $1 WHERE id = $2', [JSON.stringify(updated), clientId]);
+  const updated = { ...existing, phone, telnyx_campaign_id };
+  await pool.query(
+    'UPDATE clients SET brand_config = $1, telnyx_phone_number = $2 WHERE id = $3',
+    [JSON.stringify(updated), cleanTelnyx || null, clientId]
+  );
   res.redirect('/settings/phone?ok=1&msg=Phone+%26+SMS+settings+saved.');
 });
 

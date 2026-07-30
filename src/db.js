@@ -137,6 +137,7 @@ const MIGRATION_FILES = [
   '019_audit_log.sql',
   '020_seed_canary.sql',
   '021_sms_delivery_consent.sql',
+  '022_billing.sql',
 ];
 
 async function runMigrations() {

@@ -24,6 +24,7 @@ const gmailOAuthRouter = require('./routes/gmail-oauth');
 const cronRouter        = require('./routes/cron');
 const unsubscribeRouter = require('./routes/unsubscribe');
 const settingsRouter    = require('./routes/settings');
+const billingRouter     = require('./routes/billing');
 const retellRouter      = require('./routes/retell');
 const telnyxRouter      = require('./routes/telnyx');
 const pixelRouter       = require('./routes/pixel');
@@ -118,6 +119,7 @@ app.use('/unsubscribe', unsubscribeRouter);
 
 // Tenant settings
 app.use('/settings', settingsRouter);
+app.use('/billing', billingRouter);
 
 // Delivery feedback: /api/sending-health (banner) + /undelivered (list).
 // Mounted at root because it owns both an /api path and a top-level page.
