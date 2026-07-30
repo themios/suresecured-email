@@ -24,10 +24,12 @@ router.post('/form-submission', requireClientApiKey, async (req, res) => {
   const safeLeadId = toInt(lead_id);
 
   try {
+    // req.apiClientId is the tenant behind the API key (null only for the shared
+    // platform key). Stamp it so the submission is owned by the right tenant.
     await pool.query(
-      `INSERT INTO form_submissions (token, lead_id, salesperson_id, form_type, submitter_email, submitter_name, raw_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [safeToken, safeLeadId, safeSalespersonId, form_type || 'quote', submitter_email || null, submitter_name || null, raw_data || {}]
+      `INSERT INTO form_submissions (token, lead_id, salesperson_id, form_type, submitter_email, submitter_name, raw_data, client_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [safeToken, safeLeadId, safeSalespersonId, form_type || 'quote', submitter_email || null, submitter_name || null, raw_data || {}, req.apiClientId]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -38,6 +40,8 @@ router.post('/form-submission', requireClientApiKey, async (req, res) => {
 
 // Generate tracking links for a batch of leads
 router.post('/generate-links', requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
+  if (!cid) return res.status(403).json({ error: 'No tenant context' });
   const { leads } = req.body;
   if (!Array.isArray(leads) || leads.length === 0) {
     return res.status(400).json({ error: 'leads array required' });
@@ -48,8 +52,8 @@ router.post('/generate-links', requireAdminAuth, async (req, res) => {
     for (const lead of leads) {
       const token = uuidv4();
       await pool.query(
-        `INSERT INTO tracking_tokens (token, lead_id, salesperson_id, campaign_id, email_step, destination_url)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO tracking_tokens (token, lead_id, salesperson_id, campaign_id, email_step, destination_url, client_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           token,
           lead.lead_id,
@@ -57,6 +61,7 @@ router.post('/generate-links', requireAdminAuth, async (req, res) => {
           lead.campaign_id || null,
           lead.email_step || 1,
           lead.destination_url || process.env.SITE_URL,
+          cid,
         ]
       );
       results.push({
@@ -73,11 +78,13 @@ router.post('/generate-links', requireAdminAuth, async (req, res) => {
 });
 
 router.post('/salespeople', requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
+  if (!cid) return res.status(403).json({ error: 'No tenant context' });
   const { name, email, commission_rate } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO salespeople (name, email, commission_rate) VALUES ($1, $2, $3) RETURNING *`,
-      [name, email, commission_rate || 100]
+      `INSERT INTO salespeople (name, email, commission_rate, client_id) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [name, email, commission_rate || 100, cid]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -87,12 +94,14 @@ router.post('/salespeople', requireAdminAuth, async (req, res) => {
 });
 
 router.post('/leads', requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
+  if (!cid) return res.status(403).json({ error: 'No tenant context' });
   const { email, first_name, last_name, phone, city, audience_type, product_interest, salesperson_id } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO leads (email, first_name, last_name, phone, city, audience_type, product_interest, salesperson_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [email, first_name, last_name, phone, city, audience_type || 'B2C', product_interest, salesperson_id]
+      `INSERT INTO leads (email, first_name, last_name, phone, city, audience_type, product_interest, salesperson_id, client_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [email, first_name, last_name, phone, city, audience_type || 'B2C', product_interest, salesperson_id, cid]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -102,6 +111,8 @@ router.post('/leads', requireAdminAuth, async (req, res) => {
 });
 
 router.get('/stats', requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
+  if (!cid) return res.status(403).json({ error: 'No tenant context' });
   try {
     const [spStats, recentOrders, recentForms] = await Promise.all([
       pool.query(`
@@ -122,22 +133,24 @@ router.get('/stats', requireAdminAuth, async (req, res) => {
         LEFT JOIN form_submissions fs ON fs.salesperson_id = s.id
         LEFT JOIN orders o ON o.salesperson_id = s.id
         LEFT JOIN commissions cm ON cm.salesperson_id = s.id
-        WHERE s.active = true
+        WHERE s.active = true AND s.client_id = $1
         GROUP BY s.id, s.name, s.email, s.commission_rate
         ORDER BY total_revenue DESC
-      `),
+      `, [cid]),
       pool.query(`
         SELECT o.*, s.name AS salesperson_name
         FROM orders o
         LEFT JOIN salespeople s ON s.id = o.salesperson_id
+        WHERE o.client_id = $1
         ORDER BY o.ordered_at DESC LIMIT 20
-      `),
+      `, [cid]),
       pool.query(`
         SELECT fs.*, s.name AS salesperson_name
         FROM form_submissions fs
         LEFT JOIN salespeople s ON s.id = fs.salesperson_id
+        WHERE fs.client_id = $1
         ORDER BY fs.submitted_at DESC LIMIT 20
-      `),
+      `, [cid]),
     ]);
 
     res.json({
@@ -229,6 +242,7 @@ router.put('/landing-page/:id', requireAdminAuth, async (req, res) => {
 // ─── Suppression List ──────────────────────────────────────────────────────
 
 router.post('/suppression', requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
   const { emails, reason } = req.body;
   if (!Array.isArray(emails) || emails.length === 0) {
     return res.status(400).json({ error: 'emails array required' });
@@ -241,9 +255,10 @@ router.post('/suppression', requireAdminAuth, async (req, res) => {
       const clean = (email || '').trim().toLowerCase();
       if (!clean || !clean.includes('@')) { skipped++; continue; }
       try {
+        // Global suppression list, tagged with the acting tenant.
         await pool.query(
-          `INSERT INTO suppression_list (email, reason) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING`,
-          [clean, reason || 'existing_customer']
+          `INSERT INTO suppression_list (email, reason, client_id) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`,
+          [clean, reason || 'existing_customer', cid]
         );
         added++;
       } catch { skipped++; }
@@ -270,13 +285,16 @@ router.get('/suppression/check', requireAdminAuth, async (req, res) => {
 });
 
 router.put('/salespeople/:id/tracking-number', requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
+  if (!cid) return res.status(403).json({ error: 'No tenant context' });
   const { tracking_phone_number, callrail_number_id } = req.body;
   try {
     const result = await pool.query(
       `UPDATE salespeople SET tracking_phone_number = $1, callrail_number_id = $2
-       WHERE id = $3 RETURNING id, name, email, tracking_phone_number`,
-      [tracking_phone_number, callrail_number_id || null, req.params.id]
+       WHERE id = $3 AND client_id = $4 RETURNING id, name, email, tracking_phone_number`,
+      [tracking_phone_number, callrail_number_id || null, req.params.id, cid]
     );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });

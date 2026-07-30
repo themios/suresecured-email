@@ -1,11 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireTenantContext } = require('../middleware/auth');
 const { shell, navHtml } = require('../lib/layout');
 
-// Data endpoint — returns all chart data as JSON
-router.get('/data', requireAuth, async (req, res) => {
+// Data endpoint — returns all chart data as JSON.
+// Every query is scoped to req.user.client_id ($1 in all of them) so one tenant
+// can never see another's revenue, leads, or reps. requireTenantContext
+// guarantees client_id is present before we get here.
+router.get('/data', requireAuth, requireTenantContext, async (req, res) => {
+  const cid = req.user.client_id;
   const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
   const spFilter = req.query.sp ? parseInt(req.query.sp, 10) : null;
   if (req.query.sp && Number.isNaN(spFilter)) {
@@ -13,12 +17,11 @@ router.get('/data', requireAuth, async (req, res) => {
   }
 
   try {
-    const spClause = spFilter ? 'AND salesperson_id = $2' : '';
-    const spClauseS = spFilter ? 'AND s.id = $2' : '';
-    const spClauseL = spFilter ? 'AND l.salesperson_id = $2' : '';
-    const dayParam = [days];
-    const daySpParam = spFilter ? [days, spFilter] : [days];
-    const monthOnlyParam = spFilter ? [spFilter] : [];
+    // Time-series params: client_id=$1, days=$2, optional salesperson=$3.
+    const tsParams  = spFilter ? [cid, days, spFilter] : [cid, days];
+    const tsSp      = spFilter ? 'AND salesperson_id = $3' : '';
+    // Month/no-days params: client_id=$1, optional salesperson=$2.
+    const cidParams = spFilter ? [cid, spFilter] : [cid];
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
 
@@ -37,27 +40,31 @@ router.get('/data', requireAuth, async (req, res) => {
 
       pool.query(`
         SELECT DATE(ordered_at) AS date, COALESCE(SUM(amount),0) AS revenue
-        FROM orders WHERE ordered_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
+        FROM orders
+        WHERE client_id = $1 AND ordered_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}
         GROUP BY DATE(ordered_at) ORDER BY date
-      `, daySpParam),
+      `, tsParams),
 
       pool.query(`
         SELECT DATE(clicked_at) AS date, COUNT(*) AS clicks
-        FROM clicks WHERE clicked_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
+        FROM clicks
+        WHERE client_id = $1 AND clicked_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}
         GROUP BY DATE(clicked_at) ORDER BY date
-      `, daySpParam),
+      `, tsParams),
 
       pool.query(`
         SELECT DATE(called_at) AS date, COUNT(*) AS calls
-        FROM phone_calls WHERE called_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
+        FROM phone_calls
+        WHERE client_id = $1 AND called_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}
         GROUP BY DATE(called_at) ORDER BY date
-      `, daySpParam),
+      `, tsParams),
 
       pool.query(`
         SELECT DATE(submitted_at) AS date, COUNT(*) AS forms
-        FROM form_submissions WHERE submitted_at >= NOW() - ($1::integer * INTERVAL '1 day') ${spClause}
+        FROM form_submissions
+        WHERE client_id = $1 AND submitted_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}
         GROUP BY DATE(submitted_at) ORDER BY date
-      `, daySpParam),
+      `, tsParams),
 
       pool.query(`
         SELECT s.name,
@@ -69,30 +76,30 @@ router.get('/data', requireAuth, async (req, res) => {
         LEFT JOIN orders o ON o.salesperson_id = s.id
         LEFT JOIN commissions cm ON cm.salesperson_id = s.id
         LEFT JOIN clicks c ON c.salesperson_id = s.id
-        WHERE s.active = true ${spClauseS}
+        WHERE s.active = true AND s.client_id = $1 ${spFilter ? 'AND s.id = $2' : ''}
         GROUP BY s.name ORDER BY revenue DESC LIMIT 10
-      `, monthOnlyParam),
+      `, cidParams),
 
       pool.query(`
         SELECT
-          (SELECT COUNT(*) FROM leads ${spFilter ? 'WHERE salesperson_id = $1' : ''}) AS total_leads,
-          (SELECT COUNT(*) FROM clicks WHERE clicked_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_clicks,
-          (SELECT COUNT(*) FROM form_submissions WHERE submitted_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_forms,
-          (SELECT COUNT(*) FROM phone_calls WHERE called_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_calls,
-          (SELECT COUNT(*) FROM orders WHERE ordered_at >= NOW() - ($${spFilter ? 2 : 1}::integer * INTERVAL '1 day') ${spFilter ? 'AND salesperson_id = $1' : ''}) AS total_orders
-      `, spFilter ? [spFilter, days] : [days]),
+          (SELECT COUNT(*) FROM leads WHERE client_id = $1 ${tsSp}) AS total_leads,
+          (SELECT COUNT(*) FROM clicks WHERE client_id = $1 AND clicked_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}) AS total_clicks,
+          (SELECT COUNT(*) FROM form_submissions WHERE client_id = $1 AND submitted_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}) AS total_forms,
+          (SELECT COUNT(*) FROM phone_calls WHERE client_id = $1 AND called_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}) AS total_calls,
+          (SELECT COUNT(*) FROM orders WHERE client_id = $1 AND ordered_at >= NOW() - ($2::integer * INTERVAL '1 day') ${tsSp}) AS total_orders
+      `, tsParams),
 
       pool.query(`
         SELECT l.audience_type, COUNT(*) AS count FROM leads l
-        WHERE 1=1 ${spClauseL}
+        WHERE l.client_id = $1 ${spFilter ? 'AND l.salesperson_id = $2' : ''}
         GROUP BY l.audience_type
-      `, monthOnlyParam),
+      `, cidParams),
 
       pool.query(`
         SELECT COALESCE(l.product_interest, 'Unknown') AS product, COUNT(*) AS count
-        FROM leads l WHERE 1=1 ${spClauseL}
+        FROM leads l WHERE l.client_id = $1 ${spFilter ? 'AND l.salesperson_id = $2' : ''}
         GROUP BY l.product_interest ORDER BY count DESC LIMIT 6
-      `, monthOnlyParam),
+      `, cidParams),
 
       pool.query(`
         SELECT s.name,
@@ -101,14 +108,14 @@ router.get('/data', requireAuth, async (req, res) => {
           COALESCE(g.target_orders, 0)  AS goal_orders,
           COUNT(DISTINCT o.id)          AS actual_orders
         FROM salespeople s
-        LEFT JOIN salesperson_goals g ON g.salesperson_id = s.id AND g.period_start = $1
-        LEFT JOIN orders o ON o.salesperson_id = s.id AND DATE(o.ordered_at) >= $1
-        WHERE s.active = true ${spFilter ? 'AND s.id = $2' : ''}
+        LEFT JOIN salesperson_goals g ON g.salesperson_id = s.id AND g.period_start = $2
+        LEFT JOIN orders o ON o.salesperson_id = s.id AND DATE(o.ordered_at) >= $2
+        WHERE s.active = true AND s.client_id = $1 ${spFilter ? 'AND s.id = $3' : ''}
         GROUP BY s.name, g.target_revenue, g.target_orders
         ORDER BY actual_revenue DESC
-      `, spFilter ? [monthStart, spFilter] : [monthStart]),
+      `, spFilter ? [cid, monthStart, spFilter] : [cid, monthStart]),
 
-      pool.query('SELECT id, name FROM salespeople WHERE active = true ORDER BY name'),
+      pool.query('SELECT id, name FROM salespeople WHERE active = true AND client_id = $1 ORDER BY name', [cid]),
     ]);
 
     res.json({
@@ -130,7 +137,7 @@ router.get('/data', requireAuth, async (req, res) => {
 });
 
 // Analytics page
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireTenantContext, async (req, res) => {
   const content = `
   <div class="px-6 py-8 max-w-7xl mx-auto">
 

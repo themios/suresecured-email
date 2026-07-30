@@ -129,23 +129,24 @@ router.post('/call-ended', retellAuth, async (req, res) => {
     const callStartedAt = start_timestamp ? new Date(start_timestamp).toISOString() : null;
     const callEndedAt   = end_timestamp   ? new Date(end_timestamp).toISOString()   : null;
 
-    // Upsert lead by phone number (idx_leads_phone unique index allows ON CONFLICT target)
-    const { rows: leadRows } = await pool.query(
-      `INSERT INTO leads (phone, client_id, created_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (phone) DO NOTHING
-       RETURNING id`,
-      [from_number, clientId]
-    );
-    let leadId = leadRows[0]?.id;
-
-    if (!leadId) {
-      // Lead already existed — fetch it
+    // Find this tenant's lead by phone, else create one. Scoped to client_id:
+    // leads(phone) is unique per tenant now (not globally), so the same caller
+    // can be a lead for more than one tenant. A call to an unknown number
+    // (clientId null) records the call but creates no orphan lead.
+    let leadId = null;
+    if (from_number && clientId) {
       const { rows: existing } = await pool.query(
-        `SELECT id FROM leads WHERE phone = $1 AND (client_id = $2 OR client_id IS NULL) LIMIT 1`,
+        `SELECT id FROM leads WHERE phone = $1 AND client_id = $2 LIMIT 1`,
         [from_number, clientId]
       );
       leadId = existing[0]?.id;
+      if (!leadId) {
+        const { rows: created } = await pool.query(
+          `INSERT INTO leads (phone, client_id, created_at) VALUES ($1, $2, NOW()) RETURNING id`,
+          [from_number, clientId]
+        );
+        leadId = created[0]?.id;
+      }
     }
 
     // First-touch attribution for voice outreach

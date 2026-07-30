@@ -212,6 +212,17 @@ async function runMigrations() {
     'utf8'
   );
   await pool.query(migration017Sql);
+
+  // Convert the global unique indexes on tenant tables (leads.phone,
+  // orders.shopify_order_id, salespeople.email) to per-tenant composites, so a
+  // second tenant can hold a phone/order/rep the first already has. The P0-8
+  // conversion deferred by migration 015; ON CONFLICT call sites updated in the
+  // same change (idempotent, create-before-drop).
+  const migration018Sql = fs.readFileSync(
+    path.join(__dirname, '../migrations/018_tenant_unique_indexes.sql'),
+    'utf8'
+  );
+  await pool.query(migration018Sql);
 }
 
 // ── PHASE 1: base tables ──────────────────────────────────────────────────

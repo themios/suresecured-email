@@ -92,10 +92,12 @@ async function ingestFromSource(source) {
     const [firstName, ...rest] = String(msg.name || '').split(' ');
     const salespersonId = decision.salespersonId || source.default_salesperson_id || null;
 
+    // The scoped dedup SELECT above already prevents duplicates for this tenant.
+    // No ON CONFLICT here because leads has no global unique on email (and must
+    // not — two tenants can legitimately hold the same address).
     const { rows: newLead } = await pool.query(
       `INSERT INTO leads (email, first_name, last_name, stage, audience_type, client_id, salesperson_id, product_interest, created_at)
        VALUES ($1, $2, $3, 'new', 'inbound', $4, $5, $6, NOW())
-       ON CONFLICT (email) DO NOTHING
        RETURNING id`,
       [msg.email, firstName || msg.email.split('@')[0], rest.join(' ') || '', clientId, salespersonId, decision.tag || null]
     );

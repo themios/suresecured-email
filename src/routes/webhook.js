@@ -91,7 +91,7 @@ router.post('/shopify/order', express.raw({ type: 'application/json' }), async (
     const orderResult = await pool.query(
       `INSERT INTO orders (shopify_order_id, token, lead_id, salesperson_id, customer_email, amount, order_data, client_id, commission_status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       ON CONFLICT (shopify_order_id) DO NOTHING
+       ON CONFLICT (client_id, shopify_order_id) DO NOTHING
        RETURNING id`,
       [shopifyOrderId, token, leadId, resolvedSalespersonId, customerEmail, orderAmount, order, clientId, commissionStatus]
     );

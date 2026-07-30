@@ -2,9 +2,14 @@
 const express = require('express');
 const router  = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireTenantContext } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
 const { sendDirectEmail, sesEnabled } = require('../lib/gmail');
+
+// Every CRM route is tenant-scoped. Enforce identity + tenant context once, at
+// the router level, so no individual route can forget it and leak another
+// tenant's leads. req.user.client_id is guaranteed present after this.
+router.use(requireAuth, requireTenantContext);
 
 const STAGES = ['new', 'contacted', 'quoted', 'follow_up', 'won', 'lost', 'dormant'];
 
@@ -19,7 +24,8 @@ const STAGE_LABELS = {
 };
 
 // ─── Leads List ──────────────────────────────────────────────────────────────
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
+  const cid      = req.user.client_id;
   const stage    = req.query.stage  || '';
   const search   = req.query.search || '';
   const replied  = req.query.replied || '';
@@ -28,8 +34,10 @@ router.get('/', requireAuth, async (req, res) => {
   const pageSize = 50;
   const offset   = (page - 1) * pageSize;
 
-  let where = ['1=1'];
-  const params = [];
+  // client_id is $1 in every leads query so the list, count, and stage tallies
+  // can only ever reflect this tenant.
+  let where = ['l.client_id = $1'];
+  const params = [cid];
 
   if (stage) {
     params.push(stage);
@@ -72,8 +80,9 @@ router.get('/', requireAuth, async (req, res) => {
     pool.query(`
       SELECT stage, COUNT(*) AS cnt
       FROM leads
+      WHERE client_id = $1
       GROUP BY stage
-    `),
+    `, [cid]),
   ]);
 
   const leads      = leadsResult.rows;
@@ -201,17 +210,20 @@ router.get('/', requireAuth, async (req, res) => {
 });
 
 // ─── Lead Detail View ─────────────────────────────────────────────────────────
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', async (req, res) => {
+  const cid = req.user.client_id;
   const leadId = parseInt(req.params.id);
   if (!leadId) return res.status(404).send('Not found');
 
   const [leadResult, enrollmentsResult, emailSendsResult, callLogsResult, notesResult, smsResult, suppressedResult] = await Promise.all([
+    // Scoped by client_id: opening another tenant's lead by guessing its id
+    // returns 404, and the related lookups below only render for a lead we own.
     pool.query(`
       SELECT l.*, s.name AS salesperson_name, s.email AS salesperson_email
       FROM leads l
       LEFT JOIN salespeople s ON s.id = l.salesperson_id
-      WHERE l.id = $1
-    `, [leadId]),
+      WHERE l.id = $1 AND l.client_id = $2
+    `, [leadId, cid]),
 
     pool.query(`
       SELECT ce.*, seq.name AS sequence_name
@@ -700,96 +712,103 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // ─── API: Update Stage ────────────────────────────────────────────────────────
-router.post('/:id/stage', requireAuth, async (req, res) => {
+router.post('/:id/stage', async (req, res) => {
+  const cid = req.user.client_id;
   const leadId = parseInt(req.params.id);
   const { stage } = req.body;
   if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Invalid stage' });
-  await pool.query('UPDATE leads SET stage = $1 WHERE id = $2', [stage, leadId]);
+  const { rowCount } = await pool.query(
+    'UPDATE leads SET stage = $1 WHERE id = $2 AND client_id = $3', [stage, leadId, cid]
+  );
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
 });
 
 // ─── API: Suppress Lead ───────────────────────────────────────────────────────
-router.post('/:id/suppress', requireAuth, async (req, res) => {
+router.post('/:id/suppress', async (req, res) => {
+  const cid = req.user.client_id;
   const leadId = parseInt(req.params.id);
   const reason = req.body.reason || 'manual';
-  const { rows } = await pool.query('SELECT email FROM leads WHERE id = $1', [leadId]);
+  const { rows } = await pool.query('SELECT email FROM leads WHERE id = $1 AND client_id = $2', [leadId, cid]);
   if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+  // Suppression is currently a global (cross-tenant) safety list keyed by email;
+  // tag the row with the acting tenant for the eventual per-tenant conversion.
   await pool.query(
-    `INSERT INTO suppression_list (email, reason) VALUES ($1, $2)
+    `INSERT INTO suppression_list (email, reason, client_id) VALUES ($1, $2, $3)
      ON CONFLICT (email) DO UPDATE SET reason = $2, added_at = NOW()`,
-    [rows[0].email, reason]
+    [rows[0].email, reason, cid]
   );
   await pool.query(
     `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'suppressed'
-     WHERE lead_id = $1 AND status = 'active'`,
-    [leadId]
+     WHERE lead_id = $1 AND client_id = $2 AND status = 'active'`,
+    [leadId, cid]
   );
   res.json({ ok: true });
 });
 
 // ─── API: Enrollment Actions (pause / resume / unenroll) ──────────────────────
-router.post('/enrollment/:enrollmentId/pause', requireAuth, async (req, res) => {
+router.post('/enrollment/:enrollmentId/pause', async (req, res) => {
+  const cid = req.user.client_id;
   const id = parseInt(req.params.enrollmentId);
-  await pool.query(
-    `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'manual' WHERE id = $1`, [id]
+  const { rowCount } = await pool.query(
+    `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'manual' WHERE id = $1 AND client_id = $2`, [id, cid]
   );
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
 });
 
-router.post('/enrollment/:enrollmentId/resume', requireAuth, async (req, res) => {
+router.post('/enrollment/:enrollmentId/resume', async (req, res) => {
+  const cid = req.user.client_id;
   const id = parseInt(req.params.enrollmentId);
   const { rows } = await pool.query(
     `SELECT l.email, l.unsubscribed FROM leads l
-     JOIN contact_enrollments ce ON ce.lead_id = l.id WHERE ce.id = $1`, [id]
+     JOIN contact_enrollments ce ON ce.lead_id = l.id WHERE ce.id = $1 AND ce.client_id = $2`, [id, cid]
   );
   const lead = rows[0];
-  if (lead?.unsubscribed) return res.status(400).json({ error: 'Lead has unsubscribed' });
-  if (lead) {
-    const { rows: sup } = await pool.query(
-      `SELECT 1 FROM suppression_list WHERE LOWER(email) = LOWER($1)`, [lead.email]
-    );
-    if (sup.length) return res.status(400).json({ error: 'Lead is suppressed' });
-  }
+  if (!lead) return res.status(404).json({ error: 'Not found' });
+  if (lead.unsubscribed) return res.status(400).json({ error: 'Lead has unsubscribed' });
+  const { rows: sup } = await pool.query(
+    `SELECT 1 FROM suppression_list WHERE LOWER(email) = LOWER($1)`, [lead.email]
+  );
+  if (sup.length) return res.status(400).json({ error: 'Lead is suppressed' });
   await pool.query(
-    `UPDATE contact_enrollments SET status = 'active', paused_reason = NULL WHERE id = $1`, [id]
+    `UPDATE contact_enrollments SET status = 'active', paused_reason = NULL WHERE id = $1 AND client_id = $2`, [id, cid]
   );
   res.json({ ok: true });
 });
 
-router.post('/enrollment/:enrollmentId/unenroll', requireAuth, async (req, res) => {
+router.post('/enrollment/:enrollmentId/unenroll', async (req, res) => {
+  const cid = req.user.client_id;
   const id = parseInt(req.params.enrollmentId);
-  await pool.query(
-    `UPDATE contact_enrollments SET status = 'cancelled', paused_reason = 'manual_unenroll' WHERE id = $1`, [id]
+  const { rowCount } = await pool.query(
+    `UPDATE contact_enrollments SET status = 'cancelled', paused_reason = 'manual_unenroll' WHERE id = $1 AND client_id = $2`, [id, cid]
   );
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
 });
 
 // ─── API: Unsuppress Lead ─────────────────────────────────────────────────────
-router.post('/:id/unsuppress', requireAuth, async (req, res) => {
+router.post('/:id/unsuppress', async (req, res) => {
+  const cid = req.user.client_id;
   const leadId = parseInt(req.params.id);
-  const { rows } = await pool.query('SELECT email FROM leads WHERE id = $1', [leadId]);
+  const { rows } = await pool.query('SELECT email FROM leads WHERE id = $1 AND client_id = $2', [leadId, cid]);
   if (!rows[0]) return res.status(404).json({ error: 'Not found' });
   await pool.query('DELETE FROM suppression_list WHERE LOWER(email) = LOWER($1)', [rows[0].email]);
   res.json({ ok: true });
 });
 
 // ─── API: Send Reply Email ────────────────────────────────────────────────────
-router.post('/:id/reply', requireAuth, async (req, res) => {
+router.post('/:id/reply', async (req, res) => {
+  const clientId = req.user.client_id;
   const leadId = parseInt(req.params.id);
   const { subject, body } = req.body;
   if (!body?.trim()) return res.status(400).json({ error: 'Body required' });
 
   const { rows: leads } = await pool.query(
-    'SELECT first_name, last_name, email FROM leads WHERE id = $1', [leadId]
+    'SELECT first_name, last_name, email FROM leads WHERE id = $1 AND client_id = $2', [leadId, clientId]
   );
   const lead = leads[0];
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
-  let clientId = req.user?.client_id;
-  if (!clientId) {
-    const { rows: cr } = await pool.query('SELECT id FROM clients ORDER BY id LIMIT 1');
-    clientId = cr[0]?.id || null;
-  }
 
   try {
     const result = await sendDirectEmail({
@@ -805,15 +824,15 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
 
     if (result.threadId) {
       await pool.query(
-        `UPDATE leads SET direct_email_thread_id = $1, direct_email_salesperson_id = $2 WHERE id = $3`,
-        [result.threadId, req.user?.id, leadId]
+        `UPDATE leads SET direct_email_thread_id = $1, direct_email_salesperson_id = $2 WHERE id = $3 AND client_id = $4`,
+        [result.threadId, req.user?.id, leadId, clientId]
       );
     }
 
     const user = req.user;
     await pool.query(
-      `INSERT INTO lead_notes (lead_id, author_name, content) VALUES ($1, $2, $3)`,
-      [leadId, user?.name || user?.email || 'Rep', `[Email sent] ${subject?.trim() || ''}\n\n${body.trim()}`]
+      `INSERT INTO lead_notes (lead_id, client_id, author_name, content) VALUES ($1, $2, $3, $4)`,
+      [leadId, clientId, user?.name || user?.email || 'Rep', `[Email sent] ${subject?.trim() || ''}\n\n${body.trim()}`]
     );
 
     res.json({ ok: true });
@@ -824,15 +843,20 @@ router.post('/:id/reply', requireAuth, async (req, res) => {
 });
 
 // ─── API: Add Note ────────────────────────────────────────────────────────────
-router.post('/:id/notes', requireAuth, async (req, res) => {
+router.post('/:id/notes', async (req, res) => {
+  const cid = req.user.client_id;
   const leadId = parseInt(req.params.id);
   const { content } = req.body;
   if (!content?.trim()) return res.status(400).json({ error: 'Content required' });
 
+  // Confirm the lead is this tenant's before attaching a note to it.
+  const { rows } = await pool.query('SELECT 1 FROM leads WHERE id = $1 AND client_id = $2', [leadId, cid]);
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
+
   const user = req.user;
   await pool.query(
-    'INSERT INTO lead_notes (lead_id, author_name, content) VALUES ($1, $2, $3)',
-    [leadId, user?.name || user?.email || 'Admin', content.trim()]
+    'INSERT INTO lead_notes (lead_id, client_id, author_name, content) VALUES ($1, $2, $3, $4)',
+    [leadId, cid, user?.name || user?.email || 'Admin', content.trim()]
   );
   res.json({ ok: true });
 });

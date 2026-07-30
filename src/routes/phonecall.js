@@ -23,23 +23,31 @@ router.post('/', async (req, res) => {
     const trackingNum = tracking_phone_number || req.body.tracking_number;
     const callDuration = duration_seconds || duration || 0;
 
-    // Match tracking number to a salesperson
+    // Match tracking number to a salesperson, and derive the tenant from them
+    // so the call and any lead match stay inside that tenant.
     let salespersonId = null;
+    let clientId = null;
     if (trackingNum) {
       const spResult = await pool.query(
-        'SELECT id FROM salespeople WHERE tracking_phone_number = $1 AND active = true',
+        'SELECT id, client_id FROM salespeople WHERE tracking_phone_number = $1 AND active = true',
         [trackingNum]
       );
-      if (spResult.rows.length > 0) salespersonId = spResult.rows[0].id;
+      if (spResult.rows.length > 0) {
+        salespersonId = spResult.rows[0].id;
+        clientId = spResult.rows[0].client_id;
+      }
     }
 
-    // Try to match caller to an existing lead by phone number
+    // Try to match caller to an existing lead by phone number, scoped to the
+    // resolved tenant (a caller can be a lead for more than one tenant).
     let leadId = null;
-    if (caller_number) {
+    if (caller_number && clientId) {
       const cleanCaller = caller_number.replace(/\D/g, '').slice(-10);
       const leadResult = await pool.query(
-        `SELECT id FROM leads WHERE RIGHT(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = $1 LIMIT 1`,
-        [cleanCaller]
+        `SELECT id FROM leads
+         WHERE client_id = $2 AND RIGHT(regexp_replace(phone, '[^0-9]', '', 'g'), 10) = $1
+         LIMIT 1`,
+        [cleanCaller, clientId]
       );
       if (leadResult.rows.length > 0) leadId = leadResult.rows[0].id;
     }
@@ -47,10 +55,11 @@ router.post('/', async (req, res) => {
     // Record the call
     await pool.query(
       `INSERT INTO phone_calls
-         (salesperson_id, lead_id, tracking_number, caller_number, duration_seconds, recording_url, callrail_id, called_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         (client_id, salesperson_id, lead_id, tracking_number, caller_number, duration_seconds, recording_url, callrail_id, called_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        ON CONFLICT (callrail_id) DO NOTHING`,
       [
+        clientId,
         salespersonId,
         leadId,
         trackingNum,

@@ -36,16 +36,18 @@ async function sendSequencesHandler(req, res) {
 
   // ── Pass 0: inbound email capture — new leads from Gmail inbox ──────────────
   try {
+    // Each connected mailbox belongs to a salesperson, who belongs to a client.
+    // Join the inbound config for THAT salesperson's own client — never a single
+    // globally-picked config, which would mis-attribute one tenant's inbound
+    // leads to another.
     const { rows: inboundAccounts } = await pool.query(`
       SELECT ea.salesperson_id, ea.email AS gmail_email, cec.client_id,
              cec.inbound_capture_enabled, cec.inbound_sequence_id, cec.inbound_last_check_at
       FROM email_accounts ea
-      CROSS JOIN (
-        SELECT cec2.* FROM client_email_config cec2
-        WHERE cec2.inbound_capture_enabled = true
-        ORDER BY cec2.client_id LIMIT 1
-      ) cec
+      JOIN salespeople sp ON sp.id = ea.salesperson_id
+      JOIN client_email_config cec ON cec.client_id = sp.client_id
       WHERE ea.enabled = true
+        AND cec.inbound_capture_enabled = true
     `);
 
     for (const acct of inboundAccounts) {
@@ -79,15 +81,17 @@ async function sendSequencesHandler(req, res) {
             const [firstName, ...rest] = senderName.split(' ');
             const lastName = rest.join(' ');
 
-            // Skip if already a lead
-            const { rows: existing } = await pool.query('SELECT id FROM leads WHERE email = $1', [senderEmail]);
+            // Skip if already a lead for THIS tenant (scoped dedup).
+            const { rows: existing } = await pool.query(
+              'SELECT id FROM leads WHERE LOWER(email) = LOWER($1) AND client_id = $2', [senderEmail, acct.client_id]
+            );
             if (existing.length) continue;
 
-            // Create new lead
+            // Create new lead. No ON CONFLICT: leads has no global unique on
+            // email, and the scoped dedup above already prevents duplicates.
             const { rows: newLead } = await pool.query(`
               INSERT INTO leads (email, first_name, last_name, stage, audience_type, client_id, created_at)
               VALUES ($1, $2, $3, 'new', 'inbound', $4, NOW())
-              ON CONFLICT (email) DO NOTHING
               RETURNING id
             `, [senderEmail, firstName || senderEmail, lastName || '', acct.client_id]);
 
@@ -96,8 +100,8 @@ async function sendSequencesHandler(req, res) {
 
             // Log the inbound email as a note
             await pool.query(
-              `INSERT INTO lead_notes (lead_id, author_name, content) VALUES ($1, $2, $3)`,
-              [leadId, 'Inbound', `[Inbound email] ${subject}\n\nFrom: ${fromHeader}`]
+              `INSERT INTO lead_notes (lead_id, client_id, author_name, content) VALUES ($1, $2, $3, $4)`,
+              [leadId, acct.client_id, 'Inbound', `[Inbound email] ${subject}\n\nFrom: ${fromHeader}`]
             );
 
             // Notify via Telegram

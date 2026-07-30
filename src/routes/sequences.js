@@ -1,18 +1,25 @@
 const express  = require('express');
 const router   = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireTenantContext } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
+
+// Every sequence route is tenant-scoped. Enforce identity + tenant context once
+// at the router level so no route can leak or mutate another tenant's sequences,
+// steps, or enrollments. req.user.client_id is guaranteed present after this.
+router.use(requireAuth, requireTenantContext);
 
 // -- API endpoints ----------------------------------------------------------
 
 // List sequences
-router.get('/api/sequences', requireAuth, async (req, res) => {
+router.get('/api/sequences', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT s.*, COUNT(ss.id) AS step_count
      FROM sequences s
      LEFT JOIN sequence_steps ss ON ss.sequence_id = s.id
-     GROUP BY s.id ORDER BY s.created_at DESC`
+     WHERE s.client_id = $1
+     GROUP BY s.id ORDER BY s.created_at DESC`,
+    [req.user.client_id]
   );
   res.json(rows);
 });
@@ -24,7 +31,7 @@ router.get('/api/sequences', requireAuth, async (req, res) => {
 // Per-sequence deliverability report
 // Join path: sequences -> contact_enrollments -> email_sends
 // Scoped to req.user.client_id for multi-tenant isolation
-router.get('/api/sequences/report', requireAuth, async (req, res) => {
+router.get('/api/sequences/report', async (req, res) => {
   try {
     const { rows } = await pool.query(`
       SELECT
@@ -49,9 +56,10 @@ router.get('/api/sequences/report', requireAuth, async (req, res) => {
       FROM sequences seq
       LEFT JOIN contact_enrollments ce ON ce.sequence_id = seq.id
       LEFT JOIN email_sends es ON es.enrollment_id = ce.id
+      WHERE seq.client_id = $1
       GROUP BY seq.id, seq.name
       ORDER BY seq.created_at DESC
-    `);
+    `, [req.user.client_id]);
     res.json(rows);
   } catch (err) {
     console.error('Sequences report error:', err.message);
@@ -60,79 +68,88 @@ router.get('/api/sequences/report', requireAuth, async (req, res) => {
 });
 
 // Get one sequence with steps
-router.get('/api/sequences/:id', requireAuth, async (req, res) => {
+router.get('/api/sequences/:id', async (req, res) => {
+  const cid = req.user.client_id;
   const [seq, steps] = await Promise.all([
-    pool.query('SELECT * FROM sequences WHERE id = $1', [req.params.id]),
-    pool.query('SELECT * FROM sequence_steps WHERE sequence_id = $1 ORDER BY step_number', [req.params.id]),
+    pool.query('SELECT * FROM sequences WHERE id = $1 AND client_id = $2', [req.params.id, cid]),
+    pool.query('SELECT * FROM sequence_steps WHERE sequence_id = $1 AND client_id = $2 ORDER BY step_number', [req.params.id, cid]),
   ]);
   if (!seq.rows[0]) return res.status(404).json({ error: 'Not found' });
   res.json({ ...seq.rows[0], steps: steps.rows });
 });
 
 // Create sequence
-router.post('/api/sequences', requireAuth, async (req, res) => {
+router.post('/api/sequences', async (req, res) => {
   const { name, description, audience_type } = req.body;
   const { rows } = await pool.query(
-    `INSERT INTO sequences (name, description, audience_type) VALUES ($1,$2,$3) RETURNING *`,
-    [name, description, audience_type || 'B2C']
+    `INSERT INTO sequences (client_id, name, description, audience_type) VALUES ($1,$2,$3,$4) RETURNING *`,
+    [req.user.client_id, name, description, audience_type || 'B2C']
   );
   res.json(rows[0]);
 });
 
 // Update sequence
-router.put('/api/sequences/:id', requireAuth, async (req, res) => {
+router.put('/api/sequences/:id', async (req, res) => {
   const { name, description, audience_type, active } = req.body;
   const { rows } = await pool.query(
-    `UPDATE sequences SET name=$1, description=$2, audience_type=$3, active=$4 WHERE id=$5 RETURNING *`,
-    [name, description, audience_type, active, req.params.id]
+    `UPDATE sequences SET name=$1, description=$2, audience_type=$3, active=$4 WHERE id=$5 AND client_id=$6 RETURNING *`,
+    [name, description, audience_type, active, req.params.id, req.user.client_id]
   );
+  if (!rows[0]) return res.status(404).json({ error: 'Not found' });
   res.json(rows[0]);
 });
 
 // Delete sequence
-router.delete('/api/sequences/:id', requireAuth, async (req, res) => {
-  await pool.query('DELETE FROM sequences WHERE id = $1', [req.params.id]);
+router.delete('/api/sequences/:id', async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM sequences WHERE id = $1 AND client_id = $2', [req.params.id, req.user.client_id]);
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
 });
 
 // Upsert a step
-router.post('/api/sequences/:id/steps', requireAuth, async (req, res) => {
+router.post('/api/sequences/:id/steps', async (req, res) => {
+  const cid = req.user.client_id;
   const { step_number, delay_days, delay_minutes, subject, body } = req.body;
   const dm = delay_minutes != null ? parseInt(delay_minutes) : null;
+  // Confirm the parent sequence is this tenant's before writing a step onto it.
+  const { rows: own } = await pool.query('SELECT 1 FROM sequences WHERE id = $1 AND client_id = $2', [req.params.id, cid]);
+  if (!own[0]) return res.status(404).json({ error: 'Sequence not found' });
   const { rows } = await pool.query(
-    `INSERT INTO sequence_steps (sequence_id, step_number, delay_days, delay_minutes, subject, body)
-     VALUES ($1,$2,$3,$4,$5,$6)
+    `INSERT INTO sequence_steps (sequence_id, client_id, step_number, delay_days, delay_minutes, subject, body)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (sequence_id, step_number) DO UPDATE
-       SET delay_days=$3, delay_minutes=$4, subject=$5, body=$6
+       SET delay_days=$4, delay_minutes=$5, subject=$6, body=$7
      RETURNING *`,
-    [req.params.id, step_number, delay_days, dm, subject, body]
+    [req.params.id, cid, step_number, delay_days, dm, subject, body]
   );
   res.json(rows[0]);
 });
 
 // Delete a step
-router.delete('/api/sequences/:seqId/steps/:stepId', requireAuth, async (req, res) => {
-  await pool.query('DELETE FROM sequence_steps WHERE id = $1 AND sequence_id = $2',
-    [req.params.stepId, req.params.seqId]);
+router.delete('/api/sequences/:seqId/steps/:stepId', async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM sequence_steps WHERE id = $1 AND sequence_id = $2 AND client_id = $3',
+    [req.params.stepId, req.params.seqId, req.user.client_id]);
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
 });
 
 // Auto-enroll: match all leads by audience_type to this sequence, skip suppressed + already enrolled
-router.post('/api/sequences/:id/auto-enroll', requireAuth, async (req, res) => {
+router.post('/api/sequences/:id/auto-enroll', async (req, res) => {
   try {
+    const clientId     = req.user.client_id;
+    const salespersonId = req.session?.salespersonId || req.user?.salesperson_id || null;
+
     const { rows: seqRows } = await pool.query(
-      `SELECT audience_type FROM sequences WHERE id = $1`,
-      [req.params.id]
+      `SELECT audience_type FROM sequences WHERE id = $1 AND client_id = $2`,
+      [req.params.id, clientId]
     );
     if (!seqRows[0]) return res.status(404).json({ error: 'Sequence not found' });
 
     const audienceType = seqRows[0].audience_type;
-    const clientId     = req.session?.clientId || req.user?.client_id || null;
-    const salespersonId = req.session?.salespersonId || req.user?.salesperson_id || null;
 
     const { rows: firstStep } = await pool.query(
-      `SELECT delay_days, delay_minutes FROM sequence_steps WHERE sequence_id = $1 AND step_number = 1`,
-      [req.params.id]
+      `SELECT delay_days, delay_minutes FROM sequence_steps WHERE sequence_id = $1 AND client_id = $2 AND step_number = 1`,
+      [req.params.id, clientId]
     );
     const fs1 = firstStep[0];
     const delayMs1 = fs1?.delay_minutes != null
@@ -140,29 +157,30 @@ router.post('/api/sequences/:id/auto-enroll', requireAuth, async (req, res) => {
       : (fs1?.delay_days ?? 0) * 24 * 60 * 60 * 1000;
     const nextSendAt = new Date(Date.now() + delayMs1).toISOString();
 
-    // Find eligible leads: matching audience_type, not suppressed, not already in this sequence
+    // Find eligible leads: this tenant's, matching audience_type, not suppressed,
+    // not already in this sequence.
     const { rows: leads } = await pool.query(`
       SELECT l.id, l.salesperson_id
       FROM leads l
       WHERE l.audience_type = $1
-        ${clientId ? 'AND l.client_id = $2' : ''}
+        AND l.client_id = $2
         AND l.email NOT IN (SELECT email FROM suppression_list)
         AND (l.unsubscribed IS NULL OR l.unsubscribed = false)
         AND NOT EXISTS (
           SELECT 1 FROM contact_enrollments ce
-          WHERE ce.lead_id = l.id AND ce.sequence_id = $${clientId ? 3 : 2}
+          WHERE ce.lead_id = l.id AND ce.sequence_id = $3
         )
-    `, clientId ? [audienceType, clientId, req.params.id] : [audienceType, req.params.id]);
+    `, [audienceType, clientId, req.params.id]);
 
     let enrolled = 0, skipped = 0;
     for (const lead of leads) {
       try {
         const spId = salespersonId || lead.salesperson_id;
         await pool.query(
-          `INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, next_send_at)
-           VALUES ($1,$2,$3,$4)
+          `INSERT INTO contact_enrollments (lead_id, client_id, sequence_id, salesperson_id, next_send_at)
+           VALUES ($1,$2,$3,$4,$5)
            ON CONFLICT (lead_id, sequence_id) DO NOTHING`,
-          [lead.id, req.params.id, spId, nextSendAt]
+          [lead.id, clientId, req.params.id, spId, nextSendAt]
         );
         enrolled++;
       } catch { skipped++; }
@@ -176,14 +194,19 @@ router.post('/api/sequences/:id/auto-enroll', requireAuth, async (req, res) => {
 });
 
 // Enroll contacts in a sequence
-router.post('/api/sequences/:id/enroll', requireAuth, async (req, res) => {
+router.post('/api/sequences/:id/enroll', async (req, res) => {
+  const cid = req.user.client_id;
   const { salesperson_id, lead_ids } = req.body;
   if (!lead_ids?.length) return res.status(400).json({ error: 'No lead_ids provided' });
 
+  // Confirm the sequence is this tenant's before enrolling anyone into it.
+  const { rows: seqOwn } = await pool.query('SELECT 1 FROM sequences WHERE id = $1 AND client_id = $2', [req.params.id, cid]);
+  if (!seqOwn[0]) return res.status(404).json({ error: 'Sequence not found' });
+
   // Get first step delay to set initial next_send_at
   const { rows: firstStep } = await pool.query(
-    `SELECT delay_days, delay_minutes FROM sequence_steps WHERE sequence_id = $1 AND step_number = 1`,
-    [req.params.id]
+    `SELECT delay_days, delay_minutes FROM sequence_steps WHERE sequence_id = $1 AND client_id = $2 AND step_number = 1`,
+    [req.params.id, cid]
   );
   const fs1 = firstStep[0];
   const delayMs1 = fs1?.delay_minutes != null
@@ -194,9 +217,9 @@ router.post('/api/sequences/:id/enroll', requireAuth, async (req, res) => {
   let enrolled = 0, skipped = 0;
   for (const leadId of lead_ids) {
     try {
-      // Block suppressed or unsubscribed leads
+      // Block leads that aren't this tenant's, suppressed, or unsubscribed.
       const { rows: check } = await pool.query(
-        `SELECT unsubscribed, email FROM leads WHERE id = $1`, [leadId]
+        `SELECT unsubscribed, email FROM leads WHERE id = $1 AND client_id = $2`, [leadId, cid]
       );
       const lead = check[0];
       if (!lead) { skipped++; continue; }
@@ -207,10 +230,10 @@ router.post('/api/sequences/:id/enroll', requireAuth, async (req, res) => {
       if (sup.length) { skipped++; continue; }
 
       await pool.query(
-        `INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, next_send_at)
-         VALUES ($1,$2,$3,$4)
+        `INSERT INTO contact_enrollments (lead_id, client_id, sequence_id, salesperson_id, next_send_at)
+         VALUES ($1,$2,$3,$4,$5)
          ON CONFLICT (lead_id, sequence_id) DO NOTHING`,
-        [leadId, req.params.id, salesperson_id, nextSendAt]
+        [leadId, cid, req.params.id, salesperson_id, nextSendAt]
       );
       enrolled++;
     } catch {
@@ -221,51 +244,54 @@ router.post('/api/sequences/:id/enroll', requireAuth, async (req, res) => {
 });
 
 // List enrollments for a sequence
-router.get('/api/sequences/:id/enrollments', requireAuth, async (req, res) => {
+router.get('/api/sequences/:id/enrollments', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT ce.*, l.email, l.first_name, l.last_name, s.name AS salesperson_name,
             (SELECT COUNT(*) FROM email_sends WHERE enrollment_id = ce.id) AS emails_sent
      FROM contact_enrollments ce
      JOIN leads l ON l.id = ce.lead_id
      JOIN salespeople s ON s.id = ce.salesperson_id
-     WHERE ce.sequence_id = $1
+     WHERE ce.sequence_id = $1 AND ce.client_id = $2
      ORDER BY ce.enrolled_at DESC
      LIMIT 200`,
-    [req.params.id]
+    [req.params.id, req.user.client_id]
   );
   res.json(rows);
 });
 
 // Pause/resume enrollment
-router.post('/api/enrollments/:id/pause', requireAuth, async (req, res) => {
-  await pool.query(
-    `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'manual' WHERE id = $1`,
-    [req.params.id]
+router.post('/api/enrollments/:id/pause', async (req, res) => {
+  const { rowCount } = await pool.query(
+    `UPDATE contact_enrollments SET status = 'paused', paused_reason = 'manual' WHERE id = $1 AND client_id = $2`,
+    [req.params.id, req.user.client_id]
   );
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
 });
-router.post('/api/enrollments/:id/resume', requireAuth, async (req, res) => {
-  await pool.query(
-    `UPDATE contact_enrollments SET status = 'active', paused_reason = NULL WHERE id = $1`,
-    [req.params.id]
+router.post('/api/enrollments/:id/resume', async (req, res) => {
+  const { rowCount } = await pool.query(
+    `UPDATE contact_enrollments SET status = 'active', paused_reason = NULL WHERE id = $1 AND client_id = $2`,
+    [req.params.id, req.user.client_id]
   );
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
 });
 
-// Email account status for all salespeople
-router.get('/api/email-accounts', requireAuth, async (req, res) => {
+// Email account status for this tenant's salespeople
+router.get('/api/email-accounts', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT s.id, s.name, ea.email AS gmail_email, ea.enabled, ea.last_error, ea.connected_at
      FROM salespeople s
      LEFT JOIN email_accounts ea ON ea.salesperson_id = s.id
-     WHERE s.active = true
-     ORDER BY s.name`
+     WHERE s.active = true AND s.client_id = $1
+     ORDER BY s.name`,
+    [req.user.client_id]
   );
   res.json(rows);
 });
 
-// Contact list for enrollment - all leads with suppression check
-router.get('/api/leads/enrollable', requireAuth, async (req, res) => {
+// Contact list for enrollment - this tenant's leads with suppression check
+router.get('/api/leads/enrollable', async (req, res) => {
   const seqId = req.query.sequence_id;
   const { rows } = await pool.query(
     `SELECT l.id, l.email, l.first_name, l.last_name, l.city, l.audience_type, l.product_interest,
@@ -279,29 +305,29 @@ router.get('/api/leads/enrollable', requireAuth, async (req, res) => {
             ) AS suppressed
      FROM leads l
      LEFT JOIN salespeople s ON s.id = l.salesperson_id
+     WHERE l.client_id = $2
      ORDER BY l.created_at DESC
      LIMIT 500`,
-    [seqId || 0]
+    [seqId || 0, req.user.client_id]
   );
   res.json(rows);
 });
 
 // Verify unverified leads via ZeroBounce - processes up to 50 at a time
 // Suppresses invalid/spamtrap/abuse addresses automatically
-router.post('/api/leads/verify-batch', requireAuth, async (req, res) => {
+router.post('/api/leads/verify-batch', async (req, res) => {
   const { verifyEmail, BLOCK_STATUSES } = require('../lib/zerobounce');
 
   if (!process.env.ZEROBOUNCE_API_KEY) {
     return res.status(400).json({ error: 'ZEROBOUNCE_API_KEY not configured in environment' });
   }
 
-  const clientId = req.user?.client_id || null;
+  const clientId = req.user.client_id;
   const { rows: leads } = await pool.query(
     `SELECT id, email FROM leads
-     WHERE email_verified IS NOT TRUE
-       ${clientId ? 'AND client_id = $1' : ''}
+     WHERE email_verified IS NOT TRUE AND client_id = $1
      LIMIT 50`,
-    clientId ? [clientId] : []
+    [clientId]
   );
 
   if (leads.length === 0) return res.json({ ok: true, verified: 0, suppressed: 0, message: 'All leads already verified.' });
@@ -313,20 +339,20 @@ router.post('/api/leads/verify-batch', requireAuth, async (req, res) => {
       const result = await verifyEmail(lead.email);
 
       await pool.query(
-        `UPDATE leads SET email_verified=$1, verification_status=$2, verified_at=NOW() WHERE id=$3`,
-        [result.valid, result.status, lead.id]
+        `UPDATE leads SET email_verified=$1, verification_status=$2, verified_at=NOW() WHERE id=$3 AND client_id=$4`,
+        [result.valid, result.status, lead.id, clientId]
       );
 
       if (result.block) {
-        // Auto-suppress bad addresses
+        // Auto-suppress bad addresses (global list, tagged with the acting tenant)
         await pool.query(
-          `INSERT INTO suppression_list (email, reason) VALUES ($1,$2) ON CONFLICT (email) DO NOTHING`,
-          [lead.email, result.status]
+          `INSERT INTO suppression_list (email, reason, client_id) VALUES ($1,$2,$3) ON CONFLICT (email) DO NOTHING`,
+          [lead.email, result.status, clientId]
         );
         await pool.query(
           `UPDATE contact_enrollments SET status='paused', paused_reason='invalid_email'
-           WHERE lead_id=$1 AND status='active'`,
-          [lead.id]
+           WHERE lead_id=$1 AND client_id=$2 AND status='active'`,
+          [lead.id, clientId]
         );
         suppressed++;
       }
@@ -342,15 +368,16 @@ router.post('/api/leads/verify-batch', requireAuth, async (req, res) => {
   }
 
   const remaining = await pool.query(
-    `SELECT COUNT(*) FROM leads WHERE email_verified IS NOT TRUE ${clientId ? 'AND client_id = $1' : ''}`,
-    clientId ? [clientId] : []
+    `SELECT COUNT(*) FROM leads WHERE email_verified IS NOT TRUE AND client_id = $1`,
+    [clientId]
   );
 
   res.json({ ok: true, verified, suppressed, errors, remaining: parseInt(remaining.rows[0].count) });
 });
 
 // CSV import of leads
-router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', limit: '10mb' }), async (req, res) => {
+router.post('/api/leads/import', express.text({ type: 'text/csv', limit: '10mb' }), async (req, res) => {
+  const cid = req.user.client_id;
   const lines = req.body.split('\n').map(l => l.trim()).filter(Boolean);
   if (!lines.length) return res.status(400).json({ error: 'Empty CSV' });
 
@@ -383,10 +410,13 @@ router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', l
       cityIdx    >= 0 ? cols[cityIdx]     : null,
       typeIdx    >= 0 ? (cols[typeIdx] || 'B2C') : 'B2C',
       productIdx >= 0 ? cols[productIdx]  : null,
+      cid,
     ];
 
     try {
-      // CSV imports are pre-verified offline — mark send-ready immediately
+      // CSV imports are pre-verified offline — mark send-ready immediately.
+      // Match is scoped to this tenant so an import can never overwrite another
+      // tenant's lead that happens to share an email address.
       const { rowCount: updated } = await pool.query(
         `UPDATE leads SET
            first_name = COALESCE($2, first_name),
@@ -398,14 +428,14 @@ router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', l
            email_verified = true,
            verification_status = 'preverified',
            verified_at = NOW()
-         WHERE LOWER(email) = LOWER($1)`,
+         WHERE LOWER(email) = LOWER($1) AND client_id = $8`,
         leadValues
       );
 
       if (updated === 0) {
         await pool.query(
-          `INSERT INTO leads (email, first_name, last_name, phone, city, audience_type, product_interest, email_verified, verification_status, verified_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7, true, 'preverified', NOW())`,
+          `INSERT INTO leads (email, first_name, last_name, phone, city, audience_type, product_interest, client_id, email_verified, verification_status, verified_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8, true, 'preverified', NOW())`,
           leadValues
         );
       }
@@ -418,24 +448,30 @@ router.post('/api/leads/import', requireAuth, express.text({ type: 'text/csv', l
 // -- Preview: send all steps of a sequence immediately to one email ----------
 // POST /sequences/api/sequences/:id/preview
 // Body: { email, salesperson_id }
-router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
+router.post('/api/sequences/:id/preview', async (req, res) => {
+  const clientId    = req.user.client_id;
   const seqId       = parseInt(req.params.id);
   const { email, salesperson_id } = req.body;
   if (!email) return res.status(400).json({ error: 'email required' });
 
   const { rows: steps } = await pool.query(
-    `SELECT * FROM sequence_steps WHERE sequence_id = $1 ORDER BY step_number ASC`,
-    [seqId]
+    `SELECT * FROM sequence_steps WHERE sequence_id = $1 AND client_id = $2 ORDER BY step_number ASC`,
+    [seqId, clientId]
   );
   if (!steps.length) return res.status(404).json({ error: 'No steps found' });
 
-  // Get salesperson - use provided or first active one with Gmail connected
+  // Get salesperson - use provided (this tenant's) or first active one with Gmail connected
   let spId = parseInt(salesperson_id) || null;
+  if (spId) {
+    const { rows: chk } = await pool.query('SELECT 1 FROM salespeople WHERE id = $1 AND client_id = $2', [spId, clientId]);
+    if (!chk[0]) return res.status(404).json({ error: 'Salesperson not found' });
+  }
   if (!spId) {
     const { rows } = await pool.query(
       `SELECT s.id FROM salespeople s
        JOIN email_accounts ea ON ea.salesperson_id = s.id AND ea.enabled = true
-       WHERE s.active = true LIMIT 1`
+       WHERE s.active = true AND s.client_id = $1 LIMIT 1`,
+      [clientId]
     );
     spId = rows[0]?.id;
   }
@@ -444,12 +480,10 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
   const { rows: spRows } = await pool.query(
     `SELECT s.*, ea.email AS gmail_email FROM salespeople s
      JOIN email_accounts ea ON ea.salesperson_id = s.id
-     WHERE s.id = $1`, [spId]
+     WHERE s.id = $1 AND s.client_id = $2`, [spId, clientId]
   );
   const sp = spRows[0];
   if (!sp) return res.status(400).json({ error: 'Salesperson not found' });
-
-  const clientId = req.user.client_id;
   // Load the tenant's saved branding so the preview matches real sends. Without
   // this, sendSequenceEmail fell back to hardcoded default colors (red accent)
   // and the preview never reflected the theme set in Settings > Theme.
@@ -521,7 +555,8 @@ router.post('/api/sequences/:id/preview', requireAuth, async (req, res) => {
 
 // -- Sequences UI page ------------------------------------------------------
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', async (req, res) => {
+  const cid = req.user.client_id;
   const [seqRows, spRows] = await Promise.all([
     // COUNT(DISTINCT ...) so the two LEFT JOINs do not multiply each other
     // (steps x enrollments was inflating the step count, e.g. 20 steps x 2
@@ -533,8 +568,9 @@ router.get('/', requireAuth, async (req, res) => {
                 FROM sequences s
                 LEFT JOIN sequence_steps ss ON ss.sequence_id = s.id
                 LEFT JOIN contact_enrollments ce ON ce.sequence_id = s.id
-                GROUP BY s.id ORDER BY s.created_at DESC`),
-    pool.query('SELECT s.id, s.name, ea.email AS gmail_email, ea.enabled, ea.last_error FROM salespeople s LEFT JOIN email_accounts ea ON ea.salesperson_id = s.id WHERE s.active = true ORDER BY s.name'),
+                WHERE s.client_id = $1
+                GROUP BY s.id ORDER BY s.created_at DESC`, [cid]),
+    pool.query('SELECT s.id, s.name, ea.email AS gmail_email, ea.enabled, ea.last_error FROM salespeople s LEFT JOIN email_accounts ea ON ea.salesperson_id = s.id WHERE s.active = true AND s.client_id = $1 ORDER BY s.name', [cid]),
   ]);
 
   const sequences  = seqRows.rows;
