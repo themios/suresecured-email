@@ -71,45 +71,67 @@ router.get('/login', (req, res) => {
   };
   const errMsg = errorMessages[req.query.error];
   const googleButton = googleLoginEnabled() ? `
-    <div class="my-4 flex items-center gap-3 text-xs text-gray-400">
-      <div class="h-px bg-gray-200 flex-1"></div> OR <div class="h-px bg-gray-200 flex-1"></div>
-    </div>
-    <a href="/auth/google"
-      class="w-full flex items-center justify-center gap-2 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition">
+    <div class="divider">or</div>
+    <a href="/auth/google" class="btn-google">
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
       Sign in with Google
     </a>` : '';
   res.send(`<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>SureSecured — Sales Tracker Login</title>
+  <meta charset="UTF-8">
+  <title>Sign in | SalesWyze</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--ink:#15120e;--ink-soft:#221d16;--paper:#f1e8d6;--paper-hi:#faf6ea;--brass-dark:#8f6620;--ember:#b23b27;--ember-hi:#cc4a33;--line:rgba(21,18,14,0.14);}
+    *{box-sizing:border-box;}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--ink);font-family:'Archivo',system-ui,-apple-system,sans-serif;color:var(--ink);}
+    .card{width:100%;max-width:392px;background:var(--paper-hi);border-radius:18px;padding:38px 34px;box-shadow:0 30px 72px rgba(0,0,0,.42);}
+    .brand{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:24px;}
+    .brand-mark{width:34px;height:34px;border-radius:8px;background:var(--ink);color:var(--paper-hi);display:flex;align-items:center;justify-content:center;font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:16px;}
+    .brand-word{font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:24px;letter-spacing:-.01em;}
+    h1{font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:1.55rem;text-align:center;margin:0 0 4px;}
+    .sub{text-align:center;color:var(--brass-dark);font-size:12px;margin:0 0 24px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+    label{display:block;font-size:13px;font-weight:600;color:var(--ink-soft);margin:0 0 6px;}
+    .field{margin-bottom:15px;}
+    input{width:100%;border:1px solid var(--line);background:#fff;border-radius:10px;padding:11px 13px;font-size:15px;font-family:inherit;color:var(--ink);transition:border-color .15s,box-shadow .15s;}
+    input:focus{outline:none;border-color:var(--ember);box-shadow:0 0 0 3px rgba(178,59,39,.16);}
+    .btn-primary{width:100%;border:none;background:var(--ember);color:#fff;border-radius:10px;padding:12px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer;margin-top:4px;transition:background .15s,transform .1s;}
+    .btn-primary:hover{background:var(--ember-hi);}
+    .btn-primary:active{transform:translateY(1px);}
+    .err{background:rgba(178,59,39,.1);color:var(--ember);font-size:13.5px;border-radius:10px;padding:11px 13px;margin-bottom:18px;font-weight:500;}
+    .divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--brass-dark);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;}
+    .divider::before,.divider::after{content:"";height:1px;background:var(--line);flex:1;}
+    .btn-google{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;border:1px solid var(--line);background:#fff;border-radius:10px;padding:11px;font-size:14.5px;font-weight:600;color:var(--ink);text-decoration:none;transition:background .15s;}
+    .btn-google:hover{background:var(--paper);}
+    .foot{text-align:center;margin-top:22px;font-size:12.5px;}
+    .foot a{color:var(--brass-dark);text-decoration:none;font-weight:600;}
+    .foot a:hover{color:var(--ember);}
+  </style>
 </head>
-<body class="bg-gray-900 min-h-screen flex items-center justify-center">
-  <div class="bg-white rounded-xl shadow-lg p-8 w-full max-w-sm">
-    <div class="text-center mb-6">
-      <h1 class="text-2xl font-bold text-gray-800">SureSecured</h1>
-      <p class="text-gray-500 text-sm mt-1">Sales Tracker</p>
-    </div>
-    ${errMsg ? `<div class="bg-red-50 text-red-600 text-sm rounded p-3 mb-4">${errMsg}</div>` : ''}
-    <form method="POST" action="/auth/login" class="space-y-4">
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-        <input type="email" name="email" required
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+<body>
+  <div class="card">
+    <div class="brand"><span class="brand-mark">SW</span><span class="brand-word">SalesWyze</span></div>
+    <h1>Welcome back</h1>
+    <p class="sub">Client sign in</p>
+    ${errMsg ? `<div class="err">${errMsg}</div>` : ''}
+    <form method="POST" action="/auth/login">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" required autocomplete="email">
       </div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
-        <input type="password" name="password" required
-          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      <div class="field">
+        <label>Password</label>
+        <input type="password" name="password" required autocomplete="current-password">
       </div>
-      <button type="submit"
-        class="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-semibold hover:bg-blue-700 transition">
-        Sign In
-      </button>
+      <button type="submit" class="btn-primary">Sign in</button>
     </form>
     ${googleButton}
+    <p class="foot"><a href="/">&larr; Back to SalesWyze</a></p>
   </div>
 </body>
 </html>`);
