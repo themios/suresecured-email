@@ -114,7 +114,7 @@ router.post(
 // understand and cite the page, so the FAQ, service, and org are all described.
 function seoHead(origin) {
   const url = origin + '/';
-  const desc = 'SalesWyze turns the quotes and old customers sitting in your spreadsheet into booked jobs. Email and phone follow up that sounds like your business. You only pay when a job closes.';
+  const desc = 'SalesWyze turns the old leads and past customers sitting in your spreadsheet into new sales. Done-for-you email and text follow up that sounds like your business, for any industry. Flat pricing, no long contract.';
   const title = 'SalesWyze — Your old leads are still worth money';
 
   const org = {
@@ -126,13 +126,13 @@ function seoHead(origin) {
   const site = { '@context': 'https://schema.org', '@type': 'WebSite', name: 'SalesWyze', url };
   const service = {
     '@context': 'https://schema.org', '@type': 'Service',
-    name: 'Lead list reactivation for trades',
+    name: 'Lead list reactivation for any business',
     serviceType: 'Database reactivation and lead follow-up',
     provider: { '@type': 'Organization', name: 'SalesWyze' },
     areaServed: 'US',
-    audience: { '@type': 'Audience', audienceType: 'Roofing, HVAC, electrical, plumbing, and security screen contractors' },
-    description: 'Done-for-you email and phone follow up that reactivates old quotes and cold customer lists and books jobs. You only pay when a job closes.',
-    offers: { '@type': 'Offer', priceSpecification: { '@type': 'PriceSpecification', description: 'Performance based. No monthly fee. A percentage of jobs that close, typically starting around 10 percent.' } },
+    audience: { '@type': 'Audience', audienceType: 'Any business with a list of old leads and past customers, including auto, legal, retail, home services, and agriculture' },
+    description: 'Done-for-you email and phone follow up that reactivates old leads and cold customer lists and books new business, for any industry.',
+    offers: { '@type': 'Offer', priceSpecification: { '@type': 'PriceSpecification', description: 'Flat pricing. Fully managed at $499 per month, or $199 per month with a one-time $999 setup.' } },
   };
   const faqPairs = [
     ['Do I need to switch software?', 'No. This runs alongside whatever you already use for scheduling, invoicing, or your CRM.'],
@@ -208,9 +208,9 @@ ${seoHead(origin)}
     <div class="dot-field" aria-hidden="true"></div>
     <div class="wrap hero-grid">
       <div class="hero-copy reveal">
-        <span class="eyebrow">For roofers, HVAC, electrical, plumbing &amp; security dealers</span>
+        <span class="eyebrow">For any business sitting on a list of old leads and past customers</span>
         <h1 class="h-display">The leads you already paid for are still sitting there.</h1>
-        <p class="hero-sub">Every quote you sent and never heard back on is a job somebody else could still close for you. We turn that old list into new work, with follow up written to sound like your business, not a call center.</p>
+        <p class="hero-sub">Every person who asked about you and never heard back is business somebody else could still win. Auto, legal, retail, home services, agriculture, it does not matter. We turn that old list into new sales, with follow up written to sound like your business, not a call center.</p>
         <div class="hero-actions">
           <a href="#apply" class="btn btn-ember btn-large">Get my free list audit</a>
           <span class="hero-microcopy">No cost. No contract. Takes about two minutes.</span>
@@ -254,7 +254,7 @@ ${seoHead(origin)}
       <div class="problem-grid">
         <div class="problem-card reveal" style="--delay:0ms">
           ${icon('folder')}
-          <p>A folder of quotes nobody ever followed up on.</p>
+          <p>A list of old leads and past customers nobody ever followed up on.</p>
         </div>
         <div class="problem-card reveal" style="--delay:80ms">
           ${icon('mail')}
@@ -319,35 +319,51 @@ ${seoHead(origin)}
     <div class="wrap">
       <h2 class="section-title reveal">Clear pricing. Pick how you want to work with us.</h2>
       <p class="pricing-lede reveal">No long-term contract. It starts with a free audit of your list, so you see what is in there before you pay a cent.</p>
-      <div class="tiers tiers-2">
+      <div class="tiers">
 
-        <div class="tier tier-featured reveal">
-          <span class="tier-tag">We do it for you</span>
-          <h3>Done for you</h3>
-          <div class="tier-price"><span class="amt">$999</span><span class="per">one-time setup</span></div>
-          <p class="tier-sub">then $199 / month</p>
-          <p class="tier-note">We clean your list, write the follow up to sound like your business, wire up the sending, and run it. You just take the calls.</p>
+        <div class="tier reveal">
+          <span class="tier-tag">Hands-off</span>
+          <h3>Fully managed</h3>
+          <div class="tier-price"><span class="amt">$499</span><span class="per">/month</span></div>
+          <p class="tier-sub">we set it up and maintain it</p>
+          <p class="tier-note">We build it and keep it running, start to finish. You never touch it, you just take the calls.</p>
           <ul class="tier-list">
-            <li>Your list cleaned and verified first</li>
-            <li>Email and text sequences written for you</li>
+            <li>Everything set up and maintained for you</li>
+            <li>List cleaned, sequences written and tuned</li>
             <li>Delivery watched daily, so mail reaches the inbox</li>
             <li>New leads captured and answered on their own</li>
             <li>Replies routed straight to your team</li>
           </ul>
+          <a href="#apply" class="btn btn-ink">Get my free list audit</a>
+        </div>
+
+        <div class="tier tier-featured reveal" style="--delay:80ms">
+          <span class="tier-tag">Most popular</span>
+          <h3>We build it, you run it</h3>
+          <div class="tier-price"><span class="amt">$199</span><span class="per">/month</span></div>
+          <p class="tier-sub">one time setup fee of $999</p>
+          <p class="tier-note">We do the whole setup and hand you the keys. Your list cleaned, your sequences written, your sending wired up. You take it from there.</p>
+          <ul class="tier-list">
+            <li>We build the whole thing for you</li>
+            <li>List cleaned and verified first</li>
+            <li>Email and text sequences written for you</li>
+            <li>You run it day to day</li>
+            <li>Cancel anytime</li>
+          </ul>
           <a href="#apply" class="btn btn-ember">Get my free list audit</a>
         </div>
 
-        <div class="tier reveal" style="--delay:80ms">
+        <div class="tier reveal" style="--delay:160ms">
           <span class="tier-tag">Coming soon</span>
           <h3>Self-serve</h3>
           <div class="tier-price"><span class="amt">$199</span><span class="per">/month</span></div>
           <p class="tier-sub">no setup fee</p>
-          <p class="tier-note">Run it yourself. The full platform, your own sending, our sequences and tools.</p>
+          <p class="tier-note">Run it yourself from day one. The full platform, your own sending, our sequences and tools.</p>
           <ul class="tier-list">
             <li>The whole platform, in your hands</li>
             <li>Unlimited contacts</li>
             <li>Send from your own business inbox</li>
-            <li>You manage your own replies</li>
+            <li>You set it up and run it</li>
           </ul>
           <a href="#apply" class="btn btn-ink">Join the waitlist</a>
         </div>
@@ -423,16 +439,8 @@ ${seoHead(origin)}
             </label>
           </div>
           <div class="form-row">
-            <label>What's your trade?
-              <select name="trade">
-                <option value="">Select one</option>
-                <option value="security">Security &amp; screens</option>
-                <option value="roofing">Roofing</option>
-                <option value="hvac">HVAC</option>
-                <option value="plumbing">Plumbing</option>
-                <option value="electrical">Electrical</option>
-                <option value="other">Other</option>
-              </select>
+            <label>What kind of business?
+              <input type="text" name="trade" maxlength="100" placeholder="Auto, legal, retail, agriculture...">
             </label>
             <label>Rough size of your list
               <select name="list_size">
@@ -926,8 +934,8 @@ html.has-js .reveal.in-view{opacity:1;transform:translateY(0);}
 .pricing-lede{text-align:center;color:var(--ink-soft);max-width:52ch;margin:14px auto 0;font-size:1.05rem;line-height:1.6;}
 .tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:20px;max-width:1040px;margin:48px auto 0;align-items:stretch;}
 .tiers-2{max-width:760px;}
-.tier-sub{margin:-8px 0 16px;font-size:1rem;font-weight:600;color:var(--brass-dark);}
-.tier-featured .tier-sub{color:var(--brass);}
+.tier-sub{margin:-8px 0 16px;font-size:.9rem;font-weight:500;color:var(--brass-dark);}
+.tier-featured .tier-sub{color:rgba(250,246,234,.7);}
 .tier{background:var(--paper-hi);border:1px solid var(--line);border-radius:18px;padding:32px 28px;display:flex;flex-direction:column;}
 .tier-featured{background:var(--ink);color:var(--paper-hi);border-color:var(--ink);box-shadow:0 26px 62px rgba(21,18,14,.30);transform:translateY(-8px);}
 .tier-tag{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--brass-dark);margin-bottom:16px;font-weight:600;}
