@@ -2,7 +2,47 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { leadFormLimiter } = require('../middleware/rateLimit');
-const { generateAudit } = require('../lib/audit');
+const { generateAudit, renderAuditEmail } = require('../lib/audit');
+const { sendDirectEmail } = require('../lib/gmail');
+
+// Who the platform sends its own mail as (the audit copy). Prefer an explicit
+// PLATFORM_SALESPERSON_ID; otherwise use the first connected, enabled Gmail
+// identity (lowest client_id = the owner's own tenant). Returns null if no
+// mailbox is connected, in which case we just skip the emailed copy.
+async function platformSender() {
+  const envSp = parseInt(process.env.PLATFORM_SALESPERSON_ID, 10);
+  if (Number.isInteger(envSp)) {
+    const { rows } = await pool.query('SELECT client_id FROM salespeople WHERE id = $1', [envSp]);
+    if (rows[0]) return { salespersonId: envSp, clientId: rows[0].client_id };
+  }
+  const { rows } = await pool.query(
+    `SELECT ea.salesperson_id, s.client_id
+       FROM email_accounts ea
+       JOIN salespeople s ON s.id = ea.salesperson_id
+      WHERE ea.enabled = true AND ea.oauth_refresh_token IS NOT NULL
+      ORDER BY s.client_id ASC, ea.salesperson_id ASC
+      LIMIT 1`
+  );
+  return rows[0] ? { salespersonId: rows[0].salesperson_id, clientId: rows[0].client_id } : null;
+}
+
+// Email the prospect their own copy of the estimate, so we land in their inbox
+// as a contact. Best effort: never blocks or fails the page response.
+async function emailAuditCopy({ to, businessName, audit, origin }) {
+  const sender = await platformSender();
+  if (!sender) { console.warn('[marketing] no connected mailbox; skipping audit email'); return; }
+  const { subject, html, text } = renderAuditEmail(audit, { businessName, origin });
+  await sendDirectEmail({
+    fromName: 'Sure Secured',
+    replyTo: 'sales@suresecured.com',
+    to,
+    subject,
+    htmlBody: html,
+    textBody: text,
+    salespersonId: sender.salespersonId,
+    clientId: sender.clientId,
+  });
+}
 
 function fmtMoney(n) { return '$' + Math.round(n).toLocaleString('en-US'); }
 
@@ -112,6 +152,10 @@ router.post(
     // if generation fails for any reason.
     try {
       const audit = await generateAudit(trade, list_size, deal_value);
+      // Send them a copy for their inbox (and to put us in their contacts).
+      // Fire-and-forget: the page must render even if mail is slow or down.
+      emailAuditCopy({ to: email.trim(), businessName: business_name, audit, origin: originOf(req) })
+        .catch(err => console.error('[marketing] audit email failed:', err.message));
       return res.send(renderAuditReport(originOf(req), { audit, businessName: business_name }));
     } catch (err) {
       console.error('[marketing] audit generation failed:', err.message);

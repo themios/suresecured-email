@@ -122,4 +122,79 @@ async function generateAudit(trade, list_size, dealInput) {
   };
 }
 
-module.exports = { generateAudit, benchmarkFor, listCount, auditMath, parseMoney };
+// ── Emailed copy ────────────────────────────────────────────────────────────
+// A self-contained, email-client-safe version of the estimate. Inline styles
+// only (no <style> block, no external CSS), tables for layout, so it renders in
+// Gmail/Outlook. Same numbers as the on-screen report, same humanized copy.
+function money(n) { return '$' + Math.round(n).toLocaleString('en-US'); }
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function renderAuditEmail(audit, { businessName, origin } = {}) {
+  const { label, count, deal, rows, narrative, usedTheirValue } = audit;
+  const who = businessName && businessName.trim() ? businessName.trim() : 'Your list';
+  const named = who !== 'Your list';
+  const typical = rows.find(r => r.highlight) || rows[1] || rows[0];
+  const pctLabel = (p) => (p % 1 === 0 ? p : p.toFixed(1)) + '%';
+  const cell = 'padding:11px 14px;border-bottom:1px solid #e7ddd0;font-family:Arial,Helvetica,sans-serif;font-size:15px;';
+  const head = 'padding:0 14px 8px;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#8a7960;border-bottom:1px solid #e7ddd0;';
+  const rowsHtml = rows.map(r => `
+      <tr>
+        <td style="${cell}">${pctLabel(r.pct)} <span style="color:#8a7960;">(${escHtml(r.note)})</span></td>
+        <td style="${cell}">${r.sales.toLocaleString('en-US')}</td>
+        <td style="${cell}font-weight:700;color:#b4531f;">${money(r.revenue)}</td>
+      </tr>`).join('');
+  const assume = usedTheirValue
+    ? `Based on your own number, about ${money(deal)} a sale, and a list of roughly ${count.toLocaleString('en-US')}.`
+    : `Based on a typical ${escHtml(label)} sale of about ${money(deal)}, and a list of roughly ${count.toLocaleString('en-US')}.`;
+
+  const subject = named
+    ? `${who}: about ${money(typical.revenue)} sitting in your old list`
+    : `About ${money(typical.revenue)} sitting in your old list`;
+
+  const html = `<div style="background:#f6f0e6;padding:28px 0;">
+  <div style="font-family:Georgia,'Times New Roman',serif;max-width:560px;margin:0 auto;padding:0 24px;color:#211a12;line-height:1.6;">
+    <p style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#8a7960;margin:0 0 6px;">Your free estimate</p>
+    <h1 style="font-family:Arial,Helvetica,sans-serif;font-size:24px;line-height:1.15;margin:0 0 16px;">${escHtml(who)} is worth more than it is doing right now.</h1>
+    <p style="margin:0 0 20px;">${escHtml(narrative)}</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;margin:0 0 12px;">
+      <tr>
+        <th align="left" style="${head}">If this many come back</th>
+        <th align="left" style="${head}">Sales</th>
+        <th align="left" style="${head}">Revenue you recover</th>
+      </tr>${rowsHtml}
+    </table>
+    <p style="font-size:14px;color:#5f5342;margin:0 0 24px;">${assume} Swap in your own numbers any time. The shape does not change.</p>
+    <p style="margin:0 0 24px;"><a href="${escHtml(origin || '')}/#pricing" style="background:#b4531f;color:#ffffff;text-decoration:none;font-family:Arial,Helvetica,sans-serif;font-weight:700;font-size:15px;padding:13px 24px;border-radius:6px;display:inline-block;">See the plans</a></p>
+    <p style="margin:0 0 6px;">We can set this up for you. It runs from $199 a month plus a one-time $999 setup, or fully managed at $499 a month.</p>
+    <p style="margin:0 0 20px;">Want to talk it through? Just reply to this email, or call or text (747) 688-9992.</p>
+    <hr style="border:none;border-top:1px solid #e7ddd0;margin:24px 0;">
+    <p style="font-size:13px;color:#8a7960;margin:0;">Sure Secured, 1555 Simi Town Center Way, Simi Valley, CA 93065<br>sales@suresecured.com</p>
+  </div>
+</div>`;
+
+  const text = [
+    'Your free estimate',
+    '',
+    `${who} is worth more than it is doing right now.`,
+    '',
+    narrative,
+    '',
+    ...rows.map(r => `  ${pctLabel(r.pct)} (${r.note}): ${r.sales.toLocaleString('en-US')} sales = ${money(r.revenue)}`),
+    '',
+    assume,
+    '',
+    `See the plans: ${origin || ''}/#pricing`,
+    'It runs from $199 a month plus a one-time $999 setup, or fully managed at $499 a month.',
+    '',
+    'Reply to this email, or call or text (747) 688-9992.',
+    'Sure Secured, 1555 Simi Town Center Way, Simi Valley, CA 93065 | sales@suresecured.com',
+  ].join('\n');
+
+  return { subject, html, text };
+}
+
+module.exports = { generateAudit, benchmarkFor, listCount, auditMath, parseMoney, renderAuditEmail };
