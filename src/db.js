@@ -59,14 +59,29 @@ const pool = new Pool({
  * Every phase is idempotent (IF NOT EXISTS / guarded DO blocks), so this runs
  * unchanged against both an empty and a fully-populated database.
  */
+// A fixed key so every booting instance contends for the SAME advisory lock.
+const MIGRATION_LOCK_KEY = 947200118;
+
 async function initDb() {
-  await createTenancyCore();
-  await createBaseTables();
-  await createTenantScopedTables();
-  await runMigrations();
-  await postMigrationAlters();
-  await seedLandingPageMatrix();
-  console.log('Database tables ready.');
+  // Serialize concurrent boots (overlapping deploys, a second replica) so the
+  // schema phases and migrations never run simultaneously and race. The lock is
+  // held on one dedicated connection for the whole run and released in finally;
+  // a second booting instance blocks here until the first finishes, then finds
+  // every migration already applied and skips them.
+  const lockClient = await pool.connect();
+  try {
+    await lockClient.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
+    await createTenancyCore();
+    await createBaseTables();
+    await createTenantScopedTables();
+    await runMigrations();
+    await postMigrationAlters();
+    await seedLandingPageMatrix();
+    console.log('Database tables ready.');
+  } finally {
+    await lockClient.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]).catch(() => {});
+    lockClient.release();
+  }
 }
 
 // ── PHASE 0: tenancy core ─────────────────────────────────────────────────
@@ -95,134 +110,52 @@ async function postMigrationAlters() {
 // Runs after createBaseTables() so the ALTER TABLE statements in 001 have
 // something to alter, and before createTenantScopedTables() so `clients` exists
 // for those tables to reference.
+//
+// Applied-once, in order, tracked in schema_migrations. Every file is still
+// written to be idempotent (guarded IF NOT EXISTS / DO blocks) as belt-and-
+// suspenders, but the tracker means a migration is not re-run on every boot and
+// gives a durable record of what has been applied. New schema changes go in a
+// NEW numbered file; applied files are immutable.
+const MIGRATION_FILES = [
+  '001_add_tenancy.sql',
+  '002_commission_engine.sql',
+  '003_email_deliverability.sql',
+  '005_ai_intelligence.sql',
+  '006_voice.sql',
+  '007_attribution.sql',
+  '008_send_limits.sql',
+  '009_agent_system.sql',
+  '010_lead_segment.sql',
+  '011_agent_research_planning.sql',
+  '012_email_sources.sql',
+  '013_auth_domains.sql',
+  '014_order_suggested_salesperson.sql',
+  '015_tenant_backfill.sql',
+  '016_delivery_feedback.sql',
+  '017_step_active.sql',
+  '018_tenant_unique_indexes.sql',
+];
+
 async function runMigrations() {
-  // Run tenancy migration first (idempotent)
-  const migrationSql = fs.readFileSync(
-    path.join(__dirname, '../migrations/001_add_tenancy.sql'),
-    'utf8'
-  );
-  await pool.query(migrationSql);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      filename   TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  const { rows } = await pool.query('SELECT filename FROM schema_migrations');
+  const applied = new Set(rows.map(r => r.filename));
 
-  // Run commission engine migration (idempotent)
-  const migration002Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/002_commission_engine.sql'),
-    'utf8'
-  );
-  await pool.query(migration002Sql);
-
-  // Run email deliverability migration (idempotent)
-  const migration003Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/003_email_deliverability.sql'),
-    'utf8'
-  );
-  await pool.query(migration003Sql);
-
-  // Run AI intelligence migration (idempotent)
-  const migration005Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/005_ai_intelligence.sql'),
-    'utf8'
-  );
-  await pool.query(migration005Sql);
-
-  // Run voice migration (idempotent)
-  const migration006Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/006_voice.sql'),
-    'utf8'
-  );
-  await pool.query(migration006Sql);
-
-  const migration007Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/007_attribution.sql'),
-    'utf8'
-  );
-  await pool.query(migration007Sql);
-
-  const migration008Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/008_send_limits.sql'),
-    'utf8'
-  );
-  await pool.query(migration008Sql);
-
-  // Run AI agent system migration (idempotent) — event bus, per-tenant
-  // enablement, run/cost log, approval queue, reporting output.
-  const migration009Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/009_agent_system.sql'),
-    'utf8'
-  );
-  await pool.query(migration009Sql);
-
-  // Lead segmentation (idempotent) — engagement tier label written by the
-  // Segmentation agent.
-  const migration010Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/010_lead_segment.sql'),
-    'utf8'
-  );
-  await pool.query(migration010Sql);
-
-  // Research (enrichment) + campaign planning agents (idempotent).
-  const migration011Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/011_agent_research_planning.sql'),
-    'utf8'
-  );
-  await pool.query(migration011Sql);
-
-  // Multiple email intake sources + sender rules (idempotent).
-  const migration012Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/012_email_sources.sql'),
-    'utf8'
-  );
-  await pool.query(migration012Sql);
-
-  // Per-tenant Google sign-in domains for auto-join (idempotent).
-  const migration013Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/013_auth_domains.sql'),
-    'utf8'
-  );
-  await pool.query(migration013Sql);
-
-  // Name-based attribution suggestion on orders (idempotent).
-  const migration014Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/014_order_suggested_salesperson.sql'),
-    'utf8'
-  );
-  await pool.query(migration014Sql);
-
-  // Attach pre-tenancy rows to their tenant, and convert the global unique
-  // indexes that would block a second one (idempotent). Must run before route
-  // queries are tenant-scoped, or the backfilled rows go invisible.
-  const migration015Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/015_tenant_backfill.sql'),
-    'utf8'
-  );
-  await pool.query(migration015Sql);
-
-  // Delivery feedback: persist WHY a send failed, and track identity-level
-  // health so a broken mailbox surfaces to the operator instead of failing
-  // silently (idempotent).
-  const migration016Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/016_delivery_feedback.sql'),
-    'utf8'
-  );
-  await pool.query(migration016Sql);
-
-  // Retire sequence steps without deleting them (active flag), so a shortened
-  // sequence keeps its send history (idempotent).
-  const migration017Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/017_step_active.sql'),
-    'utf8'
-  );
-  await pool.query(migration017Sql);
-
-  // Convert the global unique indexes on tenant tables (leads.phone,
-  // orders.shopify_order_id, salespeople.email) to per-tenant composites, so a
-  // second tenant can hold a phone/order/rep the first already has. The P0-8
-  // conversion deferred by migration 015; ON CONFLICT call sites updated in the
-  // same change (idempotent, create-before-drop).
-  const migration018Sql = fs.readFileSync(
-    path.join(__dirname, '../migrations/018_tenant_unique_indexes.sql'),
-    'utf8'
-  );
-  await pool.query(migration018Sql);
+  for (const file of MIGRATION_FILES) {
+    if (applied.has(file)) continue;
+    const sql = fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8');
+    await pool.query(sql);
+    await pool.query(
+      'INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT DO NOTHING',
+      [file]
+    );
+    console.log(`[migrate] applied ${file}`);
+  }
 }
 
 // ── PHASE 1: base tables ──────────────────────────────────────────────────
