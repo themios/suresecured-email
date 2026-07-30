@@ -13,6 +13,8 @@ const { imapEnabled, checkForRepliesViaImap } = require('../lib/imap');
 const { callOpenRouter, buildDigestPrompt, classifyReply } = require('../lib/openrouter');
 const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
+const { sendSms: sendTwilioSms } = require('../lib/twilio');
+const { safeDecrypt } = require('../lib/crypto');
 const { setFirstTouchAttribution } = require('../lib/attribution');
 const { sendTelegram, notifyNewLead, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 const { runDueAgents } = require('../lib/agents/scheduler');
@@ -311,6 +313,10 @@ async function sendSequencesHandler(req, res) {
         s.title            AS salesperson_title,
         c.brand_config,
         c.telnyx_phone_number,
+        c.sms_provider,
+        c.twilio_account_sid,
+        c.twilio_auth_token_enc,
+        c.twilio_phone_number,
         COALESCE((SELECT SUM(es.open_count)  FROM email_sends es WHERE es.lead_id = l.id), 0) AS open_count,
         COALESCE((SELECT SUM(es.click_count) FROM email_sends es WHERE es.lead_id = l.id), 0) AS click_count
       FROM contact_enrollments ce
@@ -514,10 +520,22 @@ async function sendSequencesHandler(req, res) {
           smsBody = smsBody.replaceAll(`{${k}}`, v || '');
         }
 
-        // Per-tenant Telnyx number if the client has one configured, else the
-        // platform default. Mirrors the retell.js/telnyx.js voice pattern.
-        const fromNumber = row.telnyx_phone_number || process.env.TELNYX_PHONE_NUMBER;
-        const smsResult = await sendSms(row.lead_phone, smsBody, fromNumber);
+        // Provider is per tenant: Telnyx (platform account, shared default
+        // number) or Twilio (BYO -- some customers already run their outreach
+        // through their own Twilio account and number). Default stays Telnyx
+        // so every existing tenant is unaffected.
+        const useTwilio = row.sms_provider === 'twilio';
+        const fromNumber = useTwilio
+          ? row.twilio_phone_number
+          : (row.telnyx_phone_number || process.env.TELNYX_PHONE_NUMBER);
+
+        const smsResult = useTwilio
+          ? await sendTwilioSms(row.lead_phone, smsBody, {
+              accountSid: row.twilio_account_sid,
+              authToken: safeDecrypt(row.twilio_auth_token_enc),
+              from: fromNumber,
+            })
+          : await sendSms(row.lead_phone, smsBody, fromNumber);
         sendResult = smsResult;
 
         if (smsResult.ok) {
@@ -525,11 +543,13 @@ async function sendSequencesHandler(req, res) {
           await client.query(
             `INSERT INTO sms_messages
                (enrollment_id, step_id, lead_id, client_id, direction, from_number, to_number,
-                body, telnyx_message_id, status, sent_at)
-             VALUES ($1,$2,$3,$4,'outbound',$5,$6,$7,$8,'sent',NOW())`,
+                body, telnyx_message_id, twilio_message_sid, provider, status, sent_at)
+             VALUES ($1,$2,$3,$4,'outbound',$5,$6,$7,$8,$9,$10,'sent',NOW())`,
             [row.enrollment_id, step.id, row.lead_id, row.client_id,
-             fromNumber, row.lead_phone,
-             smsBody, smsResult.messageId]
+             fromNumber, row.lead_phone, smsBody,
+             useTwilio ? null : smsResult.messageId,
+             useTwilio ? smsResult.messageId : null,
+             useTwilio ? 'twilio' : 'telnyx']
           );
         } else {
           // Record the failure the same way email failures are recorded, so
@@ -537,10 +557,11 @@ async function sendSequencesHandler(req, res) {
           await client.query(
             `INSERT INTO sms_messages
                (enrollment_id, step_id, lead_id, client_id, direction, from_number, to_number,
-                body, status, error_reason, sent_at)
-             VALUES ($1,$2,$3,$4,'outbound',$5,$6,$7,'failed',$8,NOW())`,
+                body, status, error_reason, provider, sent_at)
+             VALUES ($1,$2,$3,$4,'outbound',$5,$6,$7,'failed',$8,$9,NOW())`,
             [row.enrollment_id, step.id, row.lead_id, row.client_id,
-             fromNumber, row.lead_phone, smsBody, String(smsResult.error || '').slice(0, 500)]
+             fromNumber, row.lead_phone, smsBody, String(smsResult.error || '').slice(0, 500),
+             useTwilio ? 'twilio' : 'telnyx']
           );
         }
       } else {

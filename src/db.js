@@ -138,6 +138,7 @@ const MIGRATION_FILES = [
   '020_seed_canary.sql',
   '021_sms_delivery_consent.sql',
   '022_billing.sql',
+  '023_twilio_sms.sql',
 ];
 
 async function runMigrations() {

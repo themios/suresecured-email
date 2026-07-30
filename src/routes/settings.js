@@ -1034,26 +1034,69 @@ router.post('/email/test-imap', requireAuth, async (req, res) => {
 // ─── Phone & SMS ──────────────────────────────────────────────────────────────
 router.get('/phone', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { rows } = await pool.query('SELECT brand_config, telnyx_phone_number FROM clients WHERE id = $1', [clientId]);
+  const { rows } = await pool.query(
+    `SELECT brand_config, telnyx_phone_number, sms_provider, twilio_account_sid, twilio_auth_token_enc, twilio_phone_number
+     FROM clients WHERE id = $1`, [clientId]
+  );
   const bc = rows[0]?.brand_config || {};
   const telnyxNumber = rows[0]?.telnyx_phone_number || '';
+  const provider = rows[0]?.sms_provider || 'telnyx';
+  const twilioSid = rows[0]?.twilio_account_sid || '';
+  const twilioHasToken = !!rows[0]?.twilio_auth_token_enc;
+  const twilioNumber = rows[0]?.twilio_phone_number || '';
 
   const body = `
   <form method="POST" action="/settings/phone">
     <div class="bg-white rounded-xl shadow-sm p-6 space-y-4">
-      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">SMS &amp; Voice (Telnyx)</h2>
-      <p class="text-xs text-slate-400">Your own number for outbound SMS sequences and voice. SMS steps in your sequences send from this number instead of the platform default. Requires 10DLC Brand + Campaign registration in the Telnyx portal before outbound SMS delivers to US numbers (3-7 day approval) — inbound replies and STOP/HELP work immediately.</p>
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">Telnyx Phone Number</label>
-          <input name="telnyx_phone_number" value="${esc(telnyxNumber)}" placeholder="+17476889992"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
-          <p class="text-xs text-slate-400 mt-1">E.164 format, e.g. +15551234567.</p>
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">SMS &amp; Voice Provider</h2>
+      <p class="text-xs text-slate-400">Some accounts already run texting through their own Twilio account — pick whichever provider you use. SMS steps in your sequences send from the number below instead of the platform default.</p>
+
+      <div class="flex gap-2 mb-2">
+        <button type="button" onclick="selectSmsProvider('telnyx')" data-sms-provider="telnyx"
+          class="sms-provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition
+            ${provider === 'telnyx' ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-200'}">Telnyx</button>
+        <button type="button" onclick="selectSmsProvider('twilio')" data-sms-provider="twilio"
+          class="sms-provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition
+            ${provider === 'twilio' ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-200'}">Twilio</button>
+      </div>
+      <input type="hidden" name="sms_provider" id="sms_provider-value" value="${esc(provider)}">
+
+      <div id="telnyx-fields" style="${provider === 'telnyx' ? '' : 'display:none'}">
+        <p class="text-xs text-slate-400 mb-2">Requires 10DLC Brand + Campaign registration in the Telnyx portal before outbound SMS delivers to US numbers (3-7 day approval) — inbound replies and STOP/HELP work immediately.</p>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Telnyx Phone Number</label>
+            <input name="telnyx_phone_number" value="${esc(telnyxNumber)}" placeholder="+17476889992"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <p class="text-xs text-slate-400 mt-1">E.164 format, e.g. +15551234567.</p>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">10DLC Campaign ID (optional)</label>
+            <input name="telnyx_campaign_id" value="${esc(bc.telnyx_campaign_id)}" placeholder="Campaign registered ID"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+        </div>
+      </div>
+
+      <div id="twilio-fields" style="${provider === 'twilio' ? '' : 'display:none'}">
+        <p class="text-xs text-slate-400 mb-2">Your own Twilio account credentials (console.twilio.com → Account → API keys & tokens). Set your webhook URLs in the Twilio console: inbound SMS to <code>/twilio-hooks/sms</code>, status callback to <code>/twilio-hooks/status</code> (set automatically on each send).</p>
+        <div class="grid grid-cols-2 gap-4 mb-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Twilio Phone Number</label>
+            <input name="twilio_phone_number" value="${esc(twilioNumber)}" placeholder="+17476889992"
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Twilio Account SID</label>
+            <input name="twilio_account_sid" value="${esc(twilioSid)}" placeholder="AC..."
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">10DLC Campaign ID (optional)</label>
-          <input name="telnyx_campaign_id" value="${esc(bc.telnyx_campaign_id)}" placeholder="Campaign registered ID"
+          <label class="block text-xs font-medium text-slate-500 mb-1">Twilio Auth Token</label>
+          <input type="password" name="twilio_auth_token" placeholder="${twilioHasToken ? '••••••••••••  (saved)' : 'Enter auth token'}"
             class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          ${twilioHasToken ? '<p class="text-xs text-slate-400 mt-1">Leave blank to keep existing</p>' : ''}
         </div>
       </div>
 
@@ -1067,28 +1110,53 @@ router.get('/phone', requireAuth, async (req, res) => {
     <div class="flex justify-end mt-4">
       <button type="submit" class="bg-sky-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-sky-700">Save Phone & SMS</button>
     </div>
-  </form>`;
+  </form>
+  <script>
+    function selectSmsProvider(key) {
+      document.getElementById('sms_provider-value').value = key;
+      document.querySelectorAll('.sms-provider-btn').forEach(function(btn) {
+        var active = btn.dataset.smsProvider === key;
+        btn.className = 'sms-provider-btn text-left px-3 py-2.5 rounded-lg border text-sm transition ' +
+          (active ? 'border-blue-500 bg-blue-50 text-blue-700 font-medium' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-200');
+      });
+      document.getElementById('telnyx-fields').style.display = key === 'telnyx' ? '' : 'none';
+      document.getElementById('twilio-fields').style.display = key === 'twilio' ? '' : 'none';
+    }
+  </script>`;
 
   res.send(pageShell('Phone & SMS', 'phone', body, req.query.msg, req.query.ok));
 });
 
+// Loose E.164 check: leading +, 8-15 digits. Shared by both providers.
+function isE164(v) {
+  return /^\+[1-9]\d{7,14}$/.test(String(v || '').trim());
+}
+
 router.post('/phone', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { phone, telnyx_phone_number, telnyx_campaign_id } = req.body;
+  const { phone, telnyx_phone_number, telnyx_campaign_id, twilio_phone_number, twilio_account_sid, twilio_auth_token } = req.body;
+  const smsProvider = req.body.sms_provider === 'twilio' ? 'twilio' : 'telnyx';
 
-  // Loose E.164 check: leading +, 8-15 digits. Reject rather than silently
-  // save something SMS sending would fail on with a confusing Telnyx error.
   const cleanTelnyx = String(telnyx_phone_number || '').trim();
-  if (cleanTelnyx && !/^\+[1-9]\d{7,14}$/.test(cleanTelnyx)) {
+  const cleanTwilioNumber = String(twilio_phone_number || '').trim();
+
+  if (cleanTelnyx && !isE164(cleanTelnyx)) {
     return res.redirect('/settings/phone?ok=0&msg=' + encodeURIComponent('Telnyx phone number must be in E.164 format, e.g. +15551234567.'));
   }
+  if (cleanTwilioNumber && !isE164(cleanTwilioNumber)) {
+    return res.redirect('/settings/phone?ok=0&msg=' + encodeURIComponent('Twilio phone number must be in E.164 format, e.g. +15551234567.'));
+  }
+  if (smsProvider === 'twilio' && (!cleanTwilioNumber || !twilio_account_sid?.trim())) {
+    return res.redirect('/settings/phone?ok=0&msg=' + encodeURIComponent('Twilio phone number and Account SID are required to use Twilio.'));
+  }
+
+  // Neither number has a DB-level unique constraint, and the inbound webhooks
+  // for both providers resolve the tenant by a bare lookup with no
+  // tiebreaker -- so two tenants sharing a number (even across providers,
+  // in case of an entry mistake) would non-deterministically misroute each
+  // other's replies/calls. These forms are the only place a number gets
+  // assigned, so collisions are rejected here rather than left to happen.
   if (cleanTelnyx) {
-    // telnyx_phone_number has no DB-level unique constraint, and both the SMS
-    // and voice (retell.js) inbound webhooks resolve the tenant by looking it
-    // up with no tiebreaker beyond LIMIT 1 -- so two tenants sharing a number
-    // would non-deterministically misroute each other's inbound messages/calls.
-    // This form is the only place a number gets assigned, so reject a collision
-    // here rather than let it happen silently.
     const { rows: collision } = await pool.query(
       'SELECT id FROM clients WHERE telnyx_phone_number = $1 AND active = true AND id != $2',
       [cleanTelnyx, clientId]
@@ -1097,13 +1165,29 @@ router.post('/phone', requireAuth, async (req, res) => {
       return res.redirect('/settings/phone?ok=0&msg=' + encodeURIComponent('That Telnyx number is already assigned to another account.'));
     }
   }
+  if (cleanTwilioNumber) {
+    const { rows: collision } = await pool.query(
+      'SELECT id FROM clients WHERE twilio_phone_number = $1 AND active = true AND id != $2',
+      [cleanTwilioNumber, clientId]
+    );
+    if (collision.length) {
+      return res.redirect('/settings/phone?ok=0&msg=' + encodeURIComponent('That Twilio number is already assigned to another account.'));
+    }
+  }
 
-  const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
+  const { rows } = await pool.query('SELECT brand_config, twilio_auth_token_enc FROM clients WHERE id = $1', [clientId]);
   const existing = rows[0]?.brand_config || {};
   const updated = { ...existing, phone, telnyx_campaign_id };
+  // Keep the existing encrypted token unless a new one was actually typed —
+  // same "leave blank to keep existing" pattern as the SMTP password field.
+  const tokenEnc = twilio_auth_token?.trim() ? encrypt(twilio_auth_token.trim()) : (rows[0]?.twilio_auth_token_enc || null);
+
   await pool.query(
-    'UPDATE clients SET brand_config = $1, telnyx_phone_number = $2 WHERE id = $3',
-    [JSON.stringify(updated), cleanTelnyx || null, clientId]
+    `UPDATE clients SET brand_config = $1, telnyx_phone_number = $2, sms_provider = $3,
+       twilio_account_sid = $4, twilio_auth_token_enc = $5, twilio_phone_number = $6
+     WHERE id = $7`,
+    [JSON.stringify(updated), cleanTelnyx || null, smsProvider,
+     twilio_account_sid?.trim() || null, tokenEnc, cleanTwilioNumber || null, clientId]
   );
   res.redirect('/settings/phone?ok=1&msg=Phone+%26+SMS+settings+saved.');
 });

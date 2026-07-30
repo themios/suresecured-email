@@ -27,6 +27,7 @@ const settingsRouter    = require('./routes/settings');
 const billingRouter     = require('./routes/billing');
 const retellRouter      = require('./routes/retell');
 const telnyxRouter      = require('./routes/telnyx');
+const twilioRouter      = require('./routes/twilio');
 const pixelRouter       = require('./routes/pixel');
 const emailClickRouter  = require('./routes/email-click');
 const marketingRouter   = require('./routes/marketing');
@@ -113,6 +114,7 @@ app.use('/retell-hooks', retellRouter);
 
 // Telnyx SMS webhook handlers — must be after express.json()
 app.use('/telnyx-hooks', telnyxRouter);
+app.use('/twilio-hooks', twilioRouter);
 
 // Unsubscribe (no auth — must be publicly accessible)
 app.use('/unsubscribe', unsubscribeRouter);
