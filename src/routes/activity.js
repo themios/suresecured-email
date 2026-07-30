@@ -8,16 +8,26 @@ const { shell, ICONS, esc } = require('../lib/layout');
 const { calculateCommission } = require('../lib/commissions');
 const { logEvent, ipOf } = require('../lib/auditLog');
 
-// Every drill-down here reads a tenant-owned table. Enforce identity + tenant
-// context once so no page can list another tenant's orders, commissions, calls,
-// clicks, or form submissions. req.user.client_id is guaranteed after this.
-router.use(requireAuth, requireTenantContext);
-
+// Every drill-down here reads a tenant-owned table, so every route below
+// attaches requireAuth + requireTenantContext individually (NOT a router-level
+// router.use()). This router is mounted at app.use('/', activityRouter) — the
+// ROOT path — because its routes (/orders, /commissions, /calls, /clicks,
+// /form-submissions) have no common prefix and predate this file. A blanket
+// router.use() here would run for EVERY request that reaches this point in
+// index.js's middleware chain, not just requests matching this router's own
+// routes, because Express treats a '/' mount as matching any path. That
+// silently 302'd every route registered AFTER this one in index.js that
+// doesn't carry a session cookie: cron jobs (POST with a Bearer secret, no
+// cookie), the Telnyx/Retell webhooks, unsubscribe links, and Gmail OAuth
+// callbacks — all real production traffic with no cookie, redirected to
+// /login instead of reaching their actual handler. Caught by hand-testing the
+// Telnyx SMS webhook and seeing an unexpected redirect where a 200 was
+// expected. Per-route attachment is the only mounting-safe form of this guard.
 const PAGE_SIZE = 50;
 
 // Assign an uncredited order to a rep (e.g. accepting a name suggestion) and
 // credit the commission identically to the webhook path.
-router.post('/orders/:id/assign', express.urlencoded({ extended: false }), async (req, res) => {
+router.post('/orders/:id/assign', requireAuth, requireTenantContext, express.urlencoded({ extended: false }), async (req, res) => {
   const orderId = parseInt(req.params.id, 10);
   const salespersonId = parseInt(req.body.salesperson_id, 10);
   if (!orderId || !salespersonId) return res.redirect('/orders');
@@ -119,7 +129,7 @@ function tableShell(headers, rows, emptyMessage) {
 }
 
 // ─── Orders ─────────────────────────────────────────────────────────────────
-router.get('/orders', async (req, res) => {
+router.get('/orders', requireAuth, requireTenantContext, async (req, res) => {
   const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
@@ -178,7 +188,7 @@ router.get('/orders', async (req, res) => {
 });
 
 // ─── Commissions ────────────────────────────────────────────────────────────
-router.get('/commissions', async (req, res) => {
+router.get('/commissions', requireAuth, requireTenantContext, async (req, res) => {
   const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
@@ -221,7 +231,7 @@ router.get('/commissions', async (req, res) => {
 });
 
 // ─── Phone Calls ────────────────────────────────────────────────────────────
-router.get('/calls', async (req, res) => {
+router.get('/calls', requireAuth, requireTenantContext, async (req, res) => {
   const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
@@ -262,7 +272,7 @@ router.get('/calls', async (req, res) => {
 });
 
 // ─── Email Clicks ───────────────────────────────────────────────────────────
-router.get('/clicks', async (req, res) => {
+router.get('/clicks', requireAuth, requireTenantContext, async (req, res) => {
   const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
@@ -307,7 +317,7 @@ router.get('/clicks', async (req, res) => {
 });
 
 // ─── Form Submissions ───────────────────────────────────────────────────────
-router.get('/form-submissions', async (req, res) => {
+router.get('/form-submissions', requireAuth, requireTenantContext, async (req, res) => {
   const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
