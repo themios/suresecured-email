@@ -1,7 +1,9 @@
 # SalesWyze Build Plan
 
 **Date:** 2026-07-30
-**Goal:** turn a working single-tenant app into a multi-tenant product that can safely sell all three offers (pay-on-close, managed, self-serve), without boiling the ocean.
+**Goal:** turn a working single-tenant app into a multi-tenant product that can safely sell its offers (done-for-you and self-serve), without boiling the ocean.
+
+> **Pricing decision (2026-07-30):** pay-on-close is dropped. Close attribution cannot be verified without the customer's cooperation and turns every invoice into a dispute. The model is now flat: **Done for you at $999 one-time setup then $199/month**, and **Self-serve at $199/month** with no setup (coming later). The free list audit stays the entry point and de-risks the setup fee. This decision also **removes the attribution and close-tracking engine from the build** entirely, which is a real scope reduction. Where this plan below still says "pay-on-close" or "$499 managed," read "done-for-you $999 + $199."
 
 ---
 
@@ -21,7 +23,7 @@ Your edge is **proven delivery for trades**. Not "we sent it." "We watched it la
 
 1. **It sends from a real inbox and sounds like a person**, so it actually gets read.
 2. **A seed canary proves the mail reaches the inbox**, not spam, every day, automatically. You catch a delivery problem before the customer notices their replies dried up.
-3. **You only win when they win** (pay-on-close), or you watch it for them (managed). The incentive is honest.
+3. **You do it for them and you watch it, or they run it themselves.** Either way the follow up actually happens, which for a busy trades owner is the whole point.
 
 Lead the brand with that. "Reactivation that actually lands." It is a claim your competitors cannot make and your product can prove.
 
@@ -43,7 +45,7 @@ Lead the brand with that. "Reactivation that actually lands." It is a claim your
    │  per-tenant sending +      │              │  audit log, backups,       │
    │  seed canary + hand        │              │  security hardening        │
    │  onboarding                │              │  (needed as clients grow)  │
-   │  → sell pay-on-close +$499 │              └───────────────────────────┘
+   │  → sell done-for-you       │              └───────────────────────────┘
    └──────────────┬────────────┘
                   ▼
    ┌───────────────────────────┐
@@ -76,14 +78,14 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 
 ## Phase 1 — Managed tier live (fastest to new revenue)
 
-**Why here:** the managed and pay-on-close offers are delivered by hand, so they do not need billing or self-serve onboarding. Once isolation is done, this is a short hop to a second paying client.
+**Why here:** the done-for-you offer is delivered by hand, so they do not need billing or self-serve onboarding. Once isolation is done, this is a short hop to a second paying client.
 
 **Work items:**
 1. **Per-tenant sending that scales past Gmail's cap.** Today sending runs through one Gmail account, capped near 500 a day, and Railway blocks SMTP. Each client needs their own sending identity: their own Google Workspace connected by OAuth (the connect flow already exists), or an API-based ESP per tenant. Decide the default and make onboarding a client include connecting their sender.
 2. **The seed canary.** A monitored seed address per tenant, added to each campaign. A daily check reads the seed inbox via the Gmail API (plumbing you already use for reply detection) and records: did it arrive, which folder (inbox, spam, promotions), how long it took. Feed the result into the sending-health banner and `/undelivered`. This is the differentiator and the managed-tier value in one feature.
-3. **A light client-health view for you.** One screen across all managed clients: are their sends landing, any bounces climbing, any mailbox that stopped authenticating. This is the "we watch it so you never have to" that justifies the $499.
+3. **A light client-health view for you.** One screen across all managed clients: are their sends landing, any bounces climbing, any mailbox that stopped authenticating. This is the "we watch it so you never have to" that justifies the monthly.
 
-**What you can sell after:** pay-on-close and $499 managed, to real clients beyond SureSecured, with a delivery guarantee you can actually back.
+**What you can sell after:** the done-for-you offer ($999 setup + $199/month), to real clients beyond SureSecured, with a delivery guarantee you can actually back.
 
 **Rough size:** medium. The seed canary reuses existing Gmail plumbing. Per-tenant sending is mostly onboarding flow plus a decision on the default sender.
 
@@ -103,7 +105,7 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 5. **Delivery receipts and monitoring.** Telnyx returns delivery status per message. Record it the same way email sends are recorded, so a text that fails to deliver shows up on the health view, not silently.
 6. **Metering.** SMS has a real per-message cost (about $0.008 a segment) plus the 10DLC fees. Meter it per tenant and mark it up, the same as email sends and verification in Phase 2.
 
-**What you can sell after:** the omnichannel version of managed and pay-on-close, which is the tier the expensive agencies charge the most for. It roughly doubles the value of the offer.
+**What you can sell after:** the omnichannel version of done-for-you, which is what the expensive agencies charge the most for. It roughly doubles the value of the offer.
 
 **Rough size:** medium, but front-loaded by the 10DLC approval wait, which is calendar time, not work time. Do the code while the registration clears.
 

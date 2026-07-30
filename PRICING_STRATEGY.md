@@ -6,6 +6,10 @@
 
 ---
 
+> **Decision (2026-07-30):** after weighing this analysis, the call is a flat model, not revenue share. **Done for you: $999 one-time setup, then $199/month. Self-serve: $199/month, no setup (coming later).** Pay-on-close was dropped because close attribution cannot be verified without the customer's cooperation and turns every invoice into a dispute. The analysis below is kept for the competitor benchmarks and cost structure, which still hold; the tier recommendations are superseded by this decision.
+
+---
+
 ## The one-paragraph answer
 
 Your current offer (pay only when a job closes, roughly 10 percent, nothing up front) is the strongest acquisition hook in the market and it aligns your incentives with the client's. Keep it as the front door. But a pure revenue share is fragile for you in three ways: you do the work before you get paid, you depend on the client honestly reporting closes, and it does not scale past the hours your team can personally deliver. The fix is not to abandon it. It is to add two things beside it: a flat managed tier for clients who want predictability, and a self-serve platform tier that earns recurring money without burning your team's hours. Price against the benchmarks below, protect the revenue share with attribution and a short term, and you have a pricing model that both converts and compounds.
