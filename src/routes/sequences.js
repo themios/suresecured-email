@@ -109,18 +109,25 @@ router.delete('/api/sequences/:id', async (req, res) => {
 // Upsert a step
 router.post('/api/sequences/:id/steps', async (req, res) => {
   const cid = req.user.client_id;
-  const { step_number, delay_days, delay_minutes, subject, body } = req.body;
+  const { step_number, delay_days, delay_minutes, subject, body, channel } = req.body;
   const dm = delay_minutes != null ? parseInt(delay_minutes) : null;
+  const stepChannel = channel === 'sms' ? 'sms' : 'email';
+  // subject is NOT NULL in the schema (email always has one); SMS has no
+  // subject line, so synthesize a short label from the body for the column
+  // rather than relaxing the constraint for the one channel that needs it.
+  const stepSubject = stepChannel === 'sms'
+    ? (subject || (body || '').slice(0, 60) || '(SMS)')
+    : subject;
   // Confirm the parent sequence is this tenant's before writing a step onto it.
   const { rows: own } = await pool.query('SELECT 1 FROM sequences WHERE id = $1 AND client_id = $2', [req.params.id, cid]);
   if (!own[0]) return res.status(404).json({ error: 'Sequence not found' });
   const { rows } = await pool.query(
-    `INSERT INTO sequence_steps (sequence_id, client_id, step_number, delay_days, delay_minutes, subject, body)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO sequence_steps (sequence_id, client_id, step_number, delay_days, delay_minutes, subject, body, channel)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      ON CONFLICT (sequence_id, step_number) DO UPDATE
-       SET delay_days=$4, delay_minutes=$5, subject=$6, body=$7
+       SET delay_days=$4, delay_minutes=$5, subject=$6, body=$7, channel=$8
      RETURNING *`,
-    [req.params.id, cid, step_number, delay_days, dm, subject, body]
+    [req.params.id, cid, step_number, delay_days, dm, stepSubject, body, stepChannel]
   );
   res.json(rows[0]);
 });
@@ -954,7 +961,7 @@ router.get('/', async (req, res) => {
       // If delay_minutes is set, activate test mode automatically
       if (step.delay_minutes != null) testMode = true;
       var delayVal = step.delay_minutes != null ? step.delay_minutes : (step.delay_days || 0);
-      list.innerHTML += buildStepHtml(step.step_number, delayVal, step.subject, step.body, step.id, step.delay_minutes != null);
+      list.innerHTML += buildStepHtml(step.step_number, delayVal, step.subject, step.body, step.id, step.delay_minutes != null, step.channel || 'email');
     });
     // Sync test mode button state
     var btn = document.getElementById('test-mode-btn');
@@ -966,25 +973,54 @@ router.get('/', async (req, res) => {
     }
   }
 
-  function buildStepHtml(stepNum, delayVal, subject, body, stepId, isMinutes) {
+  // Toggle the subject field and body label/placeholder for a step's channel.
+  // SMS has no subject line and a much shorter effective message length.
+  function onChannelChange(stepNum) {
+    var channel = document.getElementById('step-channel-' + stepNum).value;
+    var subjectWrap = document.getElementById('step-subject-wrap-' + stepNum);
+    var bodyLabel   = document.getElementById('step-body-label-' + stepNum);
+    var bodyInput   = document.getElementById('step-body-' + stepNum);
+    if (channel === 'sms') {
+      subjectWrap.style.display = 'none';
+      bodyLabel.textContent = 'SMS message (use {first_name}, {city}, {product_interest}) — keep it under ~300 characters';
+      bodyInput.rows = 3;
+    } else {
+      subjectWrap.style.display = '';
+      bodyLabel.textContent = 'Email body (use {first_name}, {city}, {product_interest})';
+      bodyInput.rows = 5;
+    }
+  }
+
+  function buildStepHtml(stepNum, delayVal, subject, body, stepId, isMinutes, channel) {
+    channel = channel || 'email';
     var label = (isMinutes || testMode) ? 'Send after (minutes)' : 'Send after (days)';
+    var subjectHidden = channel === 'sms' ? 'style="display:none"' : '';
+    var bodyLabelText = channel === 'sms'
+      ? 'SMS message (use {first_name}, {city}, {product_interest}) — keep it under ~300 characters'
+      : 'Email body (use {first_name}, {city}, {product_interest})';
     return '<div class="border border-slate-200 rounded-xl p-4" id="step-block-' + stepNum + '">' +
       '<div class="flex justify-between items-center mb-3">' +
         '<span class="font-semibold text-sm text-slate-800">Step ' + stepNum + '</span>' +
-        '<button onclick="deleteStep(' + (stepId || 0) + ', ' + stepNum + ')" class="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Remove</button>' +
+        '<div class="flex items-center gap-2">' +
+          '<select id="step-channel-' + stepNum + '" onchange="onChannelChange(' + stepNum + ')" class="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-sky-500">' +
+            '<option value="email"' + (channel === 'email' ? ' selected' : '') + '>Email</option>' +
+            '<option value="sms"' + (channel === 'sms' ? ' selected' : '') + '>SMS</option>' +
+          '</select>' +
+          '<button onclick="deleteStep(' + (stepId || 0) + ', ' + stepNum + ')" class="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors">Remove</button>' +
+        '</div>' +
       '</div>' +
       '<div class="grid grid-cols-4 gap-3 mb-3">' +
         '<div>' +
           '<label class="block text-xs text-slate-500 mb-1 font-medium">' + label + '</label>' +
           '<input type="number" min="0" value="' + (delayVal || 0) + '" id="step-delay-' + stepNum + '" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">' +
         '</div>' +
-        '<div class="col-span-3">' +
+        '<div class="col-span-3" id="step-subject-wrap-' + stepNum + '" ' + subjectHidden + '>' +
           '<label class="block text-xs text-slate-500 mb-1 font-medium">Subject line</label>' +
           '<input type="text" value="' + (subject || '').replace(/"/g,'&quot;') + '" id="step-subject-' + stepNum + '" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" placeholder="e.g. Quick question about your security concerns">' +
         '</div>' +
       '</div>' +
-      '<label class="block text-xs text-slate-500 mb-1 font-medium">Email body (use {first_name}, {city}, {product_interest})</label>' +
-      '<textarea id="step-body-' + stepNum + '" rows="5" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">' + (body || '') + '</textarea>' +
+      '<label class="block text-xs text-slate-500 mb-1 font-medium" id="step-body-label-' + stepNum + '">' + bodyLabelText + '</label>' +
+      '<textarea id="step-body-' + stepNum + '" rows="' + (channel === 'sms' ? 3 : 5) + '" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">' + (body || '') + '</textarea>' +
       '<button onclick="saveStep(' + stepNum + (stepId ? ', ' + stepId : '') + ')" class="mt-2 text-xs bg-sky-600 text-white px-3 py-1.5 rounded-lg hover:bg-sky-700 transition-colors">Save Step</button>' +
     '</div>';
   }
@@ -994,18 +1030,21 @@ router.get('/', async (req, res) => {
     var list = document.getElementById('steps-list');
     stepCount = list.children.length + 1;
     var defaultDelay = testMode ? 10 : (stepCount === 1 ? 0 : 3);
-    list.innerHTML += buildStepHtml(stepCount, defaultDelay, '', '', null, testMode);
+    list.innerHTML += buildStepHtml(stepCount, defaultDelay, '', '', null, testMode, 'email');
     list.lastElementChild.scrollIntoView({ behavior: 'smooth' });
   }
 
   function saveStep(stepNum, stepId) {
     if (!activeSeqId) { showToast('Save the sequence first', 'warn'); return; }
+    var channel = document.getElementById('step-channel-' + stepNum).value;
     var delay   = parseInt(document.getElementById('step-delay-' + stepNum).value) || 0;
     var subject = document.getElementById('step-subject-' + stepNum).value.trim();
     var body    = document.getElementById('step-body-' + stepNum).value;
-    if (!subject || !body) { showToast('Subject and body are required', 'error'); return; }
+    // SMS has no subject line; email always requires one.
+    if (channel === 'email' && (!subject || !body)) { showToast('Subject and body are required', 'error'); return; }
+    if (channel === 'sms' && !body) { showToast('SMS message body is required', 'error'); return; }
 
-    var payload = { step_number: stepNum, subject: subject, body: body };
+    var payload = { step_number: stepNum, subject: subject, body: body, channel: channel };
     if (testMode) {
       payload.delay_minutes = delay;
       payload.delay_days    = 0;
