@@ -1051,6 +1051,8 @@ router.post('/phone', requireAuth, async (req, res) => {
 });
 
 // ─── Theme & Branding ─────────────────────────────────────────────────────────
+const EYEDROP_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z"/></svg>`;
+
 router.get('/theme', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
@@ -1061,37 +1063,30 @@ router.get('/theme', requireAuth, async (req, res) => {
     <div class="bg-white rounded-xl shadow-sm p-6 space-y-4">
       <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">Email Colors</h2>
       <p class="text-xs text-slate-400">These colors are used in your outgoing email templates.</p>
+      <p class="text-xs text-slate-400">Type a hex code, use the swatch picker, or click the eyedropper and sample a color from anywhere on your screen (open your website in another window and click the color). The preview updates as you go.</p>
       <div class="grid grid-cols-3 gap-4">
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">Primary Color</label>
-          <div class="flex gap-2">
-            <input type="color" name="primary_color" value="${esc(bc.primary_color || '#030302')}"
-              class="h-9 w-12 rounded border cursor-pointer p-0.5">
-            <input type="text" id="primary_color_hex" value="${esc(bc.primary_color || '#030302')}"
-              oninput="document.querySelector('[name=primary_color]').value=this.value"
-              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <label class="block text-xs font-medium text-slate-500 mb-1">Primary Color <span class="text-slate-400 font-normal">(header bar)</span></label>
+          <div class="flex gap-2 items-center">
+            <input type="color" name="primary_color" value="${esc(bc.primary_color || '#030302')}" class="h-9 w-12 rounded border cursor-pointer p-0.5 shrink-0">
+            <input type="text" id="primary_hex" value="${esc(bc.primary_color || '#030302')}" class="flex-1 min-w-0 border rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <button type="button" class="eyedrop shrink-0 h-9 w-9 flex items-center justify-center rounded border hover:bg-slate-50 text-slate-500" data-target="primary" title="Pick a color from anywhere on your screen">${EYEDROP_SVG}</button>
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">Accent Color</label>
-          <div class="flex gap-2">
-            <input type="color" name="accent_color" value="${esc(bc.accent_color || '#E91111')}"
-              class="h-9 w-12 rounded border cursor-pointer p-0.5"
-              oninput="document.getElementById('accent_hex').value=this.value">
-            <input type="text" id="accent_hex" value="${esc(bc.accent_color || '#E91111')}"
-              oninput="document.querySelector('[name=accent_color]').value=this.value"
-              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <label class="block text-xs font-medium text-slate-500 mb-1">Accent Color <span class="text-slate-400 font-normal">(button)</span></label>
+          <div class="flex gap-2 items-center">
+            <input type="color" name="accent_color" value="${esc(bc.accent_color || '#E91111')}" class="h-9 w-12 rounded border cursor-pointer p-0.5 shrink-0">
+            <input type="text" id="accent_hex" value="${esc(bc.accent_color || '#E91111')}" class="flex-1 min-w-0 border rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <button type="button" class="eyedrop shrink-0 h-9 w-9 flex items-center justify-center rounded border hover:bg-slate-50 text-slate-500" data-target="accent" title="Pick a color from anywhere on your screen">${EYEDROP_SVG}</button>
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">Background Color</label>
-          <div class="flex gap-2">
-            <input type="color" name="bg_color" value="${esc(bc.bg_color || '#EDEBE7')}"
-              class="h-9 w-12 rounded border cursor-pointer p-0.5"
-              oninput="document.getElementById('bg_hex').value=this.value">
-            <input type="text" id="bg_hex" value="${esc(bc.bg_color || '#EDEBE7')}"
-              oninput="document.querySelector('[name=bg_color]').value=this.value"
-              class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <label class="block text-xs font-medium text-slate-500 mb-1">Background Color <span class="text-slate-400 font-normal">(surrounding)</span></label>
+          <div class="flex gap-2 items-center">
+            <input type="color" name="bg_color" value="${esc(bc.bg_color || '#EDEBE7')}" class="h-9 w-12 rounded border cursor-pointer p-0.5 shrink-0">
+            <input type="text" id="bg_hex" value="${esc(bc.bg_color || '#EDEBE7')}" class="flex-1 min-w-0 border rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <button type="button" class="eyedrop shrink-0 h-9 w-9 flex items-center justify-center rounded border hover:bg-slate-50 text-slate-500" data-target="bg" title="Pick a color from anywhere on your screen">${EYEDROP_SVG}</button>
           </div>
         </div>
       </div>
@@ -1099,9 +1094,16 @@ router.get('/theme', requireAuth, async (req, res) => {
       <!-- Live preview -->
       <div>
         <label class="block text-xs font-medium text-slate-500 mb-2">Preview</label>
-        <div id="preview-bar" class="rounded-lg p-4 flex items-center gap-3" style="background:${esc(bc.primary_color || '#030302')}">
-          <span style="color:#fff;font-size:16px;font-weight:700">${esc(bc.name || 'Your Business')}</span>
-          <span id="preview-btn" class="ml-auto px-4 py-1.5 rounded text-white text-sm font-semibold" style="background:${esc(bc.accent_color || '#E91111')}">${esc(bc.cta_label || 'Request a Quote')}</span>
+        <div id="preview-card" class="rounded-lg p-5 border" style="background:${esc(bc.bg_color || '#EDEBE7')}">
+          <div id="preview-bar" class="rounded-lg p-4 flex items-center gap-3" style="background:${esc(bc.primary_color || '#030302')}">
+            <span style="color:#fff;font-size:16px;font-weight:700">${esc(bc.name || 'Your Business')}</span>
+            <span id="preview-btn" class="ml-auto px-4 py-1.5 rounded text-white text-sm font-semibold" style="background:${esc(bc.accent_color || '#E91111')}">${esc(bc.cta_label || 'Request a Quote')}</span>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-x-6 gap-y-1 mt-2 text-xs text-slate-500">
+          <span class="inline-flex items-center gap-1.5"><span id="lg-primary" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.primary_color || '#030302')}"></span>Primary = header bar <span id="lg-primary-hex" class="font-mono text-slate-400">${esc(bc.primary_color || '#030302')}</span></span>
+          <span class="inline-flex items-center gap-1.5"><span id="lg-accent" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.accent_color || '#E91111')}"></span>Accent = button <span id="lg-accent-hex" class="font-mono text-slate-400">${esc(bc.accent_color || '#E91111')}</span></span>
+          <span class="inline-flex items-center gap-1.5"><span id="lg-bg" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.bg_color || '#EDEBE7')}"></span>Background = surrounding <span id="lg-bg-hex" class="font-mono text-slate-400">${esc(bc.bg_color || '#EDEBE7')}</span></span>
         </div>
       </div>
 
@@ -1126,14 +1128,58 @@ router.get('/theme', requireAuth, async (req, res) => {
   </form>
 
   <script>
-    document.querySelector('[name=primary_color]').addEventListener('input', e => {
-      document.getElementById('primary_color_hex').value = e.target.value;
-      document.getElementById('preview-bar').style.background = e.target.value;
+  (function () {
+    var C = {
+      primary: { swatch: document.querySelector('[name=primary_color]'), hex: document.getElementById('primary_hex') },
+      accent:  { swatch: document.querySelector('[name=accent_color]'),  hex: document.getElementById('accent_hex') },
+      bg:      { swatch: document.querySelector('[name=bg_color]'),      hex: document.getElementById('bg_hex') },
+    };
+    var HEX = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
+
+    // Repaint the preview and legend from the current swatch values.
+    function render() {
+      var p = C.primary.swatch.value, a = C.accent.swatch.value, b = C.bg.swatch.value;
+      document.getElementById('preview-bar').style.background  = p;
+      document.getElementById('preview-btn').style.background  = a;
+      document.getElementById('preview-card').style.background = b;
+      document.getElementById('lg-primary').style.background = p; document.getElementById('lg-primary-hex').textContent = p;
+      document.getElementById('lg-accent').style.background  = a; document.getElementById('lg-accent-hex').textContent  = a;
+      document.getElementById('lg-bg').style.background      = b; document.getElementById('lg-bg-hex').textContent      = b;
+    }
+
+    // Set one color everywhere (swatch + hex field + preview). Ignores an
+    // incomplete/invalid hex so the preview does not flicker mid-typing.
+    function setColor(name, val) {
+      if (!val) return;
+      val = val.trim();
+      if (val[0] !== '#') val = '#' + val;
+      if (!HEX.test(val)) return;
+      C[name].swatch.value = val;
+      C[name].hex.value = val;
+      render();
+    }
+
+    Object.keys(C).forEach(function (name) {
+      // Native swatch picker.
+      C[name].swatch.addEventListener('input', function () { setColor(name, this.value); });
+      // Typed hex: update live while typing AND when tabbing/clicking out.
+      C[name].hex.addEventListener('input',  function () { setColor(name, this.value); });
+      C[name].hex.addEventListener('change', function () { setColor(name, this.value); });
     });
-    document.querySelector('[name=accent_color]').addEventListener('input', e => {
-      document.getElementById('accent_hex').value = e.target.value;
-      document.getElementById('preview-btn').style.background = e.target.value;
+
+    // Eyedropper: sample a color from anywhere on screen. Chromium only, so hide
+    // the button where the API is absent (the swatch and hex still work).
+    var hasEyeDropper = ('EyeDropper' in window);
+    document.querySelectorAll('.eyedrop').forEach(function (btn) {
+      if (!hasEyeDropper) { btn.style.display = 'none'; return; }
+      btn.addEventListener('click', function () {
+        var name = btn.getAttribute('data-target');
+        new window.EyeDropper().open().then(function (r) { setColor(name, r.sRGBHex); }).catch(function () {});
+      });
     });
+
+    render();
+  })();
   </script>`;
 
   res.send(pageShell('Theme & Branding', 'theme', body, req.query.msg, req.query.ok));
