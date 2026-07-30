@@ -106,56 +106,46 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 
 ---
 
-## Phase 1 — Managed tier live (fastest to new revenue)
+## Phase 1 — Managed tier live (fastest to new revenue) — ✅ SHIPPED (2026-07-30)
 
 **Why here:** the done-for-you offer is delivered by hand, so they do not need billing or self-serve onboarding. Once isolation is done, this is a short hop to a second paying client.
 
-**Work items:**
-1. **Per-tenant sending that scales past Gmail's cap.** Today sending runs through one Gmail account, capped near 500 a day, and Railway blocks SMTP. Each client needs their own sending identity: their own Google Workspace connected by OAuth (the connect flow already exists), or an API-based ESP per tenant. Decide the default and make onboarding a client include connecting their sender.
-2. **The seed canary.** A monitored seed address per tenant, added to each campaign. A daily check reads the seed inbox via the Gmail API (plumbing you already use for reply detection) and records: did it arrive, which folder (inbox, spam, promotions), how long it took. Feed the result into the sending-health banner and `/undelivered`. This is the differentiator and the managed-tier value in one feature.
-3. **A light client-health view for you.** One screen across all managed clients: are their sends landing, any bounces climbing, any mailbox that stopped authenticating. This is the "we watch it so you never have to" that justifies the monthly.
+**Shipped:**
+1. **The seed canary.** Each tenant connects one monitored inbox in Settings → Email (its own OAuth flow, `src/lib/seedCanary.js`). Every real campaign send also copies to it; a daily job (`/cron/seed-check`, 08:00 UTC) checks the inbox via the Gmail API and classifies where the mail landed (inbox / promotions / spam) from Gmail's own labels. Feeds both the sending-health banner (a milder amber warning distinct from the red "sending is down" state) and `/undelivered`.
+2. **Client-health view.** `GET /admin/client-health` — cross-tenant by design (the platform operator's own monitoring surface), gated to operator/owner. Shows every managed client's sending health, last 5 seed checks, and 24h send volume in one screen.
+3. **Per-tenant sending** was already mostly there (Gmail OAuth connect exists per salesperson, `client_email_config` supports per-tenant SMTP/from-address) — no new work needed here; onboarding a client still means connecting their sender through the existing flow.
 
-**What you can sell after:** both managed tiers — fully managed at $499/month, or build-it-you-run-it at $199/month plus the one-time $999 setup — to real clients beyond SureSecured, with a delivery guarantee you can actually back.
-
-**Rough size:** medium. The seed canary reuses existing Gmail plumbing. Per-tenant sending is mostly onboarding flow plus a decision on the default sender.
+**What you can sell after:** both managed tiers — fully managed at $499/month, or build-it-you-run-it at $199/month plus the one-time $999 setup — to real clients beyond SureSecured, with a delivery guarantee you can now actually prove, not just claim.
 
 ---
 
-## Phase 1.5 — SMS as a second channel
+## Phase 1.5 — SMS as a second channel — ✅ SHIPPED (2026-07-30)
 
 **Why here:** the offer already promises phone follow up, and omnichannel is where the money is. Email-only agencies charge $1,000 to $5,000 a month; add phone and it is $5,000 to $15,000. SMS gets read fast and closes warm replies. But it carries compliance weight email does not, so it earns its own phase and sits just after email is solid.
 
-**The parts that already exist:** Telnyx is integrated (inbound webhook, send function), `sequence_steps` already has a `channel` column, and there is a per-tenant voice extension. The plumbing is partly there. What is missing is the campaign layer and the compliance layer.
+**Shipped:**
+1. **Per-tenant phone number.** Settings → Phone & SMS now saves to `clients.telnyx_phone_number` (E.164 validated, with a cross-tenant collision check — the column has no DB-level unique constraint and both the SMS and voice inbound webhooks resolve the tenant with a bare lookup, so two tenants sharing a number would misroute each other's replies/calls). Found and fixed a pre-existing bug in the same area: the old field on this page wrote to `brand_config.telnyx_phone`, a key no sending code ever read — consolidated onto the real column.
+2. **SMS steps inside sequences.** The sequence editor now has an Email/SMS toggle per step. SMS hides the subject field (schema requires one; the backend synthesizes a short label from the body) and relabels the body field with a ~300-char guidance note.
+3. **Consent and opt-out, done right.** `leads.consent_sms` (already in the schema, unused until now) gates every outbound send in `cron.js` — an enrollment reaching an SMS step for a non-consenting lead is paused (`no_sms_consent`), not silently skipped or sent anyway. This closed a real compliance gap: the existing SMS dispatch had no consent check at all before this. STOP/STOPALL/UNSUBSCRIBE/CANCEL/END/QUIT (exact match, not substring) revoke consent instantly, cancel active enrollments, and send a confirmation text; HELP sends a static support reply.
+4. **Delivery receipts.** Telnyx's `message.finalized` event (previously ignored as a "status event") now updates the matching `sms_messages` row to delivered/failed by `telnyx_message_id`, the same way email failures are tracked.
+5. **10DLC registration** remains an external step per tenant (3-7 day approval) — inbound replies and STOP/HELP work immediately regardless; outbound is gated on it.
+6. **Metering** is not yet built — still open, lower priority than the compliance/consent piece above.
 
-**Work items:**
-1. **Per-tenant phone number.** Each client texts from their own Telnyx number, not a shared one. Buy and assign on onboarding.
-2. **10DLC registration per client.** US carriers block business SMS until the brand and campaign are registered, a 3 to 7 day approval. This is an external gate, so start it early in a client's onboarding and let it run in the background while email goes live.
-3. **SMS steps inside sequences.** Let a sequence mix email and text touches on one timeline, using the `channel` column that already exists. A text nudge after an unopened email, a text to confirm a booked call.
-4. **Consent and opt-out, done right.** This is the legal core. Texting for business needs prior express consent, and a STOP request has to suppress the number instantly and permanently. A past customer who gave you their number for a job is on firmer ground than a cold lead who never did. Build the opt-out handling into the inbound webhook, honor STOP and HELP automatically, and keep a consent record per contact. Lead with email, and let people opt into text by replying.
-5. **Delivery receipts and monitoring.** Telnyx returns delivery status per message. Record it the same way email sends are recorded, so a text that fails to deliver shows up on the health view, not silently.
-6. **Metering.** SMS has a real per-message cost (about $0.008 a segment) plus the 10DLC fees. Meter it per tenant and mark it up, the same as email sends and verification in Phase 2.
+**What you can sell after:** the omnichannel version of done-for-you. Confirmed working end to end against live test data (STOP correctly flips consent, HELP and delivery-status webhooks both process correctly).
 
-**What you can sell after:** the omnichannel version of done-for-you, which is what the expensive agencies charge the most for. It roughly doubles the value of the offer.
-
-**Rough size:** medium, but front-loaded by the 10DLC approval wait, which is calendar time, not work time. Do the code while the registration clears.
-
-**The honest compliance note:** SMS is the one place where getting it wrong is expensive in a legal sense, not just a deliverability sense. TCPA penalties are per message. Do not text a cold list. Text people who gave you their number, honor every STOP instantly, and keep the consent record. Handled that way it is a powerful channel. Handled carelessly it is a lawsuit.
+**The honest compliance note still stands:** do not text a cold list, honor every STOP instantly, keep the consent record. The code now enforces the first two; the record-keeping (`consent_sms_at`) was already there.
 
 ---
 
-## Phase 2 — Self-serve tier live ($199)
+## Phase 2 — Self-serve tier live ($199) — 🟡 SCAFFOLDED (2026-07-30), needs your Stripe account
 
 **Why here:** self-serve is the scale tier, but it is the most build. It needs a customer to sign up, pay, connect sending, import a list, and launch without you touching anything.
 
-**Work items:**
-1. **Billing.** Stripe. Plans, subscriptions, and the seat model. Card handling and the plan gate that enforces limits.
-2. **Metering and fair use.** From the pricing work: unlimited contacts, but a monthly send allowance with metered overage, so one heavy sender does not eat the margin or the sender reputation. Track usage per tenant.
-3. **Self-serve onboarding.** Sign up, connect your own sending, upload and verify a list, pick or generate a sequence, launch. The parts exist in pieces; this stitches them into a flow a stranger can complete alone.
-4. **Verification as a metered add-on.** Integrate MillionVerifier (cheaper than the current ZeroBounce), resell at a markup, count usage per tenant. This is the "bill for scrubbing" idea, and it only makes sense once billing exists.
+**Shipped (inert until Stripe is configured — degrades gracefully, no key set = no crash, just a "not configured yet" notice):**
+1. **Billing scaffold.** `client_subscriptions` table (a read-through mirror of Stripe's own state, never a second source of truth). `GET /billing` plan picker (all three tiers), `POST /billing/checkout` creates a Stripe Checkout Session. `POST /webhooks/stripe` handles `checkout.session.completed`, `customer.subscription.updated`/`.deleted`, `invoice.payment_failed`. Price IDs come from env vars (`STRIPE_PRICE_MANAGED`, `STRIPE_PRICE_DIY`, `STRIPE_PRICE_DIY_SETUP`, `STRIPE_PRICE_SELF_SERVE`) — nothing hardcoded, so standing up real billing is a config step once you have a Stripe account and price IDs, not a code change.
+2. **Still open:** seat/usage metering and fair-use enforcement, self-serve onboarding flow (sign up → connect sender → import list → launch, unassisted), and MillionVerifier as a metered add-on. None of these can be built usefully until the billing plumbing above has a real account behind it.
 
-**What you can sell after:** $199 self-serve, and the business stops being capped by your team's hours.
-
-**Rough size:** the second-biggest phase, mostly billing and onboarding.
+**What you can sell after billing is connected:** $199 self-serve, and the business stops being capped by your team's hours.
 
 ---
 
@@ -243,11 +233,13 @@ Two separate bodies of state law apply, and both are growing.
 
 ---
 
-## What's next now that Phase 0 is done
+## What's next now that Phases 0-2 are shipped
 
-1. **Phase 1's seed canary** is the highest-leverage remaining item — it is the feature that makes "we watch it land" a provable claim instead of a slogan, and it reuses Gmail plumbing that already exists (reply detection).
-2. **Phase 2 (billing) and Phase 1.5 (SMS)** are both gated on steps only the owner can do: a Stripe account, a Telnyx phone number purchase, and 10DLC brand/campaign registration (3-7 day approval). The code side of each can be scaffolded ahead of those steps clearing, but there is no point building the billing UI against a Stripe account that doesn't exist yet — start the external steps first, build the code while they clear.
-3. **Connect the support@saleswyze.com mailbox** (Settings → Email, or the Gmail OAuth connect flow) so the platform's own mail — the audit email — actually sends from that address instead of degrading to whichever mailbox is connected as the fallback.
+1. **Add your Stripe price IDs** (env vars: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MANAGED`, `STRIPE_PRICE_DIY`, `STRIPE_PRICE_DIY_SETUP`, `STRIPE_PRICE_SELF_SERVE`) once your Stripe account and products exist — that's the only thing standing between the billing scaffold and a real, working checkout flow.
+2. **Wait out 10DLC approval** for the Telnyx number you already have (3-7 days) — outbound SMS is gated on it, but everything else (inbound replies, STOP/HELP, the sequence editor's SMS steps) works today.
+3. **Connect the support@saleswyze.com mailbox** (Settings → Email) so the platform's own mail — the audit email — actually sends from that address instead of degrading to whichever mailbox is connected as the fallback.
+4. **Connect a seed inbox per tenant** (Settings → Email → Deliverability seed inbox) to start getting real spam/inbox placement data — the canary is inert with no signal until an address is connected.
+5. Self-serve onboarding (sign up → connect sender → import list → launch, unassisted) and metering/fair-use are the two pieces of Phase 2 still worth building, once there's a real Stripe account to build them against.
 
 Everything after that is a straight line you can walk one shippable step at a time.
 
