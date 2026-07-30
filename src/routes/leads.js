@@ -2,9 +2,11 @@
 const express = require('express');
 const router  = express.Router();
 const { pool } = require('../db');
-const { requireAuth, requireTenantContext } = require('../middleware/auth');
+const { requireAuth, requireTenantContext, requireRole } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
 const { sendDirectEmail, sesEnabled } = require('../lib/gmail');
+const { deleteLeadData } = require('../lib/dataDeletion');
+const { logEvent, ipOf } = require('../lib/auditLog');
 
 // Every CRM route is tenant-scoped. Enforce identity + tenant context once, at
 // the router level, so no individual route can forget it and leak another
@@ -858,6 +860,24 @@ router.post('/:id/notes', async (req, res) => {
     'INSERT INTO lead_notes (lead_id, client_id, author_name, content) VALUES ($1, $2, $3, $4)',
     [leadId, cid, user?.name || user?.email || 'Admin', content.trim()]
   );
+  res.json({ ok: true });
+});
+
+// ─── API: Data deletion request (CCPA/state privacy law "right to delete") ────
+// Destructive and irreversible, so gated to admin-tier roles beyond the
+// standard tenant scoping every other route in this file gets.
+router.post('/:id/delete-data', requireRole('operator', 'owner', 'admin'), async (req, res) => {
+  const cid = req.user.client_id;
+  const leadId = parseInt(req.params.id);
+  if (!leadId) return res.status(404).json({ error: 'Not found' });
+
+  const result = await deleteLeadData(leadId, cid);
+  if (!result.ok) return res.status(result.error === 'Lead not found for this tenant' ? 404 : 500).json(result);
+
+  logEvent({
+    clientId: cid, userId: req.user.id, actorEmail: req.user.email,
+    action: 'lead_data_deleted', targetType: 'lead', targetId: leadId, ip: ipOf(req),
+  });
   res.json({ ok: true });
 });
 
