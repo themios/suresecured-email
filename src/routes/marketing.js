@@ -7,8 +7,8 @@ function esc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Blog posts live here once built; the sitemap and blog routes read from it.
-const BLOG_POSTS = [];
+// Blog posts. The sitemap and blog routes read from this.
+const BLOG_POSTS = require('./blog-posts');
 
 // ─── Public landing page ───────────────────────────────────────────────────
 
@@ -41,6 +41,21 @@ router.get('/sitemap.xml', (req, res) => {
   res.type('application/xml').send(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`
   );
+});
+
+// ─── Blog (SEO cluster) ─────────────────────────────────────────────────────
+router.get('/blog', (req, res) => {
+  res.set('Cache-Control', 'public, max-age=600');
+  res.send(renderBlogIndex(originOf(req)));
+});
+
+router.get('/blog/:slug', (req, res) => {
+  const post = BLOG_POSTS.find(p => p.slug === req.params.slug);
+  if (!post) {
+    return res.status(404).send(renderBlogNotFound(originOf(req)));
+  }
+  res.set('Cache-Control', 'public, max-age=600');
+  res.send(renderBlogPost(originOf(req), post));
 });
 
 router.post(
@@ -179,6 +194,7 @@ ${seoHead(origin)}
     <nav class="nav-links">
       <a href="#how">How it works</a>
       <a href="#deal">The deal</a>
+      <a href="/blog">Guides</a>
       <a href="/login" class="nav-signin">Client sign in</a>
       <a href="#apply" class="btn btn-small btn-ember">Get started</a>
     </nav>
@@ -418,6 +434,195 @@ ${seoHead(origin)}
 <script>${js()}</script>
 </body>
 </html>`;
+}
+
+// ─── Blog rendering ─────────────────────────────────────────────────────────
+
+function fmtDate(iso) {
+  return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+}
+
+function siteNavHtml(active) {
+  return `<header class="site-nav" id="siteNav">
+  <div class="wrap nav-inner">
+    <a href="/" class="brand"><span class="brand-mark">SW</span><span class="brand-word">SalesWyze</span></a>
+    <nav class="nav-links">
+      <a href="/blog"${active === 'blog' ? ' aria-current="page"' : ''}>Guides</a>
+      <a href="/#how">How it works</a>
+      <a href="/login" class="nav-signin">Client sign in</a>
+      <a href="/#apply" class="btn btn-small btn-ember">Get started</a>
+    </nav>
+  </div>
+</header>`;
+}
+
+function siteFooterHtml() {
+  return `<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <span>SalesWyze is built and run by the team behind SureSecured.</span>
+    <a href="/login">Client sign in →</a>
+  </div>
+</footer>`;
+}
+
+function blogShell({ title, description, canonical, jsonld = [], bodyClass, content }) {
+  const ld = jsonld.map(o => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join('\n');
+  const ogType = bodyClass === 'is-post' ? 'article' : 'website';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<meta name="description" content="${esc(description)}">
+<link rel="canonical" href="${canonical}">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="theme-color" content="#15120e">
+<meta property="og:type" content="${ogType}">
+<meta property="og:site_name" content="SalesWyze">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(description)}">
+<meta property="og:url" content="${canonical}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:description" content="${esc(description)}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800;900&family=Archivo:ital,wght@0,400;0,500;0,600;0,700;1,500&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>${css()}${blogCss()}</style>
+${ld}
+</head>
+<body class="${bodyClass || ''}">
+<div class="grain" aria-hidden="true"></div>
+${siteNavHtml('blog')}
+<main class="blog-main">
+${content}
+</main>
+${siteFooterHtml()}
+</body>
+</html>`;
+}
+
+function renderBlogIndex(origin) {
+  const canonical = origin + '/blog';
+  const cards = BLOG_POSTS.map(p => `
+        <a class="post-card" href="/blog/${p.slug}">
+          <span class="post-card-meta">${fmtDate(p.date)}  ·  ${p.read} min read</span>
+          <h2>${esc(p.title)}</h2>
+          <p>${esc(p.description)}</p>
+          <span class="post-card-more">Read the guide →</span>
+        </a>`).join('');
+  const jsonld = [{
+    '@context': 'https://schema.org', '@type': 'Blog', name: 'SalesWyze Guides', url: canonical,
+    blogPost: BLOG_POSTS.map(p => ({ '@type': 'BlogPosting', headline: p.title, url: origin + '/blog/' + p.slug, datePublished: p.date })),
+  }];
+  const content = `
+    <div class="wrap blog-wrap">
+      <header class="blog-hero">
+        <span class="eyebrow">SalesWyze guides</span>
+        <h1 class="h-display">Straight answers on follow up and old leads</h1>
+        <p class="blog-hero-sub">Plain, practical writing for contractors sitting on a pile of old quotes and cold customers. What to send, when to send it, and how to book jobs from names you already paid for.</p>
+      </header>
+      <div class="post-list">${cards}</div>
+    </div>`;
+  return blogShell({
+    title: 'Guides on follow up and reactivating old leads | SalesWyze',
+    description: 'Practical guides for contractors on reactivating old leads, following up on quotes, email deliverability, and booking more jobs from lists you already have.',
+    canonical, jsonld, bodyClass: 'is-index', content,
+  });
+}
+
+function renderBlogPost(origin, post) {
+  const canonical = origin + '/blog/' + post.slug;
+  const related = BLOG_POSTS.filter(p => p.slug !== post.slug).slice(0, 3);
+  const jsonld = [
+    {
+      '@context': 'https://schema.org', '@type': 'Article',
+      headline: post.title, description: post.description,
+      datePublished: post.date, dateModified: post.updated || post.date,
+      author: { '@type': 'Organization', name: 'SalesWyze' },
+      publisher: { '@type': 'Organization', name: 'SalesWyze' },
+      mainEntityOfPage: canonical,
+    },
+    {
+      '@context': 'https://schema.org', '@type': 'BreadcrumbList',
+      itemListElement: [
+        { '@type': 'ListItem', position: 1, name: 'Home', item: origin + '/' },
+        { '@type': 'ListItem', position: 2, name: 'Guides', item: origin + '/blog' },
+        { '@type': 'ListItem', position: 3, name: post.title, item: canonical },
+      ],
+    },
+  ];
+  const rel = related.map(p => `<a href="/blog/${p.slug}"><span>${esc(p.title)}</span><span class="rel-arrow">→</span></a>`).join('');
+  const content = `
+    <article class="wrap post">
+      <nav class="crumbs"><a href="/">Home</a><span>/</span><a href="/blog">Guides</a></nav>
+      <header class="post-head">
+        <span class="post-card-meta">${fmtDate(post.date)}  ·  ${post.read} min read</span>
+        <h1 class="h-display">${esc(post.title)}</h1>
+      </header>
+      <div class="post-body">${post.body}</div>
+      <aside class="post-related">
+        <h3>Keep reading</h3>
+        <div class="rel-list">${rel}</div>
+      </aside>
+    </article>`;
+  return blogShell({ title: post.title + ' | SalesWyze', description: post.description, canonical, jsonld, bodyClass: 'is-post', content });
+}
+
+function renderBlogNotFound(origin) {
+  const content = `
+    <div class="wrap post">
+      <header class="post-head"><h1 class="h-display">We could not find that guide</h1></header>
+      <div class="post-body"><p>It may have moved. <a href="/blog">See all guides</a>, or head <a href="/">back home</a>.</p></div>
+    </div>`;
+  return blogShell({ title: 'Not found | SalesWyze', description: 'Page not found.', canonical: origin + '/blog', bodyClass: 'is-post', content });
+}
+
+function blogCss() {
+  return `
+.blog-main{background:var(--paper);min-height:70vh;padding:calc(var(--nav-h,72px) + 48px) 0 24px;}
+.blog-wrap,.post{max-width:none;}
+.blog-hero{max-width:760px;margin:0 auto 8px;padding:0 24px;}
+.blog-hero .eyebrow{margin-bottom:14px;}
+.blog-hero h1{margin:0 0 18px;font-size:clamp(2.1rem,5vw,3.4rem);line-height:1.02;}
+.blog-hero-sub{font-size:1.12rem;line-height:1.7;color:var(--ink-soft);max-width:60ch;}
+.post-list{max-width:820px;margin:40px auto 0;padding:0 24px;display:flex;flex-direction:column;gap:18px;}
+.post-card{display:block;text-decoration:none;color:var(--ink);background:var(--paper-hi);border:1px solid var(--line);border-radius:14px;padding:26px 28px;transition:transform .18s cubic-bezier(.2,.7,.3,1),box-shadow .18s ease,border-color .18s ease;}
+.post-card:hover{transform:translateY(-3px);box-shadow:0 14px 34px rgba(21,18,14,.10);border-color:rgba(21,18,14,.24);}
+.post-card-meta{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.04em;color:var(--brass-dark);margin-bottom:10px;text-transform:uppercase;}
+.post-card h2{font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:1.7rem;line-height:1.05;margin:0 0 10px;letter-spacing:-.01em;}
+.post-card p{margin:0 0 14px;color:var(--ink-soft);line-height:1.6;max-width:66ch;}
+.post-card-more{font-weight:700;color:var(--ember);font-size:.95rem;}
+
+.post{max-width:720px;margin:0 auto;padding:0 24px;}
+.crumbs{display:flex;gap:10px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--brass-dark);margin-bottom:22px;}
+.crumbs a{color:var(--brass-dark);text-decoration:none;}
+.crumbs a:hover{color:var(--ember);}
+.post-head{margin-bottom:34px;padding-bottom:26px;border-bottom:1px solid var(--line);}
+.post-head h1{margin:12px 0 0;font-size:clamp(2rem,4.6vw,3rem);line-height:1.04;letter-spacing:-.01em;}
+.post-body{font-size:1.18rem;line-height:1.78;color:var(--ink-soft);max-width:68ch;}
+.post-body p{margin:0 0 1.35em;}
+.post-body h2{font-family:'Big Shoulders Display',sans-serif;font-weight:800;color:var(--ink);font-size:1.7rem;line-height:1.1;letter-spacing:-.01em;margin:2em 0 .6em;}
+.post-body ul{margin:0 0 1.5em;padding-left:1.1em;}
+.post-body li{margin:0 0 .6em;padding-left:.3em;}
+.post-body li::marker{color:var(--brass);}
+.post-body a{color:var(--ember);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1.5px;font-weight:600;}
+.post-body a:hover{color:var(--ember-hi);}
+.post-body strong{color:var(--ink);font-weight:700;}
+
+.post-cta{margin:44px 0 8px;background:var(--ink);color:var(--paper-hi);border-radius:16px;padding:34px 32px;}
+.post-cta h3{font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:1.6rem;margin:0 0 10px;color:var(--paper-hi);line-height:1.1;}
+.post-cta p{margin:0 0 20px;color:rgba(250,246,234,.82);line-height:1.6;max-width:56ch;font-size:1.02rem;}
+
+.post-related{margin-top:52px;padding-top:26px;border-top:1px solid var(--line);}
+.post-related h3{font-family:'IBM Plex Mono',monospace;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--brass-dark);margin:0 0 14px;}
+.rel-list{display:flex;flex-direction:column;gap:2px;}
+.rel-list a{display:flex;justify-content:space-between;align-items:center;gap:16px;text-decoration:none;color:var(--ink);font-weight:600;padding:14px 4px;border-bottom:1px solid var(--line);transition:color .15s ease,padding-left .15s ease;}
+.rel-list a:last-child{border-bottom:none;}
+.rel-list a:hover{color:var(--ember);padding-left:8px;}
+.rel-arrow{color:var(--ember);font-weight:700;}
+`;
 }
 
 // ─── Inline icons (stroke, 20x20) ──────────────────────────────────────────
