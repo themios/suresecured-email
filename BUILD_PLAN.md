@@ -1,9 +1,35 @@
 # SalesWyze Build Plan
 
-**Date:** 2026-07-30
+**Date:** 2026-07-30 · **Last updated:** 2026-07-30 (audience broadened to any business; free audit built and shipped; pricing set to three tiers)
 **Goal:** turn a working single-tenant app into a multi-tenant product that can safely sell its offers (done-for-you and self-serve), without boiling the ocean.
 
-> **Pricing decision (2026-07-30):** pay-on-close is dropped. Close attribution cannot be verified without the customer's cooperation and turns every invoice into a dispute. The model is now flat: **Done for you at $999 one-time setup then $199/month**, and **Self-serve at $199/month** with no setup (coming later). The free list audit stays the entry point and de-risks the setup fee. This decision also **removes the attribution and close-tracking engine from the build** entirely, which is a real scope reduction. Where this plan below still says "pay-on-close" or "$499 managed," read "done-for-you $999 + $199."
+> **Pricing decision (2026-07-30):** pay-on-close is dropped. Close attribution cannot be verified without the customer's cooperation and turns every invoice into a dispute. The model is now flat, three tiers:
+> - **Fully managed — $499/month.** We set it up and we run it. No setup fee.
+> - **We build it, you run it — $199/month plus a one-time $999 setup.** We stand it up, hand it over, you drive. This is the featured tier; the landing page accentuates the $199 and keeps the "$999 one-time setup" small and non-bold.
+> - **Self-serve — $199/month, no setup (coming later).** The platform runs by the customer end to end. Gated on Phase 2 billing.
+>
+> The free estimate is the entry point and de-risks the setup. This decision also **removes the attribution and close-tracking engine from the build** entirely, which is a real scope reduction. Where the phases below still say "pay-on-close," read the flat tiers above.
+
+---
+
+## Who this is for (broadened 2026-07-30)
+
+Originally scoped to trades. It is now **any business sitting on a list of old leads and past customers** — auto dealers, law firms, retail, agriculture, medical and dental, real estate, insurance, home services, and more. The product does not care what they sell; it cares that they have a customer list they never followed up on. The landing copy, the free estimate's industry benchmarks, and the SEO all reflect this wider audience. "What's your trade" is gone. The blog cluster still needs to widen to match (see Already shipped → open items).
+
+---
+
+## Already shipped (as of 2026-07-30)
+
+These are done and on `master` (live on Railway). The phases below build on top of them.
+
+- **App bootstraps from an empty database** — phased `initDb()`; disaster recovery actually works now.
+- **Delivery feedback loop** — send failures are classified and recorded, a sending-health banner shows when mail stops landing, and `/undelivered` lists what failed. This is the spine the Phase 1 seed canary plugs into.
+- **Auth reads role/client_id from the DB per request** — closes the stale-JWT revocation gap (a down payment on Phase 0).
+- **Gmail API sending** — Railway blocks outbound SMTP (port 587), so the platform sends over the Gmail API. This is the only working send path and what the audit email rides on.
+- **Landing page + SEO** — StoryBrand-structured funnel, JSON-LD (Organization, Service, FAQ, Article), sitemap, five blog posts, transparent three-tier pricing section.
+- **Free estimate ("audit"), built end to end** — the landing form now returns an **instant, industry-tailored recoverable-revenue report** in the same app and theme. The 1% / 2.5% / 5% math is computed in code (never by the LLM); the AI writes only the short narrative, gated by a lingo + em-dash reject with a plain-human fallback. It uses the prospect's own "what is one sale worth" number when given, else an industry benchmark. It also **emails the prospect a copy** (so we land in their inbox and contacts) via the Gmail path, best-effort in the background. This replaces the old lead-capture-only CTA, which was a form with no product behind it.
+
+**Open items from this work:** widen the five blog posts (currently trades-only) to the broader audience, one targeted post per vertical is better for SEO than watering the existing ones down. The audit's per-industry deal benchmarks are seeded defaults; tune them as real data comes in. The emailed copy carries our physical address (CAN-SPAM) and is a single, solicited, one-time response, which is defensible without an unsubscribe link — but if it ever becomes a drip, it needs List-Unsubscribe like the sequence mail already has.
 
 ---
 
@@ -19,13 +45,13 @@ There is exactly one hard gate before any second customer, managed or self-serve
 
 Every competitor sends mail and hopes. Reactivation vendors do a one-time blast. Cold email agencies charge $2,500 to $12,000 and disappear behind a dashboard. Platforms like GoHighLevel hand you a tool and wish you luck on deliverability.
 
-Your edge is **proven delivery for trades**. Not "we sent it." "We watched it land, and here is the reply." Three things nobody else combines:
+Your edge is **proven delivery**. Not "we sent it." "We watched it land, and here is the reply." Three things nobody else combines:
 
 1. **It sends from a real inbox and sounds like a person**, so it actually gets read.
 2. **A seed canary proves the mail reaches the inbox**, not spam, every day, automatically. You catch a delivery problem before the customer notices their replies dried up.
-3. **You do it for them and you watch it, or they run it themselves.** Either way the follow up actually happens, which for a busy trades owner is the whole point.
+3. **You do it for them and you watch it, or they run it themselves.** Either way the follow up actually happens, which for a busy owner is the whole point.
 
-Lead the brand with that. "Reactivation that actually lands." It is a claim your competitors cannot make and your product can prove.
+Lead the brand with that. "Reactivation that actually lands." It is a claim your competitors cannot make and your product can prove. The **instant free estimate** is the top of that funnel: a stranger enters their industry, list size, and average sale, and gets a believable recoverable-revenue number in seconds, in their inbox, before you have spent a minute on them.
 
 ---
 
@@ -85,7 +111,7 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 2. **The seed canary.** A monitored seed address per tenant, added to each campaign. A daily check reads the seed inbox via the Gmail API (plumbing you already use for reply detection) and records: did it arrive, which folder (inbox, spam, promotions), how long it took. Feed the result into the sending-health banner and `/undelivered`. This is the differentiator and the managed-tier value in one feature.
 3. **A light client-health view for you.** One screen across all managed clients: are their sends landing, any bounces climbing, any mailbox that stopped authenticating. This is the "we watch it so you never have to" that justifies the monthly.
 
-**What you can sell after:** the done-for-you offer ($999 setup + $199/month), to real clients beyond SureSecured, with a delivery guarantee you can actually back.
+**What you can sell after:** both managed tiers — fully managed at $499/month, or build-it-you-run-it at $199/month plus the one-time $999 setup — to real clients beyond SureSecured, with a delivery guarantee you can actually back.
 
 **Rough size:** medium. The seed canary reuses existing Gmail plumbing. Per-tenant sending is mostly onboarding flow plus a decision on the default sender.
 
