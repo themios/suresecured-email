@@ -124,6 +124,30 @@ app.use('/', deliverabilityRouter);
 // Health check for Railway
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
+// Global error handler. Express 5 forwards rejected async handlers here, so an
+// unhandled error in any route lands as a clean 500 instead of a hung request.
+// Log the full error server-side; never leak internals to the client.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error(`[error] ${req.method} ${req.originalUrl}:`, err.stack || err.message || err);
+  if (res.headersSent) return next(err);
+  const wantsJson = (req.headers.accept || '').includes('application/json') || req.originalUrl.startsWith('/api');
+  res.status(err.status || 500);
+  if (wantsJson) return res.json({ error: 'Something went wrong.' });
+  res.type('text/plain').send('Something went wrong.');
+});
+
+// Last-resort process guards. An unhandled rejection is logged but survivable;
+// an uncaught exception leaves the process in an undefined state, so log and let
+// the platform restart us (Railway auto-restarts on non-zero exit).
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && (reason.stack || reason));
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && (err.stack || err));
+  process.exit(1);
+});
+
 async function start() {
   await initDb();
   app.listen(PORT, () => {
@@ -134,28 +158,46 @@ async function start() {
   // they schedule these jobs, but that is not a real Railway config key (cron is
   // a per-service `cronSchedule`, and a cron service runs its start command
   // instead of serving HTTP). Those blocks are inert — do not delete this
-  // node-cron block on the assumption railway.toml covers it. Verified against
-  // production logs: '[cron] send-sequences' fires once per 15-min window, and
-  // the four other jobs railway.toml claims to schedule never run at all.
+  // node-cron block on the assumption railway.toml covers it.
   //
-  // Known gaps, tracked separately: no locking (two instances would double-send,
-  // so keep this service at one replica), and daily-digest / score-leads /
-  // run-agents / poll-email-sources have no working schedule.
-  cron.schedule('*/15 * * * *', async () => {
+  // Each job is a POST to its own /cron/<name> endpoint (Bearer CRON_SECRET),
+  // so the schedule and the work stay decoupled. All five jobs are idempotent
+  // or no-ops until a tenant opts in (poll-email-sources / run-agents), so
+  // enabling them is safe. IMPORTANT: keep this service at ONE replica — there
+  // is no cross-instance lock yet, so a second replica would double-send.
+  const fireCron = async (name) => {
     try {
-      const res = await fetch(`http://localhost:${PORT}/cron/send-sequences`, {
+      const res = await fetch(`http://localhost:${PORT}/cron/${name}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
       });
-      const data = await res.json();
-      console.log('[cron] send-sequences:', JSON.stringify(data));
+      const data = await res.json().catch(() => ({}));
+      console.log(`[cron] ${name}:`, JSON.stringify(data));
     } catch (err) {
-      console.error('[cron] send-sequences failed:', err.message);
+      console.error(`[cron] ${name} failed:`, err.message);
     }
+  };
+
+  // Send due sequence emails — every 15 minutes (unchanged).
+  cron.schedule('*/15 * * * *', () => fireCron('send-sequences'));
+  // Ingest new leads from connected email intake sources — every 15 minutes.
+  cron.schedule('*/15 * * * *', () => fireCron('poll-email-sources'));
+  // Run any AI marketing agents that are due — every 30 minutes (no-op until enabled).
+  cron.schedule('*/30 * * * *', () => fireCron('run-agents'));
+  // Recompute lead engagement scores — every 6 hours.
+  cron.schedule('0 */6 * * *', () => fireCron('score-leads'));
+  // Daily metrics digest to each operator — 06:00 UTC.
+  cron.schedule('0 6 * * *', () => fireCron('daily-digest'));
+}
+
+// Only boot the server + scheduler when run directly. Tests require this module
+// to get the configured `app` and mount it themselves, without listening or
+// scheduling crons.
+if (require.main === module) {
+  start().catch(err => {
+    console.error('Failed to start:', err);
+    process.exit(1);
   });
 }
 
-start().catch(err => {
-  console.error('Failed to start:', err);
-  process.exit(1);
-});
+module.exports = { app, start };
