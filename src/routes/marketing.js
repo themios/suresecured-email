@@ -7,13 +7,40 @@ function esc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Blog posts live here once built; the sitemap and blog routes read from it.
+const BLOG_POSTS = [];
+
 // ─── Public landing page ───────────────────────────────────────────────────
+
+function originOf(req) {
+  const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0];
+  return `${proto}://${req.get('host')}`;
+}
 
 router.get('/', (req, res) => {
   const submitted = req.query.submitted === '1';
   const formError = req.query.error === '1';
   res.set('Cache-Control', 'no-store');
-  res.send(renderLanding({ submitted, formError }));
+  res.send(renderLanding({ submitted, formError, origin: originOf(req) }));
+});
+
+// SEO: let crawlers and AI answer engines discover and read the site.
+router.get('/robots.txt', (req, res) => {
+  const origin = originOf(req);
+  res.type('text/plain').send(`User-agent: *\nAllow: /\n\nSitemap: ${origin}/sitemap.xml\n`);
+});
+
+router.get('/sitemap.xml', (req, res) => {
+  const origin = originOf(req);
+  const paths = ['/'];
+  if (BLOG_POSTS.length) {
+    paths.push('/blog');
+    BLOG_POSTS.forEach(p => paths.push(`/blog/${p.slug}`));
+  }
+  const urls = paths.map(p => `  <url><loc>${origin}${p}</loc></url>`).join('\n');
+  res.type('application/xml').send(
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`
+  );
 });
 
 router.post(
@@ -67,7 +94,63 @@ router.post(
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
-function renderLanding({ submitted, formError }) {
+// Social tags + JSON-LD structured data. Structured data is what Google rich
+// results and AI answer engines (ChatGPT, Perplexity, AI Overviews) read to
+// understand and cite the page, so the FAQ, service, and org are all described.
+function seoHead(origin) {
+  const url = origin + '/';
+  const desc = 'SalesWyze turns the quotes and old customers sitting in your spreadsheet into booked jobs. Email and phone follow up that sounds like your business. You only pay when a job closes.';
+  const title = 'SalesWyze — Your old leads are still worth money';
+
+  const org = {
+    '@context': 'https://schema.org', '@type': 'Organization',
+    name: 'SalesWyze', url, description: desc,
+    parentOrganization: { '@type': 'Organization', name: 'SureSecured' },
+    areaServed: 'US',
+  };
+  const site = { '@context': 'https://schema.org', '@type': 'WebSite', name: 'SalesWyze', url };
+  const service = {
+    '@context': 'https://schema.org', '@type': 'Service',
+    name: 'Lead list reactivation for trades',
+    serviceType: 'Database reactivation and lead follow-up',
+    provider: { '@type': 'Organization', name: 'SalesWyze' },
+    areaServed: 'US',
+    audience: { '@type': 'Audience', audienceType: 'Roofing, HVAC, electrical, plumbing, and security screen contractors' },
+    description: 'Done-for-you email and phone follow up that reactivates old quotes and cold customer lists and books jobs. You only pay when a job closes.',
+    offers: { '@type': 'Offer', priceSpecification: { '@type': 'PriceSpecification', description: 'Performance based. No monthly fee. A percentage of jobs that close, typically starting around 10 percent.' } },
+  };
+  const faqPairs = [
+    ['Do I need to switch software?', 'No. This runs alongside whatever you already use for scheduling, invoicing, or your CRM.'],
+    ['My list is years old and messy. Does that matter?', "Less than you'd think. Addresses get cleaned and verified before anything goes out under your business name."],
+    ['Will this make me look like a spammer?', 'No. Every message sends from a real address tied to your business, with a working unsubscribe link. Deliverability is handled, not an afterthought.'],
+    ["What if my team doesn't have time to manage this?", "That's the point of it. Nobody on your end has to run anything day to day. Replies land in front of your team, ready to close."],
+    ['How fast can this actually start?', 'Send the list and sequences can be live within a few days, sometimes faster.'],
+  ];
+  const faq = {
+    '@context': 'https://schema.org', '@type': 'FAQPage',
+    mainEntity: faqPairs.map(([q, a]) => ({ '@type': 'Question', name: q, acceptedAnswer: { '@type': 'Answer', text: a } })),
+  };
+
+  const ld = [org, site, service, faq]
+    .map(o => `<script type="application/ld+json">${JSON.stringify(o)}</script>`)
+    .join('\n');
+
+  return `
+<link rel="canonical" href="${url}">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="theme-color" content="#12100e">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="SalesWyze">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(desc)}">
+<meta property="og:url" content="${url}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:description" content="${esc(desc)}">
+${ld}`;
+}
+
+function renderLanding({ submitted, formError, origin = '' }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -82,6 +165,7 @@ function renderLanding({ submitted, formError }) {
 ${css()}
 </style>
 <script>document.documentElement.classList.add('has-js');</script>
+${seoHead(origin)}
 </head>
 <body>
 <div class="grain" aria-hidden="true"></div>
