@@ -1063,7 +1063,7 @@ router.get('/theme', requireAuth, async (req, res) => {
     <div class="bg-white rounded-xl shadow-sm p-6 space-y-4">
       <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">Email Colors</h2>
       <p class="text-xs text-slate-400">These colors are used in your outgoing email templates.</p>
-      <p class="text-xs text-slate-400">Type a hex code, use the swatch picker, or click the eyedropper and sample a color from anywhere on your screen (open your website in another window and click the color). The preview updates as you go.</p>
+      <p class="text-xs text-slate-400">Type a hex code, use the swatch picker, or use the eyedropper. To use the eyedropper: open your website in another window, click the eyedropper button, then move your cursor over the color and <strong>click it</strong> (hovering only aims, the click captures). The preview updates as you go. Eyedropper works in Chrome and Edge.</p>
       <div class="grid grid-cols-3 gap-4">
         <div>
           <label class="block text-xs font-medium text-slate-500 mb-1">Primary Color <span class="text-slate-400 font-normal">(header bar)</span></label>
@@ -1169,12 +1169,25 @@ router.get('/theme', requireAuth, async (req, res) => {
 
     // Eyedropper: sample a color from anywhere on screen. Chromium only, so hide
     // the button where the API is absent (the swatch and hex still work).
+    // Usage: click the button, then CLICK (not hover) the color you want -- the
+    // magnifier follows the cursor and only commits on click.
     var hasEyeDropper = ('EyeDropper' in window);
     document.querySelectorAll('.eyedrop').forEach(function (btn) {
       if (!hasEyeDropper) { btn.style.display = 'none'; return; }
       btn.addEventListener('click', function () {
         var name = btn.getAttribute('data-target');
-        new window.EyeDropper().open().then(function (r) { setColor(name, r.sRGBHex); }).catch(function () {});
+        try {
+          new window.EyeDropper().open()
+            .then(function (r) { setColor(name, r.sRGBHex); })
+            .catch(function (err) {
+              // Escape / dismiss is AbortError -- not an error worth surfacing.
+              if (err && err.name && err.name !== 'AbortError') {
+                alert('Eyedropper could not pick a color: ' + err.message);
+              }
+            });
+        } catch (err) {
+          alert('Eyedropper could not start: ' + err.message);
+        }
       });
     });
 
