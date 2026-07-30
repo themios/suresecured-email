@@ -89,6 +89,28 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 
 ---
 
+## Phase 1.5 — SMS as a second channel
+
+**Why here:** the offer already promises phone follow up, and omnichannel is where the money is. Email-only agencies charge $1,000 to $5,000 a month; add phone and it is $5,000 to $15,000. SMS gets read fast and closes warm replies. But it carries compliance weight email does not, so it earns its own phase and sits just after email is solid.
+
+**The parts that already exist:** Telnyx is integrated (inbound webhook, send function), `sequence_steps` already has a `channel` column, and there is a per-tenant voice extension. The plumbing is partly there. What is missing is the campaign layer and the compliance layer.
+
+**Work items:**
+1. **Per-tenant phone number.** Each client texts from their own Telnyx number, not a shared one. Buy and assign on onboarding.
+2. **10DLC registration per client.** US carriers block business SMS until the brand and campaign are registered, a 3 to 7 day approval. This is an external gate, so start it early in a client's onboarding and let it run in the background while email goes live.
+3. **SMS steps inside sequences.** Let a sequence mix email and text touches on one timeline, using the `channel` column that already exists. A text nudge after an unopened email, a text to confirm a booked call.
+4. **Consent and opt-out, done right.** This is the legal core. Texting for business needs prior express consent, and a STOP request has to suppress the number instantly and permanently. A past customer who gave you their number for a job is on firmer ground than a cold lead who never did. Build the opt-out handling into the inbound webhook, honor STOP and HELP automatically, and keep a consent record per contact. Lead with email, and let people opt into text by replying.
+5. **Delivery receipts and monitoring.** Telnyx returns delivery status per message. Record it the same way email sends are recorded, so a text that fails to deliver shows up on the health view, not silently.
+6. **Metering.** SMS has a real per-message cost (about $0.008 a segment) plus the 10DLC fees. Meter it per tenant and mark it up, the same as email sends and verification in Phase 2.
+
+**What you can sell after:** the omnichannel version of managed and pay-on-close, which is the tier the expensive agencies charge the most for. It roughly doubles the value of the offer.
+
+**Rough size:** medium, but front-loaded by the 10DLC approval wait, which is calendar time, not work time. Do the code while the registration clears.
+
+**The honest compliance note:** SMS is the one place where getting it wrong is expensive in a legal sense, not just a deliverability sense. TCPA penalties are per message. Do not text a cold list. Text people who gave you their number, honor every STOP instantly, and keep the consent record. Handled that way it is a powerful channel. Handled carelessly it is a lawsuit.
+
+---
+
 ## Phase 2 — Self-serve tier live ($199)
 
 **Why here:** self-serve is the scale tier, but it is the most build. It needs a customer to sign up, pay, connect sending, import a list, and launch without you touching anything.
