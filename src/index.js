@@ -51,6 +51,10 @@ app.use(cookieParser());
 
 // Rate limits
 app.use('/login', loginLimiter);
+// The password-check route is POST /auth/login (auth.js), not /login — that
+// GET page. Express path-prefix matching on '/login' never reaches it, so the
+// actual brute-force target had NO rate limit until this line.
+app.use('/auth/login', loginLimiter);
 app.use('/portal/login', loginLimiter);
 app.use('/api', apiLimiter);
 app.use('/cron', cronLimiter);
