@@ -154,9 +154,19 @@ The customer, not SalesWyze, is the sender of record. Make that structural, in b
 - **They stand behind their claims and their list.** In the agreement, the customer attests that they have the legal right and the consent to contact everyone on the list, that the claims in their messages are true, and that they are responsible for the content. Pair it with an indemnification clause.
 - **Reality check:** this shifts most of the risk to the customer, which is correct and important, but it does not make the platform invisible to the law. A facilitator can still carry obligations. So the customer attestation is necessary, not sufficient. It rides alongside the technical controls, it does not replace them.
 
-### Email (federal CAN-SPAM) — mostly done
+### Email (federal CAN-SPAM) — audited against the FTC's seven rules
 
-- Accurate from and header info, a non-deceptive subject, a valid physical postal address, and a working one-click unsubscribe honored promptly. The footer, the address, and the unsubscribe are built. Keep unsubscribe instant and permanent.
+Checked each requirement against the live code. Penalties are up to $53,088 per email, so this matters.
+
+1. **No false or misleading headers.** Mail sends from a real business From name and address. Met.
+2. **No deceptive subject lines.** Content is customer-authorized (see the liability structure above), and the sequences use plain honest subjects. Met, and owned by the customer.
+3. **Identify the message as an advertisement.** This is the one soft spot. The footer establishes the relationship ("you received this because you requested information from ..."), which is the basis for the relationship and prior-consent leeway, since the list is prior inquirers, not cold. But the messages do not carry an explicit ad label. Have counsel confirm whether the relationship footing is enough for your list, or whether a light identifier is worth adding. Do not slap "ADVERTISEMENT" on everything, that would gut the "sounds like a person" value. This is a lawyer call, not a code gap.
+4. **Valid physical postal address.** Present in every footer ("Sure Secured, 1555 Simi Town Center Way, Simi Valley, CA 93065"). Met. A registered agent address or a post office box registered with the USPS is also acceptable if you ever want to keep the street address private.
+5. **A working opt-out.** One-click List-Unsubscribe headers plus a single unsubscribe page, no login, no extra info required. Met.
+6. **Honor opt-outs fast, keep the mechanism live, charge nothing.** The rule is within 10 business days, with the mechanism working at least 30 days, no fee, no info beyond an email address. Ours suppresses **immediately** on click, the token link works indefinitely, and it asks for nothing. Exceeds the requirement.
+7. **You are responsible for mail sent on your behalf.** This is the SalesWyze point: because you send for the customer, both of you can be held liable. The customer-authorization and indemnification structure above is exactly the right response, but it shares the risk, it does not remove your obligation to keep the platform itself compliant. Keep suppression, addressing, and unsubscribe correct on your side regardless of what the customer approves.
+
+Net: four requirements clearly met, one exceeded, one owned by the customer, and one (ad identification) worth a quick legal read for your specific list. No urgent code gap on the email side.
 
 ### SMS and voice (federal TCPA, plus the Telemarketing Sales Rule) — the high-risk area
 
