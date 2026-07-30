@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
 const { leadFormLimiter } = require('../middleware/rateLimit');
+const { generateAudit } = require('../lib/audit');
+
+function fmtMoney(n) { return '$' + Math.round(n).toLocaleString('en-US'); }
 
 function esc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -70,6 +73,7 @@ router.post(
       phone,
       trade,
       list_size,
+      deal_value,
       message,
       company_website, // honeypot — real visitors never fill this in
     } = req.body;
@@ -103,7 +107,16 @@ router.post(
       return res.redirect('/?error=1#apply');
     }
 
-    res.redirect('/?submitted=1#apply');
+    // Hand them their recoverable-revenue estimate immediately. Computed from
+    // industry + list size, so no manual work. Falls back to the plain thank-you
+    // if generation fails for any reason.
+    try {
+      const audit = await generateAudit(trade, list_size, deal_value);
+      return res.send(renderAuditReport(originOf(req), { audit, businessName: business_name }));
+    } catch (err) {
+      console.error('[marketing] audit generation failed:', err.message);
+      return res.redirect('/?submitted=1#apply');
+    }
   }
 );
 
@@ -452,6 +465,13 @@ ${seoHead(origin)}
               </select>
             </label>
           </div>
+          <div class="form-row">
+            <label>What is one sale worth to you, on average?
+              <input type="text" name="deal_value" maxlength="20" placeholder="$3,000" inputmode="numeric">
+              <span class="field-hint">Roughly what you make on a typical sale or job. We use your number, not a guess.</span>
+            </label>
+            <span></span>
+          </div>
           <label class="form-full">Anything else?
             <textarea name="message" maxlength="2000" rows="3" placeholder="Optional"></textarea>
           </label>
@@ -505,9 +525,10 @@ function siteFooterHtml() {
 </footer>`;
 }
 
-function blogShell({ title, description, canonical, jsonld = [], bodyClass, content }) {
+function blogShell({ title, description, canonical, jsonld = [], bodyClass, content, noindex }) {
   const ld = jsonld.map(o => `<script type="application/ld+json">${JSON.stringify(o)}</script>`).join('\n');
   const ogType = bodyClass === 'is-post' ? 'article' : 'website';
+  const robots = noindex ? 'noindex,nofollow' : 'index,follow,max-image-preview:large';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -516,7 +537,7 @@ function blogShell({ title, description, canonical, jsonld = [], bodyClass, cont
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}">
 <link rel="canonical" href="${canonical}">
-<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="robots" content="${robots}">
 <meta name="theme-color" content="#15120e">
 <meta property="og:type" content="${ogType}">
 <meta property="og:site_name" content="SalesWyze">
@@ -610,6 +631,57 @@ function renderBlogPost(origin, post) {
   return blogShell({ title: post.title + ' | SalesWyze', description: post.description, canonical, jsonld, bodyClass: 'is-post', content });
 }
 
+// The instant free-estimate report, rendered as the response to the lead form.
+// Same app, same theme, shown in seconds. noindex because it is a per-submission
+// result, not a page meant to rank.
+function renderAuditReport(origin, { audit, businessName }) {
+  const { label, count, deal, rows, narrative, usedTheirValue } = audit;
+  const pctLabel = (p) => (p % 1 === 0 ? p : p.toFixed(1)) + '%';
+  const rowsHtml = rows.map(r => `
+        <tr${r.highlight ? ' class="audit-row-hi"' : ''}>
+          <td>${pctLabel(r.pct)} <span class="audit-note">(${r.note})</span></td>
+          <td>${r.sales.toLocaleString('en-US')}</td>
+          <td class="audit-rev">${fmtMoney(r.revenue)}</td>
+        </tr>`).join('');
+  const low = rows[0];
+  const assume = usedTheirValue
+    ? `Based on your own number, about ${fmtMoney(deal)} a sale, and a list of roughly ${count.toLocaleString('en-US')}.`
+    : `Based on a typical ${esc(label)} sale of about ${fmtMoney(deal)}, and a list of roughly ${count.toLocaleString('en-US')}. Tell us your real number and we will redo it.`;
+  const who = businessName && businessName.trim() ? esc(businessName.trim()) : 'Your list';
+
+  const content = `
+    <div class="wrap audit">
+      <span class="eyebrow">Your free estimate</span>
+      <h1 class="h-display">${who} is worth more than it is doing right now.</h1>
+      <p class="audit-lede">${esc(narrative)}</p>
+
+      <table class="audit-table">
+        <thead>
+          <tr><th>If this many come back</th><th>Sales</th><th>Revenue you recover</th></tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <p class="audit-assume">${assume} Swap in your own numbers any time. The shape does not change.</p>
+
+      <div class="post-cta">
+        <h3>That is money already sitting in your list</h3>
+        <p>Even at the ${pctLabel(low.pct)} floor, that is ${fmtMoney(low.revenue)} you are leaving on the table. It runs from $199 a month plus a one-time $999 setup, or fully managed at $499. The follow up pays for itself many times over.</p>
+        <a href="/#pricing" class="btn btn-ember btn-large">See the plans</a>
+      </div>
+
+      <p class="audit-foot">We saved your details and will reach out to get you set up. Want to talk now? Call or text (747) 688-9992.</p>
+    </div>`;
+
+  return blogShell({
+    title: 'Your recoverable revenue estimate | SalesWyze',
+    description: 'What your old leads and past customers could be worth.',
+    canonical: origin + '/',
+    bodyClass: 'is-post',
+    noindex: true,
+    content,
+  });
+}
+
 function renderBlogNotFound(origin) {
   const content = `
     <div class="wrap post">
@@ -662,6 +734,21 @@ function blogCss() {
 .rel-list a:last-child{border-bottom:none;}
 .rel-list a:hover{color:var(--ember);padding-left:8px;}
 .rel-arrow{color:var(--ember);font-weight:700;}
+
+/* Free estimate report */
+.audit{max-width:720px;margin:0 auto;padding:0 24px;}
+.audit h1{font-size:clamp(2rem,4.6vw,3rem);line-height:1.05;letter-spacing:-.01em;margin:14px 0 20px;}
+.audit-lede{font-size:1.2rem;line-height:1.7;color:var(--ink-soft);margin:0 0 30px;max-width:64ch;}
+.audit-table{width:100%;border-collapse:collapse;margin:0 0 14px;}
+.audit-table th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--brass-dark);padding:0 14px 12px;border-bottom:1px solid var(--line);}
+.audit-table td{padding:16px 14px;border-bottom:1px solid var(--line);font-size:1.05rem;vertical-align:baseline;}
+.audit-table .audit-rev{font-family:'Big Shoulders Display',sans-serif;font-weight:800;font-size:1.55rem;}
+.audit-row-hi{background:var(--paper);}
+.audit-row-hi .audit-rev{color:var(--ember);}
+.audit-note{color:var(--brass-dark);font-size:.85rem;}
+.audit-assume{font-size:.92rem;line-height:1.5;color:var(--ink-soft);margin:0 0 8px;}
+.audit-foot{font-size:.9rem;color:var(--brass-dark);margin-top:22px;}
+.field-hint{display:block;font-size:.78rem;color:var(--brass-dark);margin-top:5px;font-weight:400;line-height:1.4;}
 `;
 }
 
