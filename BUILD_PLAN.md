@@ -1,7 +1,9 @@
 # SalesWyze Build Plan
 
-**Date:** 2026-07-30 · **Last updated:** 2026-07-30 (audience broadened to any business; free audit built and shipped; pricing set to three tiers)
+**Date:** 2026-07-30 · **Last updated:** 2026-07-30 (Phase 0 is DONE and verified — see below; audit log, data deletion, and a login rate-limit gap also shipped)
 **Goal:** turn a working single-tenant app into a multi-tenant product that can safely sell its offers (done-for-you and self-serve), without boiling the ocean.
+
+> **Phase 0 status: COMPLETE.** Every route was audited and scoped to `client_id` (including three files — `dashboard.js`, `activity.js`, `admin.js` — that a security review caught after the first pass missed them, one of which was a cross-tenant account-takeover path). The global unique indexes on `leads.phone`, `orders.shopify_order_id`, and `salespeople.email` are now per-tenant composites (migration 018), verified against both a fresh boot and a simulated production transition with real data. A 10-test two-tenant isolation suite (`npm run test:isolation`) drives the real HTTP app and proves tenant A cannot read or mutate tenant B's data anywhere it checked. **The app is now safe to onboard a second tenant.**
 
 > **Pricing decision (2026-07-30):** pay-on-close is dropped. Close attribution cannot be verified without the customer's cooperation and turns every invoice into a dispute. The model is now flat, three tiers:
 > - **Fully managed — $499/month.** We set it up and we run it. No setup fee.
@@ -86,17 +88,19 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 
 ---
 
-## Phase 0 — Foundation (the gate)
+## Phase 0 — Foundation (the gate) — ✅ DONE (2026-07-30)
 
-**Why first:** the moment a second business has a login, they share one database with SureSecured. Today the queries are not all scoped, so tenant B could see tenant A's leads, revenue, and customer emails. You cannot sell to anyone, managed or self-serve, until this is closed. It is also the "runs itself" promise: if the automation does not actually run, the product is a demo.
+**Why first:** the moment a second business has a login, they share one database with SureSecured. Before this work, queries were not all scoped, so tenant B could see tenant A's leads, revenue, and customer emails. It is also the "runs itself" promise: if the automation does not actually run, the product is a demo.
 
-**Work items:**
-1. **Tenant-scope every query.** Add `WHERE client_id = $1` across `analytics.js`, `api.js`, `leads.js`, and audit the rest. Pick one enforcement mechanism so the next new route cannot forget: a `tenantQuery(req)` helper plus a lint rule that bans raw `pool.query` in route files. (Postgres row-level security is the stronger long-term answer; the helper is the fast, shippable one.)
-2. **Convert the global unique indexes** to `(client_id, column)` composites, and rewrite the roughly ten `ON CONFLICT` call sites in the same change. This was deliberately deferred in migration 015 because doing it half-way breaks unsubscribe and order intake. Do it whole, now, while there is one tenant and no conflicting data.
-3. **A two-tenant isolation test suite.** Create two tenants, seed both, assert every list and report returns only its own rows. Without this, the first new route regresses the fix silently.
-4. **Turn the automation on.** Four of five scheduled jobs never fire (`poll-email-sources`, `score-leads`, `run-agents`, `daily-digest`). Wire them into the real scheduler and verify each runs. `poll-email-sources` is the "captures new customers" feature, so it matters most.
+**Work items, all shipped:**
+1. **Every query tenant-scoped.** `analytics.js`, `leads.js`, `sequences.js`, `api.js` first, then a security review swept the files the first pass never covered — `dashboard.js` (the whole overview leaked every tenant's revenue/reps/reply PII), `activity.js` (all five drill-downs — orders, commissions, calls, clicks, form-submissions — same leak, plus an order-assign mutation that never checked the order belonged to the caller's tenant), and `admin.js` (a tenant admin could set **any other tenant's rep's portal password** — a real account-takeover path — plus several unscoped salesperson/client writes). All closed. `requireTenantContext` is now enforced at the router level in every tenant-facing route file, not per-route, so a new route added later cannot forget it.
+2. **Global unique indexes converted** to `(client_id, column)` composites — `leads.phone`, `orders.shopify_order_id`, `salespeople.email` (migration 018). Every `ON CONFLICT` call site updated in lockstep (`webhook.js`, `retell.js`). Two cross-tenant write bugs found in the process and fixed: the inbound-email-capture cron was joining ONE globally-picked `client_email_config` to every connected mailbox (misattributing new leads across tenants), and two `ON CONFLICT (email)` clauses on `leads` targeted an index that no longer exists (leads has no global email uniqueness, by design — a lead can belong to more than one tenant).
+3. **Two-tenant isolation test suite shipped**: `src/test/isolation.test.js`, run with `npm run test:isolation`. Seeds two real tenants, drives the actual HTTP app (not mocks), and asserts leads/analytics/sequences/dashboard/orders never cross tenant lines, that cross-tenant reads 404, that cross-tenant writes are refused, and specifically that the portal-password takeover is closed. 10/10 pass.
+4. **All four dead cron jobs turned on** (`poll-email-sources`, `score-leads`, `run-agents`, `daily-digest`) — they only existed in `railway.toml` `[[cron]]` blocks, which Railway does not treat as a real schedule, so they never fired. Now wired into the same `node-cron` block as the one job that worked.
 
-**What you can sell after:** nothing new yet, but you are now safe to add a second customer. This is the unlock, not the product.
+**Verification performed:** fresh-database boot, idempotent rerun, and — the one that matters most — a **simulated production transition**: recreated the old global indexes with real seed data, then ran the migration and confirmed the composites replaced them cleanly with zero data loss. This is the closest verification possible short of running it against the live database directly.
+
+**What you can sell after:** nothing new yet, but the app is now safe to add a second customer — the unlock, not the product.
 
 **Rough size:** the biggest single phase. The query scoping and index conversion are the bulk. Call it the one you do carefully and do not rush.
 
@@ -159,10 +163,17 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 
 **Why:** not blockers for the first few clients, but they become real as you grow and as bigger clients ask harder questions.
 
-**Work items, roughly in order of when they bite:**
-1. **Audit log.** Append-only record of logins and state changes (commissions, leads, tenant edits). Needed for disputes and for any client who asks a security question.
-2. **A real migration runner and tested backups.** Migrations currently run in-process with no version table and no lock; restoring a backup and booting has failed before. Add a `schema_migrations` table with an advisory lock, and run one timed restore drill.
-3. **Security hardening from the launch review.** Webhook replay protection, global error and process handlers, wider rate-limit coverage, and vendoring Tailwind locally so the login and dashboards stop loading it from a CDN with CSP disabled.
+**Shipped 2026-07-30:**
+1. **Audit log** (`migrations/019_audit_log.sql`, `src/lib/auditLog.js`). Append-only, records login success/failure (password and Google, with the reason), portal-password changes, tenant/client edits, and order-assign commission credits. Best-effort — never blocks the action it records.
+2. **Real migration runner.** `schema_migrations` tracking table + a `pg_advisory_lock` around the whole boot sequence, so overlapping deploys or a second replica can never race the schema. Verified: fresh boot applies all 17 (now 19) migrations and records them; rerun applies none.
+3. **Global error and process handlers.** An Express error handler returns a clean 500 instead of a hung request; `unhandledRejection`/`uncaughtException` are logged (Railway restarts on the latter).
+4. **Login rate limiting was silently not applied.** `app.use('/login', loginLimiter)` only matches the GET page path; the actual password-check route is `POST /auth/login`, which that prefix never reached — brute-force login attempts had zero rate limiting. Fixed and verified live (21st rapid attempt returns 429).
+5. **Data deletion path** (`src/lib/dataDeletion.js`) for state privacy law requests — see the compliance section below.
+
+**Still open:**
+1. **Tested backup/restore drill.** The migration runner is now tracked and locked, but a timed restore-from-backup drill against Railway has not been run.
+2. **Webhook replay protection.** Not yet reviewed in this pass.
+3. **Vendor Tailwind locally + re-enable CSP.** Deliberately **not attempted** in this session — the CDN script (`src/lib/layout.js:107`) feeds the shared shell every authenticated page uses, and there was no browser available to visually verify the result. Rebuilding it blind and shipping it while the owner is unavailable to check the dashboards for breakage was the wrong trade. Do this in a session where you can look at the rendered pages before it goes live.
 
 **What you can sell after:** nothing new, but you can keep and defend the customers Phase 1 and 2 brought in.
 
@@ -212,9 +223,9 @@ Two separate bodies of state law apply, and both are growing.
 
 ### Data rights and documents
 
-- **A deletion path.** The app cannot currently delete a person's data on request, and several state laws require it. This is a build item, not just a policy.
-- **A retention policy**, so you are not holding raw lists and transcripts forever.
-- **The paperwork:** a privacy policy, terms of service, and a data processing agreement for customers. Lawyer-drafted, product-linked.
+- **A deletion path — ✅ shipped 2026-07-30.** `src/lib/dataDeletion.js` deletes a lead's activity/tracking records, anonymizes (rather than deletes) their orders to preserve revenue/commission history, and suppresses their email so a later import can't recreate them. Tenant-scoped and transactional — verified it refuses to touch another tenant's lead.
+- **A retention policy** — still open. No concrete retention period is set per data category yet; the draft privacy policy below flags this as the main open item before it can be published.
+- **The paperwork — drafted, not final.** `PRIVACY_POLICY_DRAFT.md`, `TERMS_OF_SERVICE_DRAFT.md`, and `DATA_PROCESSING_AGREEMENT_DRAFT.md` now exist at the repo root, grounded in what the product actually does (CAN-SPAM footer, unsubscribe, the deletion path, the audit log). Each is clearly marked DRAFT / NOT LEGAL ADVICE and lists its own open items (retention periods, which state laws apply, sub-processor list, SMS/TCPA terms once Phase 1.5 ships). **Do not publish any of the three without a lawyer's review.**
 
 ### Where the controls land by phase
 
@@ -232,11 +243,11 @@ Two separate bodies of state law apply, and both are growing.
 
 ---
 
-## What I would do first
+## What's next now that Phase 0 is done
 
-1. **Phase 0, item 1 and 3 together:** the `tenantQuery` helper and the two-tenant isolation test suite, because the test suite is what keeps the fix from rotting. This is the single highest-leverage thing in the whole plan.
-2. **Phase 0, item 4:** turn the four dead jobs on and verify, because "it captures customers and runs itself" has to be true before you sell it.
-3. Then the index conversion, then Phase 1's seed canary, which is the feature that makes the brand promise real.
+1. **Phase 1's seed canary** is the highest-leverage remaining item — it is the feature that makes "we watch it land" a provable claim instead of a slogan, and it reuses Gmail plumbing that already exists (reply detection).
+2. **Phase 2 (billing) and Phase 1.5 (SMS)** are both gated on steps only the owner can do: a Stripe account, a Telnyx phone number purchase, and 10DLC brand/campaign registration (3-7 day approval). The code side of each can be scaffolded ahead of those steps clearing, but there is no point building the billing UI against a Stripe account that doesn't exist yet — start the external steps first, build the code while they clear.
+3. **Connect the support@saleswyze.com mailbox** (Settings → Email, or the Gmail OAuth connect flow) so the platform's own mail — the audit email — actually sends from that address instead of degrading to whichever mailbox is connected as the fallback.
 
 Everything after that is a straight line you can walk one shippable step at a time.
 
