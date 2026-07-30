@@ -142,6 +142,58 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 
 ---
 
+## Compliance and legal (woven through every phase, not a bolt-on)
+
+This is a real surface with real teeth, especially for SMS. Read this first, plainly: **I can build the controls, but I cannot be your lawyer, and "compliant in every state" is a moving target that a lawyer has to sign off on.** The state privacy and texting laws change most years, and the SMS ones carry per-message penalties that fund a whole litigation industry. Build the controls below, then have counsel review the contracts, the consent language, and the multi-state SMS approach before you scale texting.
+
+### Your liability structure (the smart part you already named)
+
+The customer, not SalesWyze, is the sender of record. Make that structural, in both the product and the paperwork:
+
+- **They authorize the exact verbiage.** Before anything sends, the customer approves the email and SMS wording. Build this as an approval step in the product, and keep a timestamped record of what they approved.
+- **They stand behind their claims and their list.** In the agreement, the customer attests that they have the legal right and the consent to contact everyone on the list, that the claims in their messages are true, and that they are responsible for the content. Pair it with an indemnification clause.
+- **Reality check:** this shifts most of the risk to the customer, which is correct and important, but it does not make the platform invisible to the law. A facilitator can still carry obligations. So the customer attestation is necessary, not sufficient. It rides alongside the technical controls, it does not replace them.
+
+### Email (federal CAN-SPAM) — mostly done
+
+- Accurate from and header info, a non-deceptive subject, a valid physical postal address, and a working one-click unsubscribe honored promptly. The footer, the address, and the unsubscribe are built. Keep unsubscribe instant and permanent.
+
+### SMS and voice (federal TCPA, plus the Telemarketing Sales Rule) — the high-risk area
+
+- **Prior express consent**, in writing for marketing texts. Do not text a cold list. Text people who gave you their number, and keep the record that proves they did.
+- **STOP and HELP honored automatically and instantly**, with the number suppressed permanently.
+- **Time-of-day limits** (roughly 8am to 9pm in the recipient's local time), identification of who is texting, and 10DLC brand and campaign registration per customer.
+- Penalties are per message, so this is the one place where careless equals expensive.
+
+### The state patchwork — where "all states" actually lives
+
+Two separate bodies of state law apply, and both are growing.
+
+- **State comprehensive privacy laws.** California's CCPA and CPRA started it, and roughly twenty states now have their own (Virginia, Colorado, Connecticut, Utah, Texas, Oregon, Montana, and more, with new ones most years). They give people the right to know, access, delete, and opt out, and they require a real privacy policy, honoring deletion requests, data minimization, and in several states honoring a browser-level opt-out signal. The controls this demands: a working data-deletion path, a retention policy, a privacy policy, and a way to log and fulfill a request.
+- **State mini-TCPA and telemarketing laws.** Several states go beyond the federal floor. Florida's FTSA is the one that reshaped the industry: stricter consent, a private right of action, and a wave of lawsuits behind it. Others (Oklahoma, Washington, and more) have their own rules. The safe posture is to meet the strictest state you operate in, not the federal minimum, and to let counsel confirm the list.
+
+### Data rights and documents
+
+- **A deletion path.** The app cannot currently delete a person's data on request, and several state laws require it. This is a build item, not just a policy.
+- **A retention policy**, so you are not holding raw lists and transcripts forever.
+- **The paperwork:** a privacy policy, terms of service, and a data processing agreement for customers. Lawyer-drafted, product-linked.
+
+### Where the controls land by phase
+
+| Control | Phase |
+|---|---|
+| Email CAN-SPAM footer, unsubscribe | done |
+| Verbiage-approval step and record | Phase 1 (managed), reused everywhere |
+| SMS consent capture, STOP/HELP, time limits, 10DLC | Phase 1.5 (SMS) |
+| Consent record per contact | Phase 1.5, and Phase 2 for self-serve |
+| Data deletion path, retention policy | Phase 3 (do before you have many customers' data) |
+| Privacy policy, terms, DPA, indemnification | before the first non-SureSecured customer signs |
+| Counsel review of multi-state SMS | before SMS goes live beyond a pilot |
+
+**The one hard rule:** do not turn on broad SMS until a lawyer has looked at your consent flow and your state coverage. Email you can grow carefully on your own judgment. SMS you should not.
+
+---
+
 ## What I would do first
 
 1. **Phase 0, item 1 and 3 together:** the `tenantQuery` helper and the two-tenant isolation test suite, because the test suite is what keeps the fix from rotting. This is the single highest-leverage thing in the whole plan.
