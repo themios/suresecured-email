@@ -130,7 +130,15 @@ async function getSendingHealth(clientId) {
 
 router.get('/api/sending-health', requireAuth, requireTenantContext, async (req, res) => {
   try {
-    res.json(await getSendingHealth(req.user.client_id));
+    const health = await getSendingHealth(req.user.client_id);
+    // Seed-canary spam signal: sends can succeed (health.healthy stays true)
+    // while still landing in spam, which the failure log alone can never see.
+    const { rows: seedRows } = await pool.query(
+      `SELECT folder FROM seed_checks WHERE client_id = $1 ORDER BY checked_at DESC LIMIT 5`,
+      [req.user.client_id]
+    );
+    const spamCount = seedRows.filter(r => r.folder === 'spam').length;
+    res.json({ ...health, seedSpamCount: spamCount, seedChecked: seedRows.length });
   } catch (err) {
     console.error('[sending-health] error:', err.message);
     // Fail closed toward "healthy" so a broken health check never paints a false
@@ -144,7 +152,7 @@ router.get('/api/sending-health', requireAuth, requireTenantContext, async (req,
 
 router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) => {
   try {
-    const [failures, health] = await Promise.all([
+    const [failures, health, seedRows] = await Promise.all([
       pool.query(
         `SELECT es.id, es.to_email, es.subject, es.failure_class, es.failure_reason,
                 COALESCE(es.failed_at, es.sent_at) AS when_failed,
@@ -157,7 +165,17 @@ router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) =
         [req.user.client_id]
       ),
       getSendingHealth(req.user.client_id),
+      // Last 5 seed-canary checks: a message can send successfully (health above)
+      // and still land in spam -- a delivery problem the failure log alone can
+      // never see, since Gmail doesn't bounce a spam-foldered message.
+      pool.query(
+        `SELECT folder FROM seed_checks WHERE client_id = $1 ORDER BY checked_at DESC LIMIT 5`,
+        [req.user.client_id]
+      ),
     ]);
+
+    const recentSeedFolders = seedRows.rows.map(r => r.folder);
+    const recentSpamCount = recentSeedFolders.filter(f => f === 'spam').length;
 
     const banner = !health.healthy
       ? `<div class="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
@@ -171,6 +189,14 @@ router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) =
       : `<div class="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-6 text-sm text-emerald-800">
            Sending is healthy. Anything listed below already failed and was not retried.
          </div>`;
+
+    const seedBanner = recentSpamCount > 0
+      ? `<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+           <div class="font-semibold text-amber-800 text-sm">Seed check: ${recentSpamCount} of your last ${recentSeedFolders.length} campaign sends landed in spam</div>
+           <p class="text-amber-700 text-sm mt-1">Sending succeeded, but the mail is not reaching the inbox. This usually means a deliverability/reputation issue, not a configuration error.</p>
+           <a href="/settings/email" class="inline-block mt-3 bg-amber-600 text-white text-sm rounded-lg px-4 py-2 hover:bg-amber-700">Open email settings</a>
+         </div>`
+      : '';
 
     const rows = failures.rows.map(f => {
       const copy = CLASS_COPY[f.failure_class] || CLASS_COPY.unknown;
@@ -203,6 +229,7 @@ router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) =
         <h1 class="text-2xl font-bold text-slate-800 mb-1">Undelivered messages</h1>
         <p class="text-sm text-slate-500 mb-6">Messages that were attempted but did not reach the recipient, and why.</p>
         ${banner}
+        ${seedBanner}
         <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table class="w-full">
             <thead class="bg-slate-50 border-b border-slate-200">
@@ -242,4 +269,4 @@ router.get('/undelivered', requireAuth, requireTenantContext, async (req, res) =
   }
 });
 
-module.exports = router;
+module.exports = { router, getSendingHealth };

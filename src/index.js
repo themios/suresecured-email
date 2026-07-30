@@ -29,7 +29,7 @@ const telnyxRouter      = require('./routes/telnyx');
 const pixelRouter       = require('./routes/pixel');
 const emailClickRouter  = require('./routes/email-click');
 const marketingRouter   = require('./routes/marketing');
-const deliverabilityRouter = require('./routes/deliverability');
+const { router: deliverabilityRouter } = require('./routes/deliverability');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -192,6 +192,10 @@ async function start() {
   cron.schedule('0 */6 * * *', () => fireCron('score-leads'));
   // Daily metrics digest to each operator — 06:00 UTC.
   cron.schedule('0 6 * * *', () => fireCron('daily-digest'));
+  // Seed canary: check where the last campaign send landed (inbox/spam/promo)
+  // for every tenant with a connected seed inbox — no-op until one is connected.
+  // Runs after send-sequences has had all day to generate real mail to check.
+  cron.schedule('0 8 * * *', () => fireCron('seed-check'));
 }
 
 // Only boot the server + scheduler when run directly. Tests require this module

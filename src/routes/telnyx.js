@@ -34,14 +34,25 @@ router.post('/sms', async (req, res) => {
       return res.status(200).json({ ok: true });
     }
 
-    // Look up lead by phone number
-    const { rows: leadRows } = await pool.query(
-      `SELECT id, client_id FROM leads WHERE phone = $1 LIMIT 1`,
-      [fromNumber]
+    // Resolve the tenant from the Telnyx number the SMS was sent TO (mirrors
+    // retell.js's voice pattern). This must happen before the lead lookup:
+    // leads.phone is unique per tenant, not globally, so an unscoped lookup
+    // could match a different tenant's lead who happens to share that phone
+    // number with the real sender.
+    const { rows: clientRows } = await pool.query(
+      `SELECT id FROM clients WHERE telnyx_phone_number = $1 AND active = true LIMIT 1`,
+      [toNumber]
     );
-    const lead     = leadRows[0] || null;
-    const leadId   = lead?.id || null;
-    const clientId = lead?.client_id || null;
+    const clientId = clientRows[0]?.id || null;
+
+    let leadId = null;
+    if (clientId) {
+      const { rows: leadRows } = await pool.query(
+        `SELECT id FROM leads WHERE phone = $1 AND client_id = $2 LIMIT 1`,
+        [fromNumber, clientId]
+      );
+      leadId = leadRows[0]?.id || null;
+    }
 
     // Insert inbound SMS record
     await pool.query(

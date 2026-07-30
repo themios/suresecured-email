@@ -51,22 +51,28 @@ function oauthClient() {
 
 // ── Signed, expiring OAuth state (CSRF + identity binding) ──────────────────
 // state = base64url(JSON payload) + '.' + HMAC-SHA256(secret, payload)
-// Binds the connect flow to a specific salesperson for a short window so the
-// callback cannot be tricked into binding a Google account to an arbitrary id.
+// Binds the connect flow to a specific id for a short window so the callback
+// cannot be tricked into binding a Google account to an arbitrary id.
+//
+// `purpose` namespaces the id: a salesperson-connect state and a seed-inbox-
+// connect state can both carry the numeric id 5 (a salesperson_id and a
+// client_id are different id spaces), so the callback must verify it got back
+// the SAME purpose it issued, not just any validly-signed state. Defaults to
+// 'sp' so every existing salesperson connect call site is unaffected.
 function oauthStateSecret() {
   return process.env.JWT_SECRET || process.env.UNSUBSCRIBE_HMAC_SECRET;
 }
 
-function signOAuthState(salespersonId, ttlMs = 10 * 60 * 1000) {
+function signOAuthState(salespersonId, ttlMs = 10 * 60 * 1000, purpose = 'sp') {
   const secret = oauthStateSecret();
   if (!secret) throw new Error('JWT_SECRET required to sign OAuth state');
-  const payload = { sid: String(salespersonId), nonce: crypto.randomBytes(8).toString('hex'), exp: Date.now() + ttlMs };
+  const payload = { sid: String(salespersonId), purpose, nonce: crypto.randomBytes(8).toString('hex'), exp: Date.now() + ttlMs };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = crypto.createHmac('sha256', secret).update(encoded).digest('base64url');
   return `${encoded}.${sig}`;
 }
 
-function verifyOAuthState(state) {
+function verifyOAuthState(state, expectedPurpose = 'sp') {
   const secret = oauthStateSecret();
   if (!secret || !state || typeof state !== 'string') return null;
   const dot = state.lastIndexOf('.');
@@ -80,13 +86,14 @@ function verifyOAuthState(state) {
   try {
     const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
     if (!payload.exp || Date.now() > payload.exp) return null;
+    if ((payload.purpose || 'sp') !== expectedPurpose) return null;
     return payload.sid;
   } catch {
     return null;
   }
 }
 
-function getAuthUrl(salespersonId) {
+function getAuthUrl(id, purpose = 'sp') {
   const client = oauthClient();
   return client.generateAuthUrl({
     access_type: 'offline',
@@ -96,7 +103,7 @@ function getAuthUrl(salespersonId) {
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/userinfo.email',
     ],
-    state: signOAuthState(salespersonId),
+    state: signOAuthState(id, undefined, purpose),
   });
 }
 
@@ -477,11 +484,16 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
     attemptedService = clientCfg.provider || 'smtp';
   }
 
+  // Captured per-branch below so the seed-canary copy (sent after a successful
+  // real send) mirrors the exact From identity a real recipient saw.
+  let effectiveFromName = fromName, effectiveFromAddress = account?.email;
+
   try {
     if (clientCfg?.smtp_host && clientCfg?.smtp_user && clientCfg?.smtp_pass) {
       // ── Client DB config path ─────────────────────────────────────────────
       const sendFrom  = clientCfg.from_email || account?.email;
       const sendName  = clientCfg.from_name  || fromName;
+      effectiveFromName = sendName; effectiveFromAddress = sendFrom;
       const replyToAddr = clientCfg.reply_to || account?.email || sendFrom;
       await sendViaClientSmtp(clientCfg, {
         fromName:    sendName,
@@ -501,6 +513,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
       // ── Global env-var SES/SMTP fallback ─────────────────────────────────
       const sesFrom = process.env.SES_FROM_EMAIL || account.email;
       const sesName = process.env.SES_FROM_NAME  || fromName;
+      effectiveFromName = sesName; effectiveFromAddress = sesFrom;
       await sendViaSes({
         fromName:    sesName,
         fromAddress: sesFrom,
@@ -520,6 +533,7 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
       // Use configured from_email (Send As alias) if set, otherwise fall back to OAuth account email
       const gmailFrom = clientCfg?.from_email || account.email;
       const gmailName = clientCfg?.from_name  || fromName;
+      effectiveFromName = gmailName; effectiveFromAddress = gmailFrom;
       const gmail = google.gmail({ version: 'v1', auth: client });
       const raw   = await buildRawMessage({
         fromName:    gmailName,
@@ -546,6 +560,27 @@ async function sendSequenceEmail({ salespersonId, clientId, to, subject, body, v
     // Clears consecutive_failures and the alert gate, so a mailbox that starts
     // working again stops warning the operator without anyone dismissing it.
     await recordIdentitySuccess(clientId);
+
+    // Mirror this send to the tenant's seed inbox (if connected), so the daily
+    // seed-check job can see where it actually landed. Real campaign traffic
+    // only — a preview send is not representative of production deliverability
+    // and would pollute the signal.
+    if (!preview && clientId) {
+      // Lazy require: seedCanary.js itself requires from this file (oauthClient,
+      // buildRawMessage, etc.), so a top-level require here would be circular
+      // and one side would see a half-initialized module. Deferring to call
+      // time is safe because by then both modules have finished loading.
+      const { sendSeedCopy } = require('./seedCanary');
+      sendSeedCopy({
+        clientId,
+        salespersonAuth: { client },
+        fromName: effectiveFromName,
+        fromAddress: effectiveFromAddress,
+        subject: resolvedSubject,
+        textBody: rewrittenBodyText,
+        htmlBody: html,
+      });
+    }
 
     return { ok: true };
   } catch (err) {

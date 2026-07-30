@@ -6,6 +6,7 @@ const { requireAdminAuth } = require('../middleware/apiAuth');
 const { shell, ICONS, esc } = require('../lib/layout');
 const { createLlm, createAgent } = require('../lib/retell');
 const { logEvent, ipOf } = require('../lib/auditLog');
+const { getSendingHealth } = require('./deliverability');
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1110,6 +1111,88 @@ router.get('/agency', requireAdminAuth, requireRole('operator', 'owner'), async 
   } catch (err) {
     console.error('Agency dashboard error:', err);
     res.status(500).send('Server error loading agency dashboard');
+  }
+});
+
+// ─── Client Health ─────────────────────────────────────────────────────────
+// The "you watch it so they never have to" view: one screen across every
+// managed tenant showing whether sending is actually working. Cross-tenant BY
+// DESIGN — this is the platform operator's own monitoring surface, gated the
+// same way /agency is (operator sees every org, owner sees their own org's
+// clients only), never exposed to a tenant's own users.
+router.get('/client-health', requirePlatformAdmin, async (req, res) => {
+  try {
+    const isOp = req.user.role === 'operator';
+    const { rows: clients } = await pool.query(
+      `SELECT c.id, c.name
+         FROM clients c
+        WHERE c.active = true ${isOp ? '' : 'AND c.organization_id = $1'}
+        ORDER BY c.name`,
+      isOp ? [] : [req.user.organization_id]
+    );
+
+    const rows = await Promise.all(clients.map(async (c) => {
+      const [health, seedRows, sentRows] = await Promise.all([
+        getSendingHealth(c.id),
+        pool.query(`SELECT folder FROM seed_checks WHERE client_id = $1 ORDER BY checked_at DESC LIMIT 5`, [c.id]),
+        pool.query(`SELECT COUNT(*)::int AS n FROM email_sends WHERE client_id = $1 AND status = 'sent' AND sent_at > NOW() - interval '24 hours'`, [c.id]),
+      ]);
+      const seedFolders = seedRows.rows.map(r => r.folder);
+      const spamCount = seedFolders.filter(f => f === 'spam').length;
+      return {
+        id: c.id,
+        name: c.name,
+        health,
+        seedFolders,
+        spamCount,
+        sentLast24h: sentRows.rows[0]?.n || 0,
+      };
+    }));
+
+    const statusBadge = (r) => {
+      if (!r.health.healthy) return `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Sending down</span>`;
+      if (r.spamCount > 0) return `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">Landing in spam</span>`;
+      if (r.seedFolders.length === 0) return `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500">No seed inbox</span>`;
+      return `<span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Healthy</span>`;
+    };
+
+    const clientRows = rows.length === 0
+      ? `<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No active clients yet.</td></tr>`
+      : rows.map(r => `
+        <tr class="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+          <td class="px-4 py-3 font-medium text-slate-900">${esc(r.name)}</td>
+          <td class="px-4 py-3">${statusBadge(r)}</td>
+          <td class="px-4 py-3 text-center text-sm text-slate-600">${r.sentLast24h}</td>
+          <td class="px-4 py-3 text-sm text-slate-500">${r.seedFolders.length ? r.seedFolders.map(f => f[0].toUpperCase()).join(' ') : '—'}</td>
+          <td class="px-4 py-3 text-xs text-slate-400 font-mono max-w-xs truncate" title="${esc(r.health.lastError || '')}">${esc(r.health.lastError || '—')}</td>
+        </tr>`).join('');
+
+    const content = `
+      <div class="px-6 py-8 max-w-6xl mx-auto">
+        <div class="mb-6">
+          <h1 class="text-2xl font-bold text-slate-900">Client Health</h1>
+          <p class="text-sm text-slate-400 mt-0.5">Is every managed client's mail actually landing? Last 5 seed checks: I=Inbox, P=Promotions, S=Spam, N=Not found.</p>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <table class="w-full text-sm data-table">
+            <thead class="bg-slate-50 text-xs text-slate-500 uppercase tracking-wider border-b border-slate-100">
+              <tr>
+                <th class="px-4 py-3 text-left">Client</th>
+                <th class="px-4 py-3 text-left">Status</th>
+                <th class="px-4 py-3 text-center">Sent (24h)</th>
+                <th class="px-4 py-3 text-left">Last 5 seed checks</th>
+                <th class="px-4 py-3 text-left">Last error</th>
+              </tr>
+            </thead>
+            <tbody>${clientRows}</tbody>
+          </table>
+        </div>
+      </div>`;
+
+    res.send(shell('Client Health', 'admin', content, { user: req.user }));
+  } catch (err) {
+    console.error('Client health error:', err);
+    res.status(500).send('Server error loading client health');
   }
 });
 

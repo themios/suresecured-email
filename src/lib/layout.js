@@ -170,7 +170,23 @@ const SHARED_JS = `
   fetch('/api/sending-health', { credentials: 'same-origin' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (h) {
-      if (!h || h.healthy) return;
+      if (!h) return;
+      if (h.healthy && h.seedSpamCount > 0) {
+        // Milder amber notice: sending itself is fine, but the seed canary saw
+        // recent mail land in spam -- a deliverability problem, not an outage.
+        box.style.display = 'block';
+        box.innerHTML =
+          '<div style="position:fixed;top:0;left:0;right:0;z-index:9999;' +
+          'background:#78350f;color:#fff;padding:10px 20px;font-size:13px;' +
+          'box-shadow:0 2px 8px rgba(0,0,0,.25);' +
+          'display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+          '<strong>Landing in spam</strong>' +
+          '<span style="opacity:.9">' + h.seedSpamCount + ' of your last ' + h.seedChecked + ' seed checks landed in spam.</span>' +
+          '<a href="/settings/email" style="color:#fff;text-decoration:underline;margin-left:auto">Open email settings</a>' +
+          '</div>';
+        return;
+      }
+      if (h.healthy) return;
       var cls = {
         auth:       ['Email sending is down', 'Your mail server rejected the username or password.'],
         connection: ['Email sending is down', 'We could not reach your mail server.'],

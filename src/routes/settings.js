@@ -680,14 +680,18 @@ router.post('/business', requireAuth, async (req, res) => {
 // ─── Email Settings ───────────────────────────────────────────────────────────
 router.get('/email', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const [{ rows }, { rows: gmailRows }, { rows: seqRows }] = await Promise.all([
+  const [{ rows }, { rows: gmailRows }, { rows: seqRows }, { rows: seedRows }, { rows: seedCheckRows }] = await Promise.all([
     pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]),
     pool.query('SELECT email FROM email_accounts WHERE salesperson_id = $1 AND enabled = true', [req.user?.id]),
     pool.query('SELECT id, name FROM sequences WHERE active = true AND client_id = $1 ORDER BY name', [clientId]),
+    pool.query('SELECT email, enabled, last_error, connected_at FROM seed_accounts WHERE client_id = $1', [clientId]),
+    pool.query('SELECT folder, subject, checked_at FROM seed_checks WHERE client_id = $1 ORDER BY checked_at DESC LIMIT 5', [clientId]),
   ]);
   const cfg = rows[0] || {};
   const gmailAccount = gmailRows[0] || null;
   const sequences = seqRows;
+  const seedAccount = seedRows[0] || null;
+  const seedChecks = seedCheckRows;
 
   const body = `
     ${gmailAccount ? `
@@ -851,6 +855,34 @@ router.get('/email', requireAuth, async (req, res) => {
     </div>
   </form>
 
+  <!-- Seed canary: a monitored inbox that receives a copy of every campaign
+       send, so a daily check can prove where it actually landed. Outside the
+       main form (its own connect/disconnect actions), same pattern as Gmail. -->
+  <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
+    <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide mb-1">Deliverability seed inbox</h2>
+    <p class="text-xs text-slate-400 mb-3">Connect one inbox you check regularly. Every campaign send also goes there, and once a day we check whether it landed in the inbox, promotions, or spam — proof your mail is actually arriving, not just "sent".</p>
+    ${seedAccount ? `
+    <div class="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg p-3 mb-3">
+      <div>
+        <p class="text-sm font-medium text-slate-700">${esc(seedAccount.email)}</p>
+        <p class="text-xs text-slate-400 mt-0.5">${seedAccount.enabled ? 'Connected' : 'Disconnected'}${seedAccount.last_error ? ` · <span class="text-red-500">${esc(seedAccount.last_error)}</span>` : ''}</p>
+      </div>
+      <button onclick="disconnectSeed()" class="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50">Disconnect</button>
+    </div>
+    ${seedChecks.length ? `
+    <div class="text-xs text-slate-500">
+      <p class="font-medium text-slate-600 mb-1">Recent checks:</p>
+      ${seedChecks.map(c => {
+        const color = c.folder === 'spam' ? 'text-red-600' : c.folder === 'promotions' ? 'text-amber-600' : c.folder === 'not_found' ? 'text-slate-400' : 'text-emerald-600';
+        const label = { inbox: 'Inbox', promotions: 'Promotions', spam: 'Spam', not_found: 'No mail found', error: 'Check failed' }[c.folder] || c.folder;
+        return `<div class="flex justify-between py-1 border-t border-slate-100"><span>${new Date(c.checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span><span class="${color} font-medium">${esc(label)}</span></div>`;
+      }).join('')}
+    </div>` : `<p class="text-xs text-slate-400">No checks yet — the first daily check runs within 24 hours of connecting.</p>`}
+    ` : `
+    <a href="/gmail/seed/connect" class="inline-block bg-slate-800 text-white text-sm px-4 py-2 rounded-lg hover:bg-slate-900">Connect seed inbox</a>
+    `}
+  </div>
+
   <script>
     const PRESETS = ${JSON.stringify(PROVIDERS)};
     function selectProvider(key, fillFields = true) {
@@ -877,6 +909,11 @@ router.get('/email', requireAuth, async (req, res) => {
 
     async function disconnectGmail() {
       await fetch('/gmail/disconnect/${esc(String(req.user?.id || ''))}', { method: 'POST' });
+      location.reload();
+    }
+
+    async function disconnectSeed() {
+      await fetch('/gmail/seed/disconnect', { method: 'POST' });
       location.reload();
     }
 

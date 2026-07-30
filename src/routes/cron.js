@@ -895,6 +895,27 @@ router.post('/poll-email-sources', cronAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /cron/seed-check
+ * Daily deliverability proof: for every tenant with a connected seed inbox,
+ * check where the most recent campaign mail actually landed (inbox, spam,
+ * promotions) and record it. No-op for a tenant with no seed inbox connected.
+ */
+router.post('/seed-check', cronAuth, async (req, res) => {
+  try {
+    const { runAllSeedChecks } = require('../lib/seedCanary');
+    const results = await runAllSeedChecks();
+    const spam = results.filter(r => r.folder === 'spam');
+    if (spam.length > 0) {
+      sendTelegram(`⚠️ <b>Seed check</b>: ${spam.length} tenant(s) landed in SPAM on the last check.`).catch(() => {});
+    }
+    res.json({ ok: true, results, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('[seed-check] failed:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/test-telegram', cronAuth, async (req, res) => {
   const token  = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;

@@ -135,6 +135,7 @@ const MIGRATION_FILES = [
   '017_step_active.sql',
   '018_tenant_unique_indexes.sql',
   '019_audit_log.sql',
+  '020_seed_canary.sql',
 ];
 
 async function runMigrations() {
