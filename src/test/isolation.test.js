@@ -48,14 +48,20 @@ async function seedTenant(tag) {
     `INSERT INTO sequences (client_id, name, audience_type) VALUES ($1, $2, 'B2C') RETURNING id`,
     [clientId, `Sequence ${tag}`]
   );
+  const rep = await pool.query(
+    `INSERT INTO salespeople (client_id, name, email, portal_password_hash)
+     VALUES ($1, $2, $3, 'original-hash') RETURNING id`,
+    [clientId, `Rep ${tag}`, `rep-${tag}-${Date.now()}@example.com`]
+  );
   await pool.query(
-    `INSERT INTO orders (client_id, amount, ordered_at) VALUES ($1, $2, NOW())`,
-    [clientId, tag === 'A' ? 1000 : 9999]
+    `INSERT INTO orders (client_id, salesperson_id, amount, ordered_at) VALUES ($1, $2, $3, NOW())`,
+    [clientId, rep.rows[0].id, tag === 'A' ? 1000 : 9999]
   );
   return {
     clientId, userId,
     leadId: lead.rows[0].id,
     seqId: seq.rows[0].id,
+    repId: rep.rows[0].id,
     token: jwt.sign({ id: userId }, process.env.JWT_SECRET),
     leadEmail: `lead-${tag}@example.com`,
     interest: `interest-${tag}`,
@@ -138,6 +144,36 @@ test('reading another tenant\'s sequence by id returns 404', async (t) => {
   if (!dbReady) return t.skip('no database');
   const res = await get(`/sequences/api/sequences/${B.seqId}`, A.token);
   assert.strictEqual(res.status, 404, 'A must not read B\'s sequence');
+});
+
+test('dashboard overview shows only the caller\'s revenue', async (t) => {
+  if (!dbReady) return t.skip('no database');
+  const res = await get('/dashboard', A.token);
+  const html = await res.text();
+  assert.strictEqual(res.status, 200);
+  // B's order renders as the currency string $9,999.00; the bare "9999"
+  // also appears in unrelated CSS (z-index), so match the formatted figure.
+  assert.ok(!html.includes('9,999'), 'B\'s revenue must not appear on A\'s dashboard');
+});
+
+test('order drill-down lists only the caller\'s orders', async (t) => {
+  if (!dbReady) return t.skip('no database');
+  const res = await get('/orders', A.token);
+  const html = await res.text();
+  assert.ok(!html.includes('9,999.00'), 'B\'s $9999 order must not appear in A\'s orders list');
+});
+
+test('admin cannot set another tenant\'s rep portal password (takeover)', async (t) => {
+  if (!dbReady) return t.skip('no database');
+  await post(`/admin/salespeople/${B.repId}/portal-password`, A.token, {});
+  await fetch(`${baseUrl}/admin/salespeople/${B.repId}/portal-password`, {
+    method: 'POST',
+    headers: { Cookie: `auth_token=${A.token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'password=hijacked',
+    redirect: 'manual',
+  });
+  const { rows } = await pool.query('SELECT portal_password_hash FROM salespeople WHERE id = $1', [B.repId]);
+  assert.strictEqual(rows[0].portal_password_hash, 'original-hash', 'B\'s rep password must be unchanged');
 });
 
 test('a session with no client_id is refused by tenant routes', async (t) => {

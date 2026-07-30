@@ -20,13 +20,14 @@ function parseJsonField(value, fallback) {
 
 router.get('/', requireAdminAuth, async (req, res) => {
   try {
+    const cid = req.user.client_id;
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
     const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
     const monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
     const [salespeople, matrix, suppressionCount, goalsData] = await Promise.all([
-      pool.query('SELECT * FROM salespeople ORDER BY name'),
+      pool.query('SELECT * FROM salespeople WHERE client_id = $1 ORDER BY name', [cid]),
       pool.query('SELECT * FROM landing_page_matrix ORDER BY audience_type, product_interest, intent_level'),
       pool.query('SELECT COUNT(*) AS count FROM suppression_list'),
       pool.query(`
@@ -43,10 +44,10 @@ router.get('/', requireAdminAuth, async (req, res) => {
         LEFT JOIN orders o  ON o.salesperson_id = s.id AND DATE(o.ordered_at) BETWEEN $1 AND $2
         LEFT JOIN commissions cm ON cm.salesperson_id = s.id
           AND cm.created_at BETWEEN $1::timestamptz AND ($2::date + interval '1 day')::timestamptz
-        WHERE s.active = true
+        WHERE s.active = true AND s.client_id = $3
         GROUP BY s.id, s.name, s.email, s.commission_rate, s.portal_password_hash, g.target_revenue, g.target_orders
         ORDER BY actual_revenue DESC
-      `, [monthStart, monthEnd]),
+      `, [monthStart, monthEnd, cid]),
     ]);
 
     const flash = req.query.msg
@@ -504,11 +505,12 @@ router.get('/', requireAdminAuth, async (req, res) => {
 // ─── Salesperson Actions ───────────────────────────────────────────────────
 
 router.post('/salespeople', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
   const { first_name, last_name, email, commission_rate, tracking_phone_number, phone, title, voice_extension } = req.body;
   try {
     await pool.query(
-      `INSERT INTO salespeople (name, email, commission_rate, tracking_phone_number, phone, title, voice_extension)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO salespeople (name, email, commission_rate, tracking_phone_number, phone, title, voice_extension, client_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         `${first_name} ${last_name}`.trim(),
         email,
@@ -517,6 +519,7 @@ router.post('/salespeople', express.urlencoded({ extended: true }), requireAdmin
         phone || null,
         title || null,
         voice_extension || null,
+        cid,
       ]
     );
     res.redirect('/admin?ok=1&msg=' + encodeURIComponent('Salesperson added successfully.'));
@@ -527,10 +530,11 @@ router.post('/salespeople', express.urlencoded({ extended: true }), requireAdmin
 });
 
 router.post('/salespeople/:id', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
+  const cid = req.user.client_id;
   const { first_name, last_name, email, commission_rate, tracking_phone_number, phone, title, voice_extension } = req.body;
   try {
-    await pool.query(
-      `UPDATE salespeople SET name=$1, email=$2, commission_rate=$3, tracking_phone_number=$4, phone=$5, title=$6, voice_extension=$7 WHERE id=$8`,
+    const { rowCount } = await pool.query(
+      `UPDATE salespeople SET name=$1, email=$2, commission_rate=$3, tracking_phone_number=$4, phone=$5, title=$6, voice_extension=$7 WHERE id=$8 AND client_id=$9`,
       [
         `${first_name} ${last_name}`.trim(),
         email,
@@ -540,8 +544,10 @@ router.post('/salespeople/:id', express.urlencoded({ extended: true }), requireA
         title || null,
         voice_extension || null,
         req.params.id,
+        cid,
       ]
     );
+    if (!rowCount) return res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Salesperson not found.'));
     res.redirect('/admin?ok=1&msg=' + encodeURIComponent('Salesperson updated.'));
   } catch (err) {
     res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Failed to update salesperson.'));
@@ -550,10 +556,11 @@ router.post('/salespeople/:id', express.urlencoded({ extended: true }), requireA
 
 router.post('/salespeople/:id/toggle', requireAdminAuth, async (req, res) => {
   try {
-    await pool.query(
-      'UPDATE salespeople SET active = NOT active WHERE id = $1',
-      [req.params.id]
+    const { rowCount } = await pool.query(
+      'UPDATE salespeople SET active = NOT active WHERE id = $1 AND client_id = $2',
+      [req.params.id, req.user.client_id]
     );
+    if (!rowCount) return res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Salesperson not found.'));
     res.redirect('/admin?ok=1&msg=' + encodeURIComponent('Salesperson status updated.'));
   } catch (err) {
     res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Failed to update status.'));
@@ -730,6 +737,10 @@ router.post('/suppression/remove', requireAdminAuth, async (req, res) => {
 router.post('/salespeople/:id/goal', express.urlencoded({ extended: true }), requireAdminAuth, async (req, res) => {
   const { period_month, target_revenue, target_orders } = req.body;
   try {
+    // Confirm the rep belongs to this tenant before setting goals on them.
+    const { rows: own } = await pool.query(
+      'SELECT 1 FROM salespeople WHERE id = $1 AND client_id = $2', [req.params.id, req.user.client_id]);
+    if (!own[0]) return res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Salesperson not found.'));
     // period_month is "YYYY-MM", convert to first day of month
     const periodStart = period_month + '-01';
     await pool.query(
@@ -753,10 +764,13 @@ router.post('/salespeople/:id/portal-password', express.urlencoded({ extended: t
   const { password } = req.body;
   try {
     const hash = await bcrypt.hash(password, 12);
-    await pool.query(
-      'UPDATE salespeople SET portal_password_hash = $1 WHERE id = $2',
-      [hash, req.params.id]
+    // Scoped to this tenant: an admin must never set the portal password of
+    // another tenant's rep (which would let them log in as that rep).
+    const { rowCount } = await pool.query(
+      'UPDATE salespeople SET portal_password_hash = $1 WHERE id = $2 AND client_id = $3',
+      [hash, req.params.id, req.user.client_id]
     );
+    if (!rowCount) return res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Salesperson not found.'));
     res.redirect('/admin?ok=1&msg=' + encodeURIComponent('Portal password set. Salesperson can now log in at /portal/login.'));
   } catch (err) {
     res.redirect('/admin?ok=0&msg=' + encodeURIComponent('Failed to set portal password.'));
@@ -795,12 +809,16 @@ const requirePlatformAdmin = [requireAdminAuth, requireRole('operator', 'owner')
 // GET /admin/clients — list all clients with org name
 router.get('/clients', requirePlatformAdmin, async (req, res) => {
   try {
+    // An 'operator' is the platform super-admin and sees every org's clients; an
+    // 'owner' is an org-level role and is limited to their own organization.
+    const isOp = req.user.role === 'operator';
     const { rows } = await pool.query(`
       SELECT c.id, c.name, c.slug, c.active, o.name AS org_name
       FROM clients c
       JOIN organizations o ON o.id = c.organization_id
+      ${isOp ? '' : 'WHERE c.organization_id = $1'}
       ORDER BY o.name, c.name
-    `);
+    `, isOp ? [] : [req.user.organization_id]);
     const rowsHtml = rows.length === 0
       ? `<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">No clients yet. Create one above.</td></tr>`
       : rows.map(c => `
@@ -881,11 +899,14 @@ router.post('/clients', express.urlencoded({ extended: true }), requirePlatformA
   const commJson  = parseJsonField(commission_rules, {});
   const intJson   = parseJsonField(integration_settings, {});
 
+  // An owner can only create clients inside their own org; only a platform
+  // operator may target an arbitrary organization_id from the form.
+  const orgId = req.user.role === 'operator' ? organization_id : req.user.organization_id;
   try {
     await pool.query(
       `INSERT INTO clients (organization_id, name, slug, brand_config, commission_rules, integration_settings, voice_extension)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [organization_id, name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson), voice_extension]
+      [orgId, name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson), voice_extension]
     );
     res.redirect('/admin/clients');
   } catch (err) {
@@ -903,7 +924,10 @@ router.post('/clients', express.urlencoded({ extended: true }), requirePlatformA
 // GET /admin/clients/:id/edit — pre-populated edit form
 router.get('/clients/:id/edit', requirePlatformAdmin, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM clients WHERE id = $1', [req.params.id]);
+    const isOp = req.user.role === 'operator';
+    const { rows } = await pool.query(
+      `SELECT * FROM clients WHERE id = $1${isOp ? '' : ' AND organization_id = $2'}`,
+      isOp ? [req.params.id] : [req.params.id, req.user.organization_id]);
     if (!rows.length) return res.status(404).send('Client not found');
     const { rows: orgs } = await pool.query('SELECT id, name FROM organizations ORDER BY name');
     const client = rows[0];
@@ -923,14 +947,17 @@ router.post('/clients/:id', express.urlencoded({ extended: true }), requirePlatf
   const commJson  = parseJsonField(commission_rules, {});
   const intJson   = parseJsonField(integration_settings, {});
   try {
-    await pool.query(
+    const isOp = req.user.role === 'operator';
+    const { rowCount } = await pool.query(
       `UPDATE clients
        SET name=$1, slug=$2, brand_config=$3, commission_rules=$4,
            integration_settings=$5, active=$6, voice_extension=$7
-       WHERE id=$8`,
-      [name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson),
-       JSON.stringify(intJson), active === 'on', voice_extension, req.params.id]
+       WHERE id=$8${isOp ? '' : ' AND organization_id = $9'}`,
+      isOp
+        ? [name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson), active === 'on', voice_extension, req.params.id]
+        : [name.trim(), slug.trim(), JSON.stringify(brandJson), JSON.stringify(commJson), JSON.stringify(intJson), active === 'on', voice_extension, req.params.id, req.user.organization_id]
     );
+    if (!rowCount) return res.status(404).send('Client not found');
     res.redirect('/admin/clients');
   } catch (err) {
     console.error('Update client error:', err);
@@ -951,10 +978,11 @@ router.post('/clients/:id/provision-voice', requireAdminAuth, requireRole('opera
   if (!clientId) return res.status(400).json({ error: 'invalid client id' });
 
   try {
-    // Load client for name
+    // Load client for name (org-scoped unless platform operator)
+    const isOp = req.user.role === 'operator';
     const { rows } = await pool.query(
-      `SELECT brand_config FROM clients WHERE id = $1`,
-      [clientId]
+      `SELECT brand_config FROM clients WHERE id = $1${isOp ? '' : ' AND organization_id = $2'}`,
+      isOp ? [clientId] : [clientId, req.user.organization_id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'client not found' });
 

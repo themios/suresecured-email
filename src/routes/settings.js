@@ -683,7 +683,7 @@ router.get('/email', requireAuth, async (req, res) => {
   const [{ rows }, { rows: gmailRows }, { rows: seqRows }] = await Promise.all([
     pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]),
     pool.query('SELECT email FROM email_accounts WHERE salesperson_id = $1 AND enabled = true', [req.user?.id]),
-    pool.query('SELECT id, name FROM sequences WHERE active = true ORDER BY name'),
+    pool.query('SELECT id, name FROM sequences WHERE active = true AND client_id = $1 ORDER BY name', [clientId]),
   ]);
   const cfg = rows[0] || {};
   const gmailAccount = gmailRows[0] || null;

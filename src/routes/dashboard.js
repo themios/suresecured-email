@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireTenantContext } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
 
-router.get('/', requireAuth, async (req, res) => {
+router.get('/', requireAuth, requireTenantContext, async (req, res) => {
+  const cid = req.user.client_id;
   try {
+    // Every query scoped to client_id ($1) — this is the operator's own tenant
+    // overview, never a cross-tenant roll-up. Suppression is the one global list.
     const [spStats, recentOrders, recentForms, recentCalls, totalStats, hotLeads] = await Promise.all([
       pool.query(`
         SELECT
@@ -24,44 +27,47 @@ router.get('/', requireAuth, async (req, res) => {
         LEFT JOIN orders o ON o.salesperson_id = s.id
         LEFT JOIN phone_calls pc ON pc.salesperson_id = s.id
         LEFT JOIN commissions cm ON cm.salesperson_id = s.id
-        WHERE s.active = true
+        WHERE s.active = true AND s.client_id = $1
         GROUP BY s.id ORDER BY total_revenue DESC
-      `),
+      `, [cid]),
       pool.query(`
         SELECT o.shopify_order_id, o.customer_email, o.amount, o.ordered_at, s.name AS salesperson
         FROM orders o LEFT JOIN salespeople s ON s.id = o.salesperson_id
+        WHERE o.client_id = $1
         ORDER BY o.ordered_at DESC LIMIT 15
-      `),
+      `, [cid]),
       pool.query(`
         SELECT fs.submitter_name, fs.submitter_email, fs.form_type, fs.submitted_at, s.name AS salesperson
         FROM form_submissions fs LEFT JOIN salespeople s ON s.id = fs.salesperson_id
+        WHERE fs.client_id = $1
         ORDER BY fs.submitted_at DESC LIMIT 15
-      `),
+      `, [cid]),
       pool.query(`
         SELECT pc.caller_number, pc.tracking_number, pc.duration_seconds, pc.called_at, s.name AS salesperson
         FROM phone_calls pc LEFT JOIN salespeople s ON s.id = pc.salesperson_id
+        WHERE pc.client_id = $1
         ORDER BY pc.called_at DESC LIMIT 15
-      `),
+      `, [cid]),
       pool.query(`
         SELECT
-          (SELECT COUNT(*) FROM leads) AS total_leads,
-          (SELECT COUNT(*) FROM clicks) AS total_clicks,
-          (SELECT COUNT(*) FROM form_submissions) AS total_forms,
-          (SELECT COUNT(*) FROM orders) AS total_orders,
-          (SELECT COUNT(*) FROM phone_calls) AS total_calls,
+          (SELECT COUNT(*) FROM leads WHERE client_id = $1) AS total_leads,
+          (SELECT COUNT(*) FROM clicks WHERE client_id = $1) AS total_clicks,
+          (SELECT COUNT(*) FROM form_submissions WHERE client_id = $1) AS total_forms,
+          (SELECT COUNT(*) FROM orders WHERE client_id = $1) AS total_orders,
+          (SELECT COUNT(*) FROM phone_calls WHERE client_id = $1) AS total_calls,
           (SELECT COUNT(*) FROM suppression_list) AS total_suppressed,
-          (SELECT COALESCE(SUM(amount),0) FROM orders) AS total_revenue,
-          (SELECT COALESCE(SUM(commission_earned),0) FROM commissions) AS total_commission,
-          (SELECT COUNT(*) FROM leads WHERE reply_classified_at IS NOT NULL) AS total_replies,
-          (SELECT COUNT(*) FROM leads WHERE reply_urgency = 'high') AS hot_leads
-      `),
+          (SELECT COALESCE(SUM(amount),0) FROM orders WHERE client_id = $1) AS total_revenue,
+          (SELECT COALESCE(SUM(commission_earned),0) FROM commissions WHERE client_id = $1) AS total_commission,
+          (SELECT COUNT(*) FROM leads WHERE client_id = $1 AND reply_classified_at IS NOT NULL) AS total_replies,
+          (SELECT COUNT(*) FROM leads WHERE client_id = $1 AND reply_urgency = 'high') AS hot_leads
+      `, [cid]),
       pool.query(`
         SELECT l.id, l.first_name, l.last_name, l.email, l.reply_category, l.reply_urgency, l.reply_summary, l.reply_classified_at
         FROM leads l
-        WHERE l.reply_classified_at IS NOT NULL
+        WHERE l.client_id = $1 AND l.reply_classified_at IS NOT NULL
         ORDER BY l.reply_classified_at DESC
         LIMIT 10
-      `),
+      `, [cid]),
     ]);
 
     const totals      = totalStats.rows[0];
@@ -187,8 +193,7 @@ router.get('/', requireAuth, async (req, res) => {
     // never break the live dashboard.
     let agentReportCard = '';
     try {
-      const clientId = req.user?.client_id
-        || (await pool.query('SELECT id FROM clients ORDER BY id LIMIT 1')).rows[0]?.id || null;
+      const clientId = req.user.client_id; // guaranteed by requireTenantContext
       if (clientId) {
         const [{ rows: enabledRows }, { rows: reportRows }, { rows: pendRows }] = await Promise.all([
           pool.query(`SELECT enabled FROM client_agent_settings WHERE client_id=$1 AND agent='reporting'`, [clientId]),

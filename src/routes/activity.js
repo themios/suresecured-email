@@ -3,21 +3,27 @@
 const express = require('express');
 const router  = express.Router();
 const { pool } = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireTenantContext } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
 const { calculateCommission } = require('../lib/commissions');
+
+// Every drill-down here reads a tenant-owned table. Enforce identity + tenant
+// context once so no page can list another tenant's orders, commissions, calls,
+// clicks, or form submissions. req.user.client_id is guaranteed after this.
+router.use(requireAuth, requireTenantContext);
 
 const PAGE_SIZE = 50;
 
 // Assign an uncredited order to a rep (e.g. accepting a name suggestion) and
 // credit the commission identically to the webhook path.
-router.post('/orders/:id/assign', requireAuth, express.urlencoded({ extended: false }), async (req, res) => {
+router.post('/orders/:id/assign', express.urlencoded({ extended: false }), async (req, res) => {
   const orderId = parseInt(req.params.id, 10);
   const salespersonId = parseInt(req.body.salesperson_id, 10);
   if (!orderId || !salespersonId) return res.redirect('/orders');
 
   const { rows: ord } = await pool.query(
-    'SELECT id, client_id, amount, commission_status FROM orders WHERE id = $1', [orderId]);
+    'SELECT id, client_id, amount, commission_status FROM orders WHERE id = $1 AND client_id = $2',
+    [orderId, req.user.client_id]);
   const order = ord[0];
   if (!order || order.commission_status === 'credited' || !order.client_id) return res.redirect('/orders');
 
@@ -107,7 +113,8 @@ function tableShell(headers, rows, emptyMessage) {
 }
 
 // ─── Orders ─────────────────────────────────────────────────────────────────
-router.get('/orders', requireAuth, async (req, res) => {
+router.get('/orders', async (req, res) => {
+  const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
 
@@ -119,10 +126,11 @@ router.get('/orders', requireAuth, async (req, res) => {
       FROM orders o
       LEFT JOIN salespeople s  ON s.id  = o.salesperson_id
       LEFT JOIN salespeople ss ON ss.id = o.suggested_salesperson_id
+      WHERE o.client_id = $1
       ORDER BY o.ordered_at DESC
-      LIMIT $1 OFFSET $2
-    `, [PAGE_SIZE, offset]),
-    pool.query('SELECT COUNT(*), COALESCE(SUM(amount),0) AS total FROM orders'),
+      LIMIT $2 OFFSET $3
+    `, [cid, PAGE_SIZE, offset]),
+    pool.query('SELECT COUNT(*), COALESCE(SUM(amount),0) AS total FROM orders WHERE client_id = $1', [cid]),
   ]);
 
   const totalCount = parseInt(countResult.rows[0].count);
@@ -164,7 +172,8 @@ router.get('/orders', requireAuth, async (req, res) => {
 });
 
 // ─── Commissions ────────────────────────────────────────────────────────────
-router.get('/commissions', requireAuth, async (req, res) => {
+router.get('/commissions', async (req, res) => {
+  const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
 
@@ -173,10 +182,11 @@ router.get('/commissions', requireAuth, async (req, res) => {
       SELECT cm.id, cm.source_type, cm.sale_amount, cm.commission_rate, cm.commission_earned,
              cm.status, cm.created_at, s.name AS salesperson_name
       FROM commissions cm LEFT JOIN salespeople s ON s.id = cm.salesperson_id
+      WHERE cm.client_id = $1
       ORDER BY cm.created_at DESC
-      LIMIT $1 OFFSET $2
-    `, [PAGE_SIZE, offset]),
-    pool.query('SELECT COUNT(*), COALESCE(SUM(commission_earned),0) AS total FROM commissions'),
+      LIMIT $2 OFFSET $3
+    `, [cid, PAGE_SIZE, offset]),
+    pool.query('SELECT COUNT(*), COALESCE(SUM(commission_earned),0) AS total FROM commissions WHERE client_id = $1', [cid]),
   ]);
 
   const totalCount = parseInt(countResult.rows[0].count);
@@ -205,7 +215,8 @@ router.get('/commissions', requireAuth, async (req, res) => {
 });
 
 // ─── Phone Calls ────────────────────────────────────────────────────────────
-router.get('/calls', requireAuth, async (req, res) => {
+router.get('/calls', async (req, res) => {
+  const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
 
@@ -214,10 +225,11 @@ router.get('/calls', requireAuth, async (req, res) => {
       SELECT pc.id, pc.caller_number, pc.tracking_number, pc.duration_seconds, pc.called_at,
              s.name AS salesperson_name
       FROM phone_calls pc LEFT JOIN salespeople s ON s.id = pc.salesperson_id
+      WHERE pc.client_id = $1
       ORDER BY pc.called_at DESC
-      LIMIT $1 OFFSET $2
-    `, [PAGE_SIZE, offset]),
-    pool.query('SELECT COUNT(*) FROM phone_calls'),
+      LIMIT $2 OFFSET $3
+    `, [cid, PAGE_SIZE, offset]),
+    pool.query('SELECT COUNT(*) FROM phone_calls WHERE client_id = $1', [cid]),
   ]);
 
   const totalCount = parseInt(countResult.rows[0].count);
@@ -244,7 +256,8 @@ router.get('/calls', requireAuth, async (req, res) => {
 });
 
 // ─── Email Clicks ───────────────────────────────────────────────────────────
-router.get('/clicks', requireAuth, async (req, res) => {
+router.get('/clicks', async (req, res) => {
+  const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
 
@@ -255,10 +268,11 @@ router.get('/clicks', requireAuth, async (req, res) => {
       FROM clicks c
       LEFT JOIN leads l ON l.id = c.lead_id
       LEFT JOIN salespeople s ON s.id = c.salesperson_id
+      WHERE c.client_id = $1
       ORDER BY c.clicked_at DESC
-      LIMIT $1 OFFSET $2
-    `, [PAGE_SIZE, offset]),
-    pool.query('SELECT COUNT(*) FROM clicks'),
+      LIMIT $2 OFFSET $3
+    `, [cid, PAGE_SIZE, offset]),
+    pool.query('SELECT COUNT(*) FROM clicks WHERE client_id = $1', [cid]),
   ]);
 
   const totalCount = parseInt(countResult.rows[0].count);
@@ -287,7 +301,8 @@ router.get('/clicks', requireAuth, async (req, res) => {
 });
 
 // ─── Form Submissions ───────────────────────────────────────────────────────
-router.get('/form-submissions', requireAuth, async (req, res) => {
+router.get('/form-submissions', async (req, res) => {
+  const cid    = req.user.client_id;
   const page   = getPage(req);
   const offset = (page - 1) * PAGE_SIZE;
 
@@ -296,10 +311,11 @@ router.get('/form-submissions', requireAuth, async (req, res) => {
       SELECT fs.id, fs.submitter_name, fs.submitter_email, fs.form_type, fs.submitted_at,
              s.name AS salesperson_name
       FROM form_submissions fs LEFT JOIN salespeople s ON s.id = fs.salesperson_id
+      WHERE fs.client_id = $1
       ORDER BY fs.submitted_at DESC
-      LIMIT $1 OFFSET $2
-    `, [PAGE_SIZE, offset]),
-    pool.query('SELECT COUNT(*) FROM form_submissions'),
+      LIMIT $2 OFFSET $3
+    `, [cid, PAGE_SIZE, offset]),
+    pool.query('SELECT COUNT(*) FROM form_submissions WHERE client_id = $1', [cid]),
   ]);
 
   const totalCount = parseInt(countResult.rows[0].count);
