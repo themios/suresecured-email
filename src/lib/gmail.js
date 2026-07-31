@@ -236,7 +236,12 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
         `style="width:100%;max-width:520px;height:auto;border-radius:6px;border:1px solid #d8d6d2"></p>`;
     }
 
-    return `<p style="margin:0 0 18px 0;color:${primary_color};font-size:15px;line-height:1.75">` +
+    // Message copy is always neutral dark text, independent of primary_color --
+    // that field is the header-bar brand color (per the Theme & Branding
+    // settings label), and reusing it here made the actual message read in
+    // whatever bright brand color a tenant picked (blue, in one real case),
+    // instead of legible body text.
+    return `<p style="margin:0 0 18px 0;color:#222222;font-size:15px;line-height:1.75">` +
       p.split('\n').map(line =>
         line.replace(/(https?:\/\/[^\s<>"]+)/g, `<a href="$1" style="color:${accent_color};font-weight:600;text-decoration:underline">$1</a>`)
       ).join('<br>') +
@@ -269,7 +274,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
                 <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
               </td>
               <td align="right">
-                <a href="https://${website.replace(/^https?:\/\//, '')}" style="color:#ffffff;font-size:11px;letter-spacing:0.5px;text-decoration:none">${website}</a>
+                <a href="https://${website.replace(/^https?:\/\//, '')}" style="color:#ffffff;font-size:12px;letter-spacing:0.5px;text-decoration:none">${website}</a>
               </td>
             </tr>
           </table>
@@ -759,7 +764,7 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
   const date = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   const paragraphs = bodyText.split(/\n\n+/).map(p =>
-    `<p style="margin:0 0 18px 0;color:${primary_color};font-size:15px;line-height:1.75">${p.replace(/\n/g, '<br>')}</p>`
+    `<p style="margin:0 0 18px 0;color:#222222;font-size:15px;line-height:1.75">${p.replace(/\n/g, '<br>')}</p>`
   ).join('\n');
 
   return `<!DOCTYPE html>
