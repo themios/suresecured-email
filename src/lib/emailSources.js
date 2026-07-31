@@ -7,6 +7,32 @@
  */
 const { pool } = require('../db');
 
+// Local-part tokens that mark a sender as automated/bulk mail rather than a
+// genuine inbound inquiry. Matched as a delimited token (on -, _, or .
+// boundaries) so it catches compound local-parts like "messages-noreply" or
+// "jobalerts-noreply", not just an exact local-part match.
+const AUTOMATED_LOCAL_TOKEN = /(^|[-_.+])(no-?reply|do-?not-?reply|notifications?|notify|bounces?|mailer-daemon|postmaster|auto-?reply|alerts?|digest|newsletter|jobalerts?|editorialstaff|invoice|billing|statements?)([-_.+]|$)/i;
+
+/**
+ * Is this inbound message almost certainly bulk/automated mail rather than a
+ * genuine inquiry? Two independent signals, either one is enough:
+ *   1. A List-Unsubscribe header -- the standard, legally-required marker for
+ *      bulk mail. Catches the overwhelming majority (newsletters, marketing,
+ *      social-network digests) regardless of how the From address looks.
+ *   2. A local-part token that only automated systems use (no-reply,
+ *      notifications, jobalerts, invoice, etc).
+ *
+ * Known, honest limitation: mail deliberately written to look personal (a
+ * SaaS "hi, I'm Emily from the team!" onboarding email with no unsubscribe
+ * header and a human-looking From name) will not be caught by either signal.
+ * No header/pattern check can distinguish that from a genuine inquiry.
+ */
+function isAutomatedSender({ email, hasListUnsubscribe }) {
+  if (hasListUnsubscribe) return true;
+  const local = String(email || '').split('@')[0] || '';
+  return AUTOMATED_LOCAL_TOKEN.test(local);
+}
+
 /** Split a raw From address into a lowercased email + bare domain. */
 function parseFrom(fromAddress) {
   const email = String(fromAddress || '').toLowerCase().trim();
@@ -39,13 +65,16 @@ function ruleMatches(rule, from) {
  * @param {string} fromAddress
  * @param {Array}  rules  rows from email_source_rules (any order)
  * @param {'all'|'allowlist'} capturePolicy  source default when no rule matches
+ * @param {{hasListUnsubscribe?: boolean}} meta  header signals for the automated-sender check
  * @returns {{capture:boolean, reason:string, ruleId?:number, sequenceId?:number, salespersonId?:number, tag?:string}}
  */
-function evaluateSender(fromAddress, rules = [], capturePolicy = 'allowlist') {
+function evaluateSender(fromAddress, rules = [], capturePolicy = 'allowlist', meta = {}) {
   const from = parseFrom(fromAddress);
   if (!from.email) return { capture: false, reason: 'no_sender' };
 
-  // Lowest priority number wins; first match decides.
+  // Lowest priority number wins; first match decides. A rule is a deliberate,
+  // explicit choice by the tenant, so it overrides the automated-sender check
+  // below -- if they specifically allowlisted a domain, honor it.
   const sorted = [...rules].sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100));
   for (const rule of sorted) {
     if (!ruleMatches(rule, from)) continue;
@@ -60,8 +89,15 @@ function evaluateSender(fromAddress, rules = [], capturePolicy = 'allowlist') {
     };
   }
 
-  // No rule matched — fall back to the source's default policy.
-  if (capturePolicy === 'all') return { capture: true, reason: 'policy_all' };
+  // No rule matched — fall back to the source's default policy. 'all' was
+  // never meant to include obvious bulk/automated mail, so filter it even
+  // on the permissive policy.
+  if (capturePolicy === 'all') {
+    if (isAutomatedSender({ email: from.email, hasListUnsubscribe: meta.hasListUnsubscribe })) {
+      return { capture: false, reason: 'automated_sender' };
+    }
+    return { capture: true, reason: 'policy_all' };
+  }
   return { capture: false, reason: 'policy_allowlist_no_match' };
 }
 
@@ -87,4 +123,4 @@ async function rulesForSource(clientId, sourceId) {
   return rows;
 }
 
-module.exports = { parseFrom, parseFromHeader, ruleMatches, evaluateSender, listEnabledSources, rulesForSource };
+module.exports = { parseFrom, parseFromHeader, ruleMatches, evaluateSender, isAutomatedSender, listEnabledSources, rulesForSource };

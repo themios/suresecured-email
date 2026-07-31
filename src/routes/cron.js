@@ -15,6 +15,7 @@ const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
 const { sendSms: sendTwilioSms } = require('../lib/twilio');
 const { safeDecrypt } = require('../lib/crypto');
+const { isAutomatedSender } = require('../lib/emailSources');
 const { setFirstTouchAttribution } = require('../lib/attribution');
 const { sendTelegram, notifyNewLead, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 const { runDueAgents } = require('../lib/agents/scheduler');
@@ -68,15 +69,26 @@ async function sendSequencesHandler(req, res) {
 
         for (const m of msgs) {
           try {
-            const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata', metadataHeaders: ['From', 'Subject'] });
+            const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata', metadataHeaders: ['From', 'Subject', 'List-Unsubscribe'] });
             const headers = msg.data.payload?.headers || [];
             const fromHeader = headers.find(h => h.name === 'From')?.value || '';
             const subject    = headers.find(h => h.name === 'Subject')?.value || '';
+            const hasListUnsubscribe = !!headers.find(h => h.name === 'List-Unsubscribe')?.value;
 
             // Parse "Name <email>" or "email"
             const emailMatch = fromHeader.match(/<([^>]+)>/) || fromHeader.match(/([^\s]+@[^\s]+)/);
             const senderEmail = emailMatch?.[1]?.toLowerCase().trim();
             if (!senderEmail) continue;
+
+            // This box is a real inbox (often a personal or daily-driver
+            // mailbox, not a dedicated sales address), so it receives plenty
+            // of newsletters, notifications, and marketing mail alongside
+            // genuine inquiries. Without this, every one of those becomes a
+            // "lead" -- confirmed in production: 30 junk leads (Nextdoor,
+            // LinkedIn, Reddit, AliExpress, Stripe receipts, etc.) captured
+            // in about a day, three of them already queued for a real
+            // outbound send before this was caught.
+            if (isAutomatedSender({ email: senderEmail, hasListUnsubscribe })) continue;
 
             const nameMatch = fromHeader.match(/^(.+?)\s*</);
             const senderName = nameMatch?.[1]?.replace(/"/g, '').trim() || '';

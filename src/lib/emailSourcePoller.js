@@ -36,17 +36,21 @@ async function fetchGmailMessages(source) {
   const out = [];
   for (const m of list.data.messages || []) {
     const msg = await gmail.users.messages.get({
-      userId: 'me', id: m.id, format: 'metadata', metadataHeaders: ['From', 'Subject'],
+      userId: 'me', id: m.id, format: 'metadata', metadataHeaders: ['From', 'Subject', 'List-Unsubscribe'],
     });
     const headers = msg.data.payload?.headers || [];
     const { email, name } = parseFromHeader(headers.find(h => h.name === 'From')?.value || '');
     const subject = headers.find(h => h.name === 'Subject')?.value || '';
-    if (email) out.push({ email, name, subject });
+    const hasListUnsubscribe = !!headers.find(h => h.name === 'List-Unsubscribe')?.value;
+    if (email) out.push({ email, name, subject, hasListUnsubscribe });
   }
   return out;
 }
 
-/** IMAP source → [{ email, name, subject }] via envelope only. */
+// IMAP source → [{ email, name, subject }] via envelope only. Envelope fetch
+// doesn't include arbitrary headers, so hasListUnsubscribe is unavailable here
+// -- IMAP sources fall back to the local-part pattern alone in
+// isAutomatedSender, which is weaker than the Gmail path's header check.
 async function fetchImapMessages(source) {
   const client = new ImapFlow({
     host: source.imap_host, port: source.imap_port || 993, secure: true,
@@ -80,7 +84,7 @@ async function ingestFromSource(source) {
 
   let captured = 0, ignored = 0, skipped = 0;
   for (const msg of messages) {
-    const decision = evaluateSender(msg.email, rules, source.capture_policy);
+    const decision = evaluateSender(msg.email, rules, source.capture_policy, { hasListUnsubscribe: msg.hasListUnsubscribe });
     if (!decision.capture) { ignored++; continue; }
 
     // Dedup: don't recreate a lead that already exists for this tenant.
