@@ -269,7 +269,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
                 <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
               </td>
               <td align="right">
-                <span style="color:#ffffff;font-size:11px;letter-spacing:0.5px">${website}</span>
+                <a href="https://${website.replace(/^https?:\/\//, '')}" style="color:#ffffff;font-size:11px;letter-spacing:0.5px;text-decoration:none">${website}</a>
               </td>
             </tr>
           </table>
