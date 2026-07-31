@@ -6,6 +6,7 @@ const { rewriteLinks, isPermanentBounce }  = require('./email-tracking');
 const crypto = require('crypto');
 const { decrypt, maybeEncrypt, safeDecrypt } = require('./crypto');
 const { reserveSend } = require('./sendLimits');
+const { resolveFontStack, clampFontSize } = require('./emailFonts');
 
 /**
  * Load and decrypt a client's email config from DB.
@@ -194,9 +195,25 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
     address       = 'Sure Secured, 1555 Simi Town Center Way, Simi Valley, CA 93065',
     cta_url       = 'https://suresecured.com/pages/request-a-quote',
     cta_label     = 'Request a Quote',
+    header_font,
+    header_font_size,
+    body_font,
+    body_font_size,
+    sig_font,
+    sig_font_size,
   } = brandConfig;
 
   const phoneDigits = phone.replace(/\D/g, '');
+
+  // Per-area font family + size, same 3-way grouping as the color settings
+  // (header / body / signature+footer). Falls back to the original hardcoded
+  // Helvetica stack and sizes when a tenant hasn't picked anything.
+  const headerFontStack = resolveFontStack(header_font);
+  const bodyFontStack   = resolveFontStack(body_font);
+  const sigFontStack    = resolveFontStack(sig_font);
+  const headerSize = clampFontSize('header', header_font_size);
+  const bodySize   = clampFontSize('body', body_font_size);
+  const sigSize     = clampFontSize('sig', sig_font_size);
 
   // Inline media tokens, each on its own paragraph, so sequence copy can embed
   // photos and video without a schema change -- the marker lives in the step
@@ -241,7 +258,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
     // settings label), and reusing it here made the actual message read in
     // whatever bright brand color a tenant picked (blue, in one real case),
     // instead of legible body text.
-    return `<p style="margin:0 0 18px 0;color:#222222;font-size:15px;line-height:1.75">` +
+    return `<p style="margin:0 0 18px 0;color:#222222;font-size:${bodySize}px;line-height:1.75;font-family:${bodyFontStack}">` +
       p.split('\n').map(line =>
         line.replace(/(https?:\/\/[^\s<>"]+)/g, `<a href="$1" style="color:${accent_color};font-weight:600;text-decoration:underline">$1</a>`)
       ).join('<br>') +
@@ -256,14 +273,14 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
   <meta name="color-scheme" content="light">
   <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
 </head>
-<body style="margin:0;padding:0;background:#f4f4f2;-webkit-text-size-adjust:100%;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+<body style="margin:0;padding:0;background:#f4f4f2;-webkit-text-size-adjust:100%;font-family:${bodyFontStack}">
   <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f4f2;padding:32px 16px">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%">
 
         <!-- Announcement bar -->
         <tr><td style="background:${info_color};padding:10px 32px;text-align:center">
-          <span style="font-size:12px;color:${primary_color};font-weight:600;letter-spacing:0.2px">For More Information Call/Text: <a href="tel:${phoneDigits}" style="color:${primary_color};text-decoration:none;font-weight:700">${phone}</a></span>
+          <span style="font-size:12px;color:${primary_color};font-weight:600;letter-spacing:0.2px;font-family:${headerFontStack}">For More Information Call/Text: <a href="tel:${phoneDigits}" style="color:${primary_color};text-decoration:none;font-weight:700">${phone}</a></span>
         </td></tr>
 
         <!-- Header -->
@@ -271,10 +288,10 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
             <tr>
               <td>
-                <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
+                <span style="color:#ffffff;font-size:${headerSize}px;font-weight:700;letter-spacing:-0.3px;font-family:${headerFontStack}">${name}</span>
               </td>
               <td align="right">
-                <a href="https://${website.replace(/^https?:\/\//, '')}" style="color:#ffffff;font-size:12px;letter-spacing:0.5px;text-decoration:none">${website}</a>
+                <a href="https://${website.replace(/^https?:\/\//, '')}" style="color:#ffffff;font-size:12px;letter-spacing:0.5px;text-decoration:none;font-family:${headerFontStack}">${website}</a>
               </td>
             </tr>
           </table>
@@ -292,14 +309,14 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
             <tr>
               <td style="background:${accent_color};border-radius:4px">
                 <a href="${cta_url}"
-                   style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;letter-spacing:0.2px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+                   style="display:inline-block;padding:13px 28px;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;letter-spacing:0.2px;font-family:${bodyFontStack}">
                   ${cta_label} &rarr;
                 </a>
               </td>
               <td width="12"></td>
               <td style="border:2px solid ${primary_color};border-radius:4px">
                 <a href="https://${website}"
-                   style="display:inline-block;padding:11px 24px;color:${primary_color};font-size:14px;font-weight:600;text-decoration:none;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+                   style="display:inline-block;padding:11px 24px;color:${primary_color};font-size:14px;font-weight:600;text-decoration:none;font-family:${bodyFontStack}">
                   Shop Products
                 </a>
               </td>
@@ -312,9 +329,9 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
             <tr>
               <td>
-                <p style="margin:0;font-size:14px;color:${primary_color};font-weight:700;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${salespersonName}</p>
-                <p style="margin:3px 0 0;font-size:12px;color:#5a5a58">Security Specialist &mdash; ${name}</p>
-                <p style="margin:6px 0 0;font-size:12px;color:#5a5a58">
+                <p style="margin:0;font-size:${sigSize}px;color:${primary_color};font-weight:700;font-family:${sigFontStack}">${salespersonName}</p>
+                <p style="margin:3px 0 0;font-size:12px;color:#5a5a58;font-family:${sigFontStack}">Security Specialist &mdash; ${name}</p>
+                <p style="margin:6px 0 0;font-size:12px;color:#5a5a58;font-family:${sigFontStack}">
                   <a href="tel:${phoneDigits}" style="color:${primary_color};text-decoration:none;font-weight:600">${phone}</a>
                   &nbsp;&nbsp;|&nbsp;&nbsp;
                   <a href="https://${website}" style="color:${primary_color};text-decoration:none;font-weight:600">${website}</a>
@@ -326,7 +343,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
 
         <!-- Footer -->
         <tr><td style="background:${bg_color};padding:16px 40px 24px;border-top:1px solid #d8d6d2;border-radius:0 0 6px 6px">
-          <p style="color:#8a8a88;font-size:11px;margin:0;line-height:1.7;text-align:center;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+          <p style="color:#8a8a88;font-size:11px;margin:0;line-height:1.7;text-align:center;font-family:${sigFontStack}">
             You received this because you requested information from ${name}.<br>
             ${address}<br>
             <a href="${unsubscribeUrl}" style="color:#8a8a88;text-decoration:underline">Unsubscribe</a>
@@ -759,12 +776,21 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
     accent_color  = '#E91111',
     bg_color      = '#EDEBE7',
     name          = 'SalesPilot',
+    header_font,
+    header_font_size,
+    body_font,
+    body_font_size,
   } = brandConfig;
+
+  const headerFontStack = resolveFontStack(header_font);
+  const bodyFontStack   = resolveFontStack(body_font);
+  const headerSize = clampFontSize('header', header_font_size);
+  const bodySize   = clampFontSize('body', body_font_size);
 
   const date = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
   const paragraphs = bodyText.split(/\n\n+/).map(p =>
-    `<p style="margin:0 0 18px 0;color:#222222;font-size:15px;line-height:1.75">${p.replace(/\n/g, '<br>')}</p>`
+    `<p style="margin:0 0 18px 0;color:#222222;font-size:${bodySize}px;line-height:1.75;font-family:${bodyFontStack}">${p.replace(/\n/g, '<br>')}</p>`
   ).join('\n');
 
   return `<!DOCTYPE html>
@@ -773,7 +799,7 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
 </head>
-<body style="margin:0;padding:0;background:#f4f4f2;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+<body style="margin:0;padding:0;background:#f4f4f2;font-family:${bodyFontStack}">
   <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f4f4f2;padding:32px 16px">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%">
@@ -783,10 +809,10 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
             <tr>
               <td>
-                <span style="color:#ffffff;font-size:20px;font-weight:700;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
+                <span style="color:#ffffff;font-size:${headerSize}px;font-weight:700;font-family:${headerFontStack}">${name}</span>
               </td>
               <td align="right">
-                <span style="color:#ffffff;font-size:11px">Daily Digest</span>
+                <span style="color:#ffffff;font-size:11px;font-family:${headerFontStack}">Daily Digest</span>
               </td>
             </tr>
           </table>
@@ -807,7 +833,7 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
 
         <!-- Footer -->
         <tr><td style="background:${bg_color};padding:16px 40px 24px;border-top:1px solid #d8d6d2;border-radius:0 0 6px 6px">
-          <p style="color:#8a8a88;font-size:11px;margin:0;line-height:1.7;text-align:center;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">
+          <p style="color:#8a8a88;font-size:11px;margin:0;line-height:1.7;text-align:center;font-family:${bodyFontStack}">
             SalesPilot operator digest &mdash; ${name}<br>
             This is an internal operational email.
           </p>

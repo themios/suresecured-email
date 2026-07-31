@@ -10,6 +10,7 @@ const { shell } = require('../lib/layout');
 const { encrypt, decrypt } = require('../lib/crypto');
 const { signOAuthState, verifyOAuthState } = require('../lib/gmail');
 const { sanitizeMatchers, inferMatcherType } = require('../lib/leadSenderMatchers');
+const { FONT_STACKS, DEFAULT_FONT_KEY, isValidFontKey, SIZE_RANGES, clampFontSize, resolveFontStack } = require('../lib/emailFonts');
 
 const PROVIDERS = {
   ionos:     { label: 'IONOS',                smtp_host: 'smtp.ionos.com',                        smtp_port: 587, imap_host: 'imap.ionos.com',             imap_port: 993, note: 'Use your full IONOS email as username.' },
@@ -1346,6 +1347,32 @@ router.get('/theme', requireAuth, async (req, res) => {
         </div>
       </div>
 
+      <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Fonts</h2>
+      <p class="text-xs text-slate-400">Applies to every customer-facing email -- sequence sends, replies from a lead's contact card, and the AI email agent's approved drafts all share this same template. Only email-safe fonts are offered here; custom web fonts aren't reliably supported by most inboxes (Outlook in particular), so a pick outside this list would silently fall back anyway.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        ${[
+          { area: 'header', label: 'Header', hint: 'Business name in the header bar' },
+          { area: 'body',   label: 'Body',   hint: 'The message itself' },
+          { area: 'sig',    label: 'Signature & Footer', hint: 'Sender name, contact line, legal footer' },
+        ].map(({ area, label, hint }) => {
+          const fontKey = isValidFontKey(bc[`${area}_font`]) ? bc[`${area}_font`] : DEFAULT_FONT_KEY;
+          const range = SIZE_RANGES[area];
+          const size = clampFontSize(area, bc[`${area}_font_size`]);
+          return `
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">${label} <span class="text-slate-400 font-normal">(${hint})</span></label>
+          <select id="${area}_font" name="${area}_font" class="w-full border rounded-lg px-2 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-sky-500">
+            ${Object.entries(FONT_STACKS).map(([key, f]) => `<option value="${key}" ${key === fontKey ? 'selected' : ''}>${esc(f.label)}</option>`).join('')}
+          </select>
+          <div class="flex items-center gap-2">
+            <input type="number" id="${area}_font_size" name="${area}_font_size" value="${size}" min="${range.min}" max="${range.max}"
+              class="w-20 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <span class="text-xs text-slate-400">px (${range.min}-${range.max})</span>
+          </div>
+        </div>`;
+        }).join('')}
+      </div>
+
       <!-- Live preview -- a scaled-down mockup of the actual outgoing email
            template (lib/gmail.js buildHtml), not just a color swatch. Every
            element here mirrors what a real send looks like: the header bar
@@ -1356,16 +1383,16 @@ router.get('/theme', requireAuth, async (req, res) => {
         <label class="block text-xs font-medium text-slate-500 mb-2">Preview</label>
         <div id="preview-card" class="rounded-lg border overflow-hidden">
           <div id="preview-header" class="p-4 flex items-center gap-3" style="background:${esc(bc.primary_color || '#030302')}">
-            <span style="color:#fff;font-size:16px;font-weight:700">${esc(bc.name || 'Your Business')}</span>
-            <span style="color:#fff;font-size:11px;margin-left:auto">${esc(bc.website || 'yourwebsite.com')}</span>
+            <span id="preview-headername" style="color:#fff;font-size:16px;font-weight:700;font-family:${resolveFontStack(bc.header_font)}">${esc(bc.name || 'Your Business')}</span>
+            <span id="preview-headerurl" style="color:#fff;font-size:11px;margin-left:auto;font-family:${resolveFontStack(bc.header_font)}">${esc(bc.website || 'yourwebsite.com')}</span>
           </div>
           <div class="p-4 bg-white">
-            <p style="color:#222222;font-size:13px;line-height:1.6;margin:0 0 12px 0">This is what your message text looks like — always dark and legible, no matter which colors you pick above.</p>
-            <span id="preview-btn" class="inline-block px-4 py-1.5 rounded text-white text-sm font-semibold" style="background:${esc(bc.accent_color || '#E91111')}">${esc(bc.cta_label || 'Request a Quote')}</span>
+            <p id="preview-bodytext" style="color:#222222;font-size:13px;line-height:1.6;margin:0 0 12px 0;font-family:${resolveFontStack(bc.body_font)}">This is what your message text looks like — always dark and legible, no matter which colors you pick above.</p>
+            <span id="preview-btn" class="inline-block px-4 py-1.5 rounded text-white text-sm font-semibold" style="background:${esc(bc.accent_color || '#E91111')};font-family:${resolveFontStack(bc.body_font)}">${esc(bc.cta_label || 'Request a Quote')}</span>
           </div>
           <div id="preview-sigband" class="p-3 border-t" style="background:${esc(bc.bg_color || '#EDEBE7')}">
-            <p id="preview-signame" style="color:${esc(bc.primary_color || '#030302')};font-weight:700;font-size:13px;margin:0">Your Name</p>
-            <p style="color:#5a5a58;font-size:11px;margin:2px 0 0">Signature details, phone, website</p>
+            <p id="preview-signame" style="color:${esc(bc.primary_color || '#030302')};font-weight:700;font-size:13px;margin:0;font-family:${resolveFontStack(bc.sig_font)}">Your Name</p>
+            <p id="preview-sigsub" style="color:#5a5a58;font-size:11px;margin:2px 0 0;font-family:${resolveFontStack(bc.sig_font)}">Signature details, phone, website</p>
           </div>
         </div>
         <div class="flex flex-wrap gap-x-6 gap-y-1 mt-2 text-xs text-slate-500">
@@ -1404,6 +1431,26 @@ router.get('/theme', requireAuth, async (req, res) => {
       bg:      { swatch: document.querySelector('[name=bg_color]'),      hex: document.getElementById('bg_hex') },
     };
     var HEX = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
+    var FONT_STACKS = ${JSON.stringify(Object.fromEntries(Object.entries(FONT_STACKS).map(([k, f]) => [k, f.stack])))};
+
+    // Font-family pickers only affect font-family in this preview, not size --
+    // the preview box is scaled down, so mirroring the real 14-32px range here
+    // would look distorted. Family is what actually needs checking (does this
+    // font render as expected), so that's what stays faithful.
+    function fontOf(area) { return FONT_STACKS[document.getElementById(area + '_font').value] || FONT_STACKS.helvetica; }
+    function renderFonts() {
+      var headerStack = fontOf('header'), bodyStack = fontOf('body'), sigStack = fontOf('sig');
+      document.getElementById('preview-headername').style.fontFamily = headerStack;
+      document.getElementById('preview-headerurl').style.fontFamily  = headerStack;
+      document.getElementById('preview-bodytext').style.fontFamily   = bodyStack;
+      document.getElementById('preview-btn').style.fontFamily        = bodyStack;
+      document.getElementById('preview-signame').style.fontFamily    = sigStack;
+      document.getElementById('preview-sigsub').style.fontFamily     = sigStack;
+    }
+    ['header', 'body', 'sig'].forEach(function (area) {
+      document.getElementById(area + '_font').addEventListener('change', renderFonts);
+    });
+    renderFonts();
 
     // Repaint the preview and legend from the current swatch values. Note
     // what's deliberately NOT repainted here: the message body text and the
@@ -1476,8 +1523,23 @@ router.post('/theme', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
   const { rows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
   const existing = rows[0]?.brand_config || {};
-  const { primary_color, accent_color, bg_color, logo_url, favicon_url } = req.body;
-  const updated = { ...existing, primary_color, accent_color, bg_color, logo_url, favicon_url };
+  const {
+    primary_color, accent_color, bg_color, logo_url, favicon_url,
+    header_font, header_font_size, body_font, body_font_size, sig_font, sig_font_size,
+  } = req.body;
+  const updated = {
+    ...existing, primary_color, accent_color, bg_color, logo_url, favicon_url,
+    // Validate the font key server-side too (never trust a raw client value
+    // into brand_config -- an unrecognized key would just fall back silently
+    // in buildHtml anyway, but storing garbage here would confuse the next
+    // page load's dropdown selection).
+    header_font:      isValidFontKey(header_font) ? header_font : DEFAULT_FONT_KEY,
+    body_font:        isValidFontKey(body_font)   ? body_font   : DEFAULT_FONT_KEY,
+    sig_font:         isValidFontKey(sig_font)    ? sig_font    : DEFAULT_FONT_KEY,
+    header_font_size: clampFontSize('header', header_font_size),
+    body_font_size:   clampFontSize('body', body_font_size),
+    sig_font_size:    clampFontSize('sig', sig_font_size),
+  };
   await pool.query('UPDATE clients SET brand_config = $1 WHERE id = $2', [JSON.stringify(updated), clientId]);
   res.redirect('/settings/theme?ok=1&msg=Theme+saved.');
 });
