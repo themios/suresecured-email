@@ -11,7 +11,7 @@
 const { pool } = require('../../db');
 const { runAgent } = require('./runner');
 const { emit } = require('./eventBus');
-const { sendDirectEmail } = require('../gmail');
+const { sendDirectEmail, buildHtml, buildUnsubscribeUrl } = require('../gmail');
 
 const DEFAULT_MAX_DRAFTS = 5;
 const DEFAULT_SEGMENTS = ['hot', 'warm'];
@@ -134,8 +134,12 @@ async function sendApprovedDraft(proposalId, clientId, decidedBy, sender = sendD
   const brandConfig = cr[0]?.brand_config || {};
   const salespersonId = await resolveSender(clientId);
 
-  const htmlBody = `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#222">${
-    String(payload.body).replace(/\n/g, '<br>')}</div>`;
+  // Same branded template as sequence sends (header, signature, footer),
+  // not a bare unstyled div.
+  const { rows: spRows } = await pool.query('SELECT name FROM salespeople WHERE id = $1', [salespersonId]);
+  const salespersonName = spRows[0]?.name || brandConfig.name || 'Sales';
+  const unsubscribeUrl = buildUnsubscribeUrl(payload.to);
+  const htmlBody = buildHtml(String(payload.body), salespersonName, unsubscribeUrl, brandConfig);
 
   let result;
   try {

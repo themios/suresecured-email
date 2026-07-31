@@ -987,7 +987,7 @@ async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, te
 
 module.exports = {
   oauthClient, getAuthUrl, exchangeCode, verifyOAuthState, signOAuthState,
-  buildHtml, buildDigestHtml,
+  buildHtml, buildDigestHtml, buildUnsubscribeUrl,
   sendSequenceEmail, sendViaSes, sendViaClientSmtp, sesEnabled, sendDirectEmail,
   checkForReplies, checkForRepliesByAddress,
   sendReplyNotification,

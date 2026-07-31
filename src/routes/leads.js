@@ -4,7 +4,7 @@ const router  = express.Router();
 const { pool } = require('../db');
 const { requireAuth, requireTenantContext, requireRole } = require('../middleware/auth');
 const { shell, ICONS, esc } = require('../lib/layout');
-const { sendDirectEmail, sesEnabled } = require('../lib/gmail');
+const { sendDirectEmail, sesEnabled, buildHtml, buildUnsubscribeUrl } = require('../lib/gmail');
 const { deleteLeadData } = require('../lib/dataDeletion');
 const { logEvent, ipOf } = require('../lib/auditLog');
 
@@ -934,13 +934,21 @@ router.post('/:id/reply', async (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
   try {
+    const { rows: clientRows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
+    const brandConfig = clientRows[0]?.brand_config || {};
+    const salespersonName = req.user?.name || req.user?.email || 'Sales';
+    const unsubscribeUrl = buildUnsubscribeUrl(lead.email);
+    // Same branded template as sequence sends (header, signature, footer) —
+    // this was previously a bare unstyled div with no signature or branding.
+    const htmlBody = buildHtml(body.trim(), salespersonName, unsubscribeUrl, brandConfig);
+
     const result = await sendDirectEmail({
-      fromName:    process.env.SES_FROM_NAME  || 'Sales',
+      fromName:    brandConfig.name || process.env.SES_FROM_NAME || 'Sales',
       fromAddress: process.env.SES_FROM_EMAIL || process.env.SES_SMTP_USER,
       to:          lead.email,
       subject:     subject?.trim() || `Re: Following up`,
       textBody:    body.trim(),
-      htmlBody:    `<div style="font-family:sans-serif;font-size:15px;line-height:1.6;color:#222">${body.trim().replace(/\n/g,'<br>')}</div>`,
+      htmlBody,
       salespersonId: req.user?.id,
       clientId,
     });
