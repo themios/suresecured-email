@@ -974,8 +974,8 @@ router.post('/email', requireAuth, async (req, res) => {
     const smtpPassEnc = smtp_pass?.trim() ? encrypt(smtp_pass.trim()) : ex.smtp_pass_enc || null;
     const imapPassEnc = imap_pass?.trim() ? encrypt(imap_pass.trim()) : ex.imap_pass_enc || null;
     await pool.query(`
-      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,inbound_capture_enabled,inbound_sequence_id,inbound_source,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
+      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,inbound_capture_enabled,inbound_sequence_id,inbound_source,enabled,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,true,NOW())
       ON CONFLICT (client_id) DO UPDATE SET
         provider=EXCLUDED.provider, smtp_host=EXCLUDED.smtp_host, smtp_port=EXCLUDED.smtp_port,
         smtp_secure=EXCLUDED.smtp_secure, smtp_user=EXCLUDED.smtp_user, smtp_pass_enc=EXCLUDED.smtp_pass_enc,
@@ -985,6 +985,15 @@ router.post('/email', requireAuth, async (req, res) => {
         inbound_capture_enabled=EXCLUDED.inbound_capture_enabled,
         inbound_sequence_id=EXCLUDED.inbound_sequence_id,
         inbound_source=EXCLUDED.inbound_source,
+        -- This page has no separate "disable my email config" control, so
+        -- saving always means "this is my active config." Without this, the
+        -- enabled column (a gate in getClientEmailConfig, see lib/gmail.js)
+        -- could be left false with literally no code path to ever set it back
+        -- to true, silently falling back to sending via whichever Gmail
+        -- happens to be OAuth-connected instead of the configured SMTP/IMAP
+        -- identity. Found exactly that in production: enabled=false with no
+        -- record of anything ever having set it, and no UI to fix it.
+        enabled=true,
         updated_at=NOW()
     `, [
       clientId,
