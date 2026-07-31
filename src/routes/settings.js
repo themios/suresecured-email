@@ -832,7 +832,7 @@ router.get('/email', requireAuth, async (req, res) => {
       <div class="flex items-center justify-between mb-3">
         <div>
           <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide">Inbound Lead Capture</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Automatically create a lead when someone emails you who isn't already in your database.</p>
+          <p class="text-xs text-slate-400 mt-0.5">Automatically create a lead when someone emails a mailbox you choose below, if they aren't already in your database.</p>
         </div>
         <label class="flex items-center gap-2 cursor-pointer">
           <input type="checkbox" name="inbound_capture_enabled" value="1" ${cfg.inbound_capture_enabled ? 'checked' : ''}
@@ -840,13 +840,27 @@ router.get('/email', requireAuth, async (req, res) => {
           <span class="text-sm text-slate-600">Enabled</span>
         </label>
       </div>
+
+      <div class="mb-3">
+        <label class="block text-xs font-medium text-slate-500 mb-1">Watch this mailbox for new leads</label>
+        <select name="inbound_source" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+          <option value="gmail" ${(cfg.inbound_source || 'gmail') === 'gmail' ? 'selected' : ''}>Gmail sign-in${gmailAccount ? ' (' + esc(gmailAccount.email) + ')' : ' (not connected)'}</option>
+          <option value="imap" ${cfg.inbound_source === 'imap' ? 'selected' : ''}>Your email provider${cfg.imap_host ? ' (' + esc(cfg.imap_user || '') + ')' : ' (not configured above)'}</option>
+        </select>
+        <p class="text-xs text-slate-400 mt-1">
+          Your Gmail sign-in above exists to authenticate sending — it is not necessarily a dedicated lead inbox, and defaulting to it can pull in ordinary personal traffic (newsletters, notifications) as "leads."
+          If your real business inquiries arrive at the mailbox configured in <strong>Outgoing Mail (IMAP)</strong> above, choose <strong>Your email provider</strong> instead so only that mailbox is watched.
+          Automated/bulk senders (anything with an unsubscribe link, or a no-reply/notifications-style address) are filtered out either way.
+        </p>
+      </div>
+
       <div>
         <label class="block text-xs font-medium text-slate-500 mb-1">Auto-enroll new leads into sequence (optional)</label>
         <select name="inbound_sequence_id" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
           <option value="">— Don't auto-enroll —</option>
           ${sequences.map(s => `<option value="${s.id}" ${cfg.inbound_sequence_id == s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
         </select>
-        <p class="text-xs text-slate-400 mt-1">Requires Gmail to be connected above. Runs every 15 minutes.</p>
+        <p class="text-xs text-slate-400 mt-1">Runs every 15 minutes.</p>
       </div>
     </div>
 
@@ -951,7 +965,7 @@ router.get('/email', requireAuth, async (req, res) => {
 
 router.post('/email', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass, inbound_capture_enabled, inbound_sequence_id } = req.body;
+  const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass, inbound_capture_enabled, inbound_sequence_id, inbound_source } = req.body;
   try {
     const { rows } = await pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]);
     const ex = rows[0] || {};
@@ -960,8 +974,8 @@ router.post('/email', requireAuth, async (req, res) => {
     const smtpPassEnc = smtp_pass?.trim() ? encrypt(smtp_pass.trim()) : ex.smtp_pass_enc || null;
     const imapPassEnc = imap_pass?.trim() ? encrypt(imap_pass.trim()) : ex.imap_pass_enc || null;
     await pool.query(`
-      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,inbound_capture_enabled,inbound_sequence_id,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW())
+      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,inbound_capture_enabled,inbound_sequence_id,inbound_source,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
       ON CONFLICT (client_id) DO UPDATE SET
         provider=EXCLUDED.provider, smtp_host=EXCLUDED.smtp_host, smtp_port=EXCLUDED.smtp_port,
         smtp_secure=EXCLUDED.smtp_secure, smtp_user=EXCLUDED.smtp_user, smtp_pass_enc=EXCLUDED.smtp_pass_enc,
@@ -970,6 +984,7 @@ router.post('/email', requireAuth, async (req, res) => {
         imap_pass_enc=EXCLUDED.imap_pass_enc,
         inbound_capture_enabled=EXCLUDED.inbound_capture_enabled,
         inbound_sequence_id=EXCLUDED.inbound_sequence_id,
+        inbound_source=EXCLUDED.inbound_source,
         updated_at=NOW()
     `, [
       clientId,
@@ -988,6 +1003,7 @@ router.post('/email', requireAuth, async (req, res) => {
       imapPassEnc,
       inbound_capture_enabled === '1',
       inbound_sequence_id ? parseInt(inbound_sequence_id) : null,
+      inbound_source === 'imap' ? 'imap' : 'gmail',
     ]);
     res.redirect('/settings/email?ok=1&msg=Email+settings+saved.');
   } catch (err) {

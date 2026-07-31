@@ -139,6 +139,7 @@ const MIGRATION_FILES = [
   '021_sms_delivery_consent.sql',
   '022_billing.sql',
   '023_twilio_sms.sql',
+  '024_inbound_source.sql',
 ];
 
 async function runMigrations() {

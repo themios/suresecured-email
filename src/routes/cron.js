@@ -15,9 +15,9 @@ const { computeScore } = require('../lib/scoring');
 const { sendSms } = require('../lib/telnyx');
 const { sendSms: sendTwilioSms } = require('../lib/twilio');
 const { safeDecrypt } = require('../lib/crypto');
-const { isAutomatedSender } = require('../lib/emailSources');
+const { fetchGmailInbound, fetchImapInbound, captureLeadFromMessage } = require('../lib/inboundCapture');
 const { setFirstTouchAttribution } = require('../lib/attribution');
-const { sendTelegram, notifyNewLead, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
+const { sendTelegram, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 const { runDueAgents } = require('../lib/agents/scheduler');
 
 function cronAuth(req, res, next) {
@@ -37,110 +37,84 @@ async function sendSequencesHandler(req, res) {
   const clientEmailConfigs = new Map();
   const salespersonGmailAuthed = new Map();
 
-  // ── Pass 0: inbound email capture — new leads from Gmail inbox ──────────────
+  // ── Pass 0: inbound email capture — new leads from the tenant's chosen source ──
+  // Two possible sources per tenant (client_email_config.inbound_source):
+  //   'gmail' (default) -- whichever Gmail account is OAuth-connected for a
+  //     salesperson under this tenant. That connection commonly exists only
+  //     to authenticate SENDING, so scanning it for leads can pull in a
+  //     personal daily-driver inbox's ordinary traffic -- confirmed in
+  //     production: 30 junk leads (Nextdoor, LinkedIn, Reddit, AliExpress,
+  //     Stripe receipts, etc.) captured in about a day from exactly that.
+  //   'imap' -- the tenant's own real business mailbox (client_email_config's
+  //     existing IMAP credentials, already used for reply-detection), fully
+  //     decoupled from whatever Gmail happens to be connected.
+  // Iterated per-TENANT (not per-mailbox), so the source choice is read once
+  // per tenant and dispatched to the matching fetch function; the actual
+  // per-message decision (filter, dedup, create, enroll) is identical either
+  // way -- shared in lib/inboundCapture.js so it cannot drift between paths.
   try {
-    // Each connected mailbox belongs to a salesperson, who belongs to a client.
-    // Join the inbound config for THAT salesperson's own client — never a single
-    // globally-picked config, which would mis-attribute one tenant's inbound
-    // leads to another.
-    const { rows: inboundAccounts } = await pool.query(`
-      SELECT ea.salesperson_id, ea.email AS gmail_email, cec.client_id,
-             cec.inbound_capture_enabled, cec.inbound_sequence_id, cec.inbound_last_check_at
-      FROM email_accounts ea
-      JOIN salespeople sp ON sp.id = ea.salesperson_id
-      JOIN client_email_config cec ON cec.client_id = sp.client_id
-      WHERE ea.enabled = true
-        AND cec.inbound_capture_enabled = true
+    const { rows: inboundTenants } = await pool.query(`
+      SELECT client_id, inbound_source, inbound_sequence_id, inbound_last_check_at
+      FROM client_email_config
+      WHERE inbound_capture_enabled = true
     `);
 
-    for (const acct of inboundAccounts) {
+    for (const tenant of inboundTenants) {
       try {
-        const auth = await getAuthedClient(acct.salesperson_id);
-        if (!auth) continue;
+        const since = tenant.inbound_last_check_at
+          ? new Date(tenant.inbound_last_check_at)
+          : new Date(Date.now() - 2 * 60 * 60 * 1000);
 
-        const gmail = google.gmail({ version: 'v1', auth: auth.client });
-        // Search inbox for messages received since last check (or 2 hours ago)
-        const since = acct.inbound_last_check_at
-          ? Math.floor(new Date(acct.inbound_last_check_at).getTime() / 1000)
-          : Math.floor((Date.now() - 2 * 60 * 60 * 1000) / 1000);
-        const q = `in:inbox after:${since} -from:me -from:${acct.gmail_email}`;
-        const list = await gmail.users.messages.list({ userId: 'me', q, maxResults: 20 });
-        const msgs = list.data.messages || [];
+        let messages = [];
+        let salespersonId = null;
 
-        for (const m of msgs) {
+        if (tenant.inbound_source === 'imap') {
+          const clientCfg = await getClientEmailConfig(tenant.client_id);
+          messages = await fetchImapInbound(clientCfg, since);
+          if (tenant.inbound_sequence_id) {
+            const { rows: spRows } = await pool.query(
+              `SELECT id FROM salespeople WHERE client_id = $1 AND active = true ORDER BY id LIMIT 1`,
+              [tenant.client_id]
+            );
+            salespersonId = spRows[0]?.id || null;
+          }
+        } else {
+          const { rows: acctRows } = await pool.query(`
+            SELECT ea.salesperson_id, ea.email AS gmail_email
+            FROM email_accounts ea JOIN salespeople sp ON sp.id = ea.salesperson_id
+            WHERE sp.client_id = $1 AND ea.enabled = true LIMIT 1
+          `, [tenant.client_id]);
+          const acct = acctRows[0];
+          if (!acct) continue;
+          const auth = await getAuthedClient(acct.salesperson_id);
+          if (!auth) continue;
+          messages = await fetchGmailInbound(auth.client, acct.gmail_email, since);
+          salespersonId = acct.salesperson_id;
+        }
+
+        for (const msg of messages) {
           try {
-            const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata', metadataHeaders: ['From', 'Subject', 'List-Unsubscribe'] });
-            const headers = msg.data.payload?.headers || [];
-            const fromHeader = headers.find(h => h.name === 'From')?.value || '';
-            const subject    = headers.find(h => h.name === 'Subject')?.value || '';
-            const hasListUnsubscribe = !!headers.find(h => h.name === 'List-Unsubscribe')?.value;
-
-            // Parse "Name <email>" or "email"
-            const emailMatch = fromHeader.match(/<([^>]+)>/) || fromHeader.match(/([^\s]+@[^\s]+)/);
-            const senderEmail = emailMatch?.[1]?.toLowerCase().trim();
-            if (!senderEmail) continue;
-
-            // This box is a real inbox (often a personal or daily-driver
-            // mailbox, not a dedicated sales address), so it receives plenty
-            // of newsletters, notifications, and marketing mail alongside
-            // genuine inquiries. Without this, every one of those becomes a
-            // "lead" -- confirmed in production: 30 junk leads (Nextdoor,
-            // LinkedIn, Reddit, AliExpress, Stripe receipts, etc.) captured
-            // in about a day, three of them already queued for a real
-            // outbound send before this was caught.
-            if (isAutomatedSender({ email: senderEmail, hasListUnsubscribe })) continue;
-
-            const nameMatch = fromHeader.match(/^(.+?)\s*</);
-            const senderName = nameMatch?.[1]?.replace(/"/g, '').trim() || '';
-            const [firstName, ...rest] = senderName.split(' ');
-            const lastName = rest.join(' ');
-
-            // Skip if already a lead for THIS tenant (scoped dedup).
-            const { rows: existing } = await pool.query(
-              'SELECT id FROM leads WHERE LOWER(email) = LOWER($1) AND client_id = $2', [senderEmail, acct.client_id]
-            );
-            if (existing.length) continue;
-
-            // Create new lead. No ON CONFLICT: leads has no global unique on
-            // email, and the scoped dedup above already prevents duplicates.
-            const { rows: newLead } = await pool.query(`
-              INSERT INTO leads (email, first_name, last_name, stage, audience_type, client_id, created_at)
-              VALUES ($1, $2, $3, 'new', 'inbound', $4, NOW())
-              RETURNING id
-            `, [senderEmail, firstName || senderEmail, lastName || '', acct.client_id]);
-
-            if (!newLead[0]) continue;
-            const leadId = newLead[0].id;
-
-            // Log the inbound email as a note
-            await pool.query(
-              `INSERT INTO lead_notes (lead_id, client_id, author_name, content) VALUES ($1, $2, $3, $4)`,
-              [leadId, acct.client_id, 'Inbound', `[Inbound email] ${subject}\n\nFrom: ${fromHeader}`]
-            );
-
-            // Notify via Telegram
-            notifyNewLead({ firstName, lastName, email: senderEmail, source: 'email' }).catch(() => {});
-
-            // Auto-enroll if sequence configured
-            if (acct.inbound_sequence_id) {
-              await pool.query(`
-                INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, client_id, status, enrolled_at)
-                VALUES ($1, $2, $3, $4, 'active', NOW())
-                ON CONFLICT DO NOTHING
-              `, [leadId, acct.inbound_sequence_id, acct.salesperson_id, acct.client_id]);
+            const result = await captureLeadFromMessage(pool, {
+              clientId: tenant.client_id,
+              salespersonId,
+              inboundSequenceId: tenant.inbound_sequence_id,
+              email: msg.email, name: msg.name, subject: msg.subject,
+              hasListUnsubscribe: msg.hasListUnsubscribe,
+            });
+            if (!result.captured && result.reason === 'automated_sender') {
+              console.log(`[inbound] skipped automated sender ${msg.email} for client ${tenant.client_id}`);
             }
           } catch (err) {
             console.error('[inbound] message processing error:', err.message);
           }
         }
 
-        // Update last check timestamp
         await pool.query(
           `UPDATE client_email_config SET inbound_last_check_at = NOW() WHERE client_id = $1`,
-          [acct.client_id]
+          [tenant.client_id]
         );
       } catch (err) {
-        console.error('[inbound] account error:', err.message);
+        console.error('[inbound] tenant error:', err.message);
       }
     }
   } catch (err) {
