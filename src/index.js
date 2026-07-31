@@ -51,6 +51,10 @@ app.use('/webhooks', webhookRouter);
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use(cookieParser());
 
+// Browsers request this by default on every page load; no static asset is
+// served here, so it 404'd (harmless, but noisy in devtools) on every page.
+app.get('/favicon.ico', (req, res) => res.status(204).end());
+
 // Rate limits
 app.use('/login', loginLimiter);
 // The password-check route is POST /auth/login (auth.js), not /login — that
