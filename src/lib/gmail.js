@@ -949,11 +949,36 @@ async function checkForRepliesByAddress(salespersonId, leadEmail, afterDate) {
 }
 
 /**
- * Send a direct (non-sequence) email via IONOS SMTP.
- * Used by the lead CRM reply composer.
+ * Send a direct (non-sequence) email — used by the lead CRM reply composer
+ * and the AI email agent's approved drafts.
  */
 async function sendDirectEmail({ fromName, fromAddress, replyTo, to, subject, textBody, htmlBody, salespersonId, clientId, sendAs }) {
-  // Try Gmail OAuth first if a salesperson ID is provided
+  // Prefer the tenant's own configured SMTP identity (e.g. sales@suresecured.com
+  // via IONOS) when one exists -- it's the tenant's real, verified business
+  // mailbox. Falling straight to Gmail OAuth here sends authenticated as
+  // whichever Gmail account happens to be connected, which may just be how
+  // the owner signs in, not a customer-facing mailbox -- and Gmail either
+  // rejects or silently rewrites a spoofed From header unless that address is
+  // a verified Send-As alias on that specific Gmail account. `sendAs` is an
+  // explicit platform-identity override (e.g. the audit email sending as
+  // support@saleswyze.com) and has no tenant SMTP config to prefer, so it
+  // skips this branch entirely.
+  if (clientId && !sendAs) {
+    const cfg = await getClientEmailConfig(clientId);
+    if (cfg?.smtp_host && cfg?.smtp_user && cfg?.smtp_pass) {
+      const sendFrom = cfg.from_email || fromAddress;
+      const sendName = cfg.from_name || fromName || 'Sales';
+      await sendViaClientSmtp(cfg, {
+        fromName:  sendName,
+        fromAddress: sendFrom,
+        replyTo:   replyTo || cfg.reply_to || sendFrom,
+        to, subject, textBody, htmlBody,
+      });
+      return { ok: true, via: cfg.provider || 'smtp' };
+    }
+  }
+
+  // Try Gmail OAuth if a salesperson ID is provided
   if (salespersonId) {
     const authed = await getAuthedClient(salespersonId);
     if (authed) {

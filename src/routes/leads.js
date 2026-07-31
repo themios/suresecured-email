@@ -936,7 +936,15 @@ router.post('/:id/reply', async (req, res) => {
   try {
     const { rows: clientRows } = await pool.query('SELECT brand_config FROM clients WHERE id = $1', [clientId]);
     const brandConfig = clientRows[0]?.brand_config || {};
-    const salespersonName = req.user?.name || req.user?.email || 'Sales';
+    // req.user is a *login* (users table) -- it has no display name and its
+    // email is just how this person signs in (may be a personal Gmail with
+    // nothing to do with the tenant's customer-facing identity). The real
+    // "who's signing this email" name lives on the salespeople row, which
+    // email_accounts.salesperson_id also keys off of.
+    const { rows: spRows } = await pool.query(
+      'SELECT name FROM salespeople WHERE id = $1 AND client_id = $2', [req.user?.id, clientId]
+    );
+    const salespersonName = spRows[0]?.name || brandConfig.name || 'Sales';
     const unsubscribeUrl = buildUnsubscribeUrl(lead.email);
     // Same branded template as sequence sends (header, signature, footer) —
     // this was previously a bare unstyled div with no signature or branding.
