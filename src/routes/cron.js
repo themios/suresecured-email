@@ -54,7 +54,7 @@ async function sendSequencesHandler(req, res) {
   // way -- shared in lib/inboundCapture.js so it cannot drift between paths.
   try {
     const { rows: inboundTenants } = await pool.query(`
-      SELECT client_id, inbound_source, inbound_sequence_id, inbound_last_check_at
+      SELECT client_id, inbound_source, inbound_sequence_id, inbound_last_check_at, lead_sender_matchers
       FROM client_email_config
       WHERE inbound_capture_enabled = true
     `);
@@ -64,6 +64,7 @@ async function sendSequencesHandler(req, res) {
         const since = tenant.inbound_last_check_at
           ? new Date(tenant.inbound_last_check_at)
           : new Date(Date.now() - 2 * 60 * 60 * 1000);
+        const senderMatchers = Array.isArray(tenant.lead_sender_matchers) ? tenant.lead_sender_matchers : [];
 
         let messages = [];
         let salespersonId = null;
@@ -88,7 +89,7 @@ async function sendSequencesHandler(req, res) {
           if (!acct) continue;
           const auth = await getAuthedClient(acct.salesperson_id);
           if (!auth) continue;
-          messages = await fetchGmailInbound(auth.client, acct.gmail_email, since);
+          messages = await fetchGmailInbound(auth.client, acct.gmail_email, since, senderMatchers);
           salespersonId = acct.salesperson_id;
         }
 
@@ -100,9 +101,10 @@ async function sendSequencesHandler(req, res) {
               inboundSequenceId: tenant.inbound_sequence_id,
               email: msg.email, name: msg.name, subject: msg.subject,
               hasListUnsubscribe: msg.hasListUnsubscribe,
+              senderMatchers,
             });
-            if (!result.captured && result.reason === 'automated_sender') {
-              console.log(`[inbound] skipped automated sender ${msg.email} for client ${tenant.client_id}`);
+            if (!result.captured && (result.reason === 'automated_sender' || result.reason === 'no_matching_rule')) {
+              console.log(`[inbound] skipped ${result.reason} for ${msg.email}, client ${tenant.client_id}`);
             }
           } catch (err) {
             console.error('[inbound] message processing error:', err.message);

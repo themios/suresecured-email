@@ -138,6 +138,21 @@ Read it as: Phase 0 first, always. Then Phase 1 gets you to two revenue tiers fa
 
 ---
 
+## Phase 1.6 — Inbound lead capture, hardened — ✅ SHIPPED (2026-07-31)
+
+**Why here:** production data showed the original inbound-capture feature (Settings → Email → Inbound Lead Capture) was pulling in personal Gmail traffic — newsletters, notifications, even the owner's own contacts — as "leads," because it defaulted to watching whichever Gmail was OAuth-connected for sign-in, not a real business inbox.
+
+**Shipped:**
+1. **Automated/bulk-sender filter.** `lib/emailSources.js`'s `isAutomatedSender()` now screens every inbound message against a `List-Unsubscribe` header check plus a local-part pattern (no-reply, notifications, invoice, jobalerts, etc.) before it's ever allowed to become a lead. This is the default safety net and requires no tenant configuration.
+2. **Inbound source is now explicit.** Settings → Email has a "Watch this mailbox for new leads" selector: Gmail sign-in vs. your own email provider (the IMAP mailbox configured on the same page). Gmail OAuth is sign-in-for-sending only and is no longer implicitly treated as a lead source — a tenant whose real inquiries land on their own domain (e.g., `sales@suresecured.com` via IONOS) now points capture there directly.
+3. **Explicit sender allowlist ("Sender Rules").** New card under Settings → Email lets a tenant add specific senders, domains, or keywords. Empty (the default) keeps the automated-sender filter as the only gate; adding even one rule switches that tenant into allowlist-only mode — only a matching sender is ever captured, and the denylist heuristic is skipped entirely since an explicit rule is a deliberate choice. Ported from a proven design in a sibling project (Wyze), minus its hardcoded per-vertical defaults since this platform serves any business. Backing logic in `lib/leadSenderMatchers.js` (exact/domain/contains matching, auto-inferred type, capped at 30 rules); wired through `lib/inboundCapture.js` and `cron.js`'s Pass-0 for both the Gmail and IMAP paths, and narrows the Gmail search query itself when rules are present (not just a client-side filter).
+4. **`client_email_config.enabled` bug fixed.** Found stuck at `false` in production with zero code paths that ever set it — Settings → Email's save handler never included that column at all. While false, `getClientEmailConfig()` returned `null`, silently falling back to sending via whichever Gmail happened to be connected instead of the tenant's configured SMTP identity. Saving the Email settings page now always sets `enabled=true`, since the page has no separate "disable" control.
+5. **Lead management beyond unsubscribe.** Lead detail page now supports edit (inline, with tenant-scoped email-collision check), archive (moves to the `dormant` stage), and delete, gated to operator/owner/admin roles.
+
+**What you can sell after:** nothing new to sell here, but everything above was needed before further growth-marketing work could safely continue — inbound capture no longer risks quietly polluting the leads table with personal contacts, and every tenant now has a real, self-serve way to say exactly whose mail counts as a lead.
+
+---
+
 ## Phase 2 — Self-serve tier live ($199) — 🟡 SCAFFOLDED (2026-07-30), needs your Stripe account
 
 **Why here:** self-serve is the scale tier, but it is the most build. It needs a customer to sign up, pay, connect sending, import a list, and launch without you touching anything.

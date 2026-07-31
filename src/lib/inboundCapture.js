@@ -8,16 +8,21 @@
 const { google } = require('googleapis');
 const { ImapFlow } = require('imapflow');
 const { isAutomatedSender } = require('./emailSources');
+const { matchSender, buildGmailQuery } = require('./leadSenderMatchers');
 const { notifyNewLead } = require('./telegram');
 
 /**
  * Fetch new inbound messages from a connected Gmail account since `sinceDate`.
+ * When `senderMatchers` is non-empty, the search itself is narrowed to only
+ * those senders (an efficiency win and an extra safety layer, not just a
+ * client-side filter) via Gmail's own `from:` query syntax.
  * @returns {Array<{email, name, subject, hasListUnsubscribe}>}
  */
-async function fetchGmailInbound(authedClient, ownEmail, sinceDate) {
+async function fetchGmailInbound(authedClient, ownEmail, sinceDate, senderMatchers = []) {
   const gmail = google.gmail({ version: 'v1', auth: authedClient });
   const sinceEpoch = Math.floor(sinceDate.getTime() / 1000);
-  const q = `in:inbox after:${sinceEpoch} -from:me -from:${ownEmail}`;
+  const base = `in:inbox after:${sinceEpoch} -from:me -from:${ownEmail}`;
+  const q = senderMatchers.length ? buildGmailQuery(senderMatchers, base) : base;
   const list = await gmail.users.messages.list({ userId: 'me', q, maxResults: 20 });
   const msgs = list.data.messages || [];
 
@@ -77,13 +82,24 @@ async function fetchImapInbound(cfg, sinceDate) {
 }
 
 /**
- * Turn one inbound message into a lead, applying the automated-sender filter
- * and per-tenant dedup. Shared by every source so the decision (and the
- * junk-mail protection) can never drift between Gmail and IMAP.
+ * Turn one inbound message into a lead. Shared by every source so the
+ * decision (and the junk-mail protection) can never drift between Gmail and
+ * IMAP. Two filtering modes, chosen by whether the tenant has any sender
+ * rules configured:
+ *   - senderMatchers non-empty: ALLOWLIST mode. Only a message from a
+ *     matching sender is ever captured -- the automated-sender check is
+ *     skipped entirely, because an explicit rule is a deliberate choice that
+ *     should not be second-guessed by a heuristic.
+ *   - senderMatchers empty (default): today's behavior -- capture anything
+ *     that doesn't look like bulk/automated mail.
  * @returns {{captured: boolean, reason: string, leadId?: number}}
  */
-async function captureLeadFromMessage(pool, { clientId, salespersonId, inboundSequenceId, email, name, subject, hasListUnsubscribe }) {
-  if (isAutomatedSender({ email, hasListUnsubscribe })) return { captured: false, reason: 'automated_sender' };
+async function captureLeadFromMessage(pool, { clientId, salespersonId, inboundSequenceId, email, name, subject, hasListUnsubscribe, senderMatchers = [] }) {
+  if (senderMatchers.length) {
+    if (!matchSender(email, senderMatchers)) return { captured: false, reason: 'no_matching_rule' };
+  } else if (isAutomatedSender({ email, hasListUnsubscribe })) {
+    return { captured: false, reason: 'automated_sender' };
+  }
 
   const { rows: existing } = await pool.query(
     'SELECT id FROM leads WHERE LOWER(email) = LOWER($1) AND client_id = $2', [email, clientId]

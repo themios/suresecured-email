@@ -9,6 +9,7 @@ const { requireAuth, requireRole, requireTenantContext } = require('../middlewar
 const { shell } = require('../lib/layout');
 const { encrypt, decrypt } = require('../lib/crypto');
 const { signOAuthState, verifyOAuthState } = require('../lib/gmail');
+const { sanitizeMatchers, inferMatcherType } = require('../lib/leadSenderMatchers');
 
 const PROVIDERS = {
   ionos:     { label: 'IONOS',                smtp_host: 'smtp.ionos.com',                        smtp_port: 587, imap_host: 'imap.ionos.com',             imap_port: 993, note: 'Use your full IONOS email as username.' },
@@ -869,6 +870,25 @@ router.get('/email', requireAuth, async (req, res) => {
     </div>
   </form>
 
+  <!-- Sender rules: an explicit allowlist of who counts as a lead. Empty by
+       default (today's "anything that isn't obviously bulk mail" behavior);
+       adding even one rule switches this tenant to allowlist-only mode. -->
+  <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
+    <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide mb-1">Sender Rules</h2>
+    <p class="text-xs text-slate-400 mb-3">
+      By default we capture any inbound email that doesn't look like bulk/automated mail. Add specific senders, domains, or keywords below to
+      switch to an allowlist — once you add a rule, only matching senders will ever become leads.
+    </p>
+    <div id="matcher-chips" class="flex flex-wrap gap-2 mb-3"></div>
+    <div class="flex gap-2">
+      <input id="matcher-input" type="text" placeholder="e.g. sales@suresecured.com, suresecured.com, or a keyword"
+        class="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();addMatcher();}">
+      <button type="button" onclick="addMatcher()" class="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-900">Add</button>
+    </div>
+    <p id="matcher-error" class="text-xs text-red-500 mt-1 hidden"></p>
+  </div>
+
   <!-- Seed canary: a monitored inbox that receives a copy of every campaign
        send, so a daily check can prove where it actually landed. Outside the
        main form (its own connect/disconnect actions), same pattern as Gmail. -->
@@ -958,6 +978,42 @@ router.get('/email', requireAuth, async (req, res) => {
       result.className = 'text-sm ml-3 ' + (d.ok ? 'text-green-600' : 'text-red-600');
       btn.disabled = false; btn.textContent = 'Test IMAP Connection';
     }
+
+    const TYPE_LABEL = { exact: 'Sender', domain: 'Domain', contains: 'Contains' };
+    let matchers = ${JSON.stringify(cfg.lead_sender_matchers || [])};
+    function renderMatchers() {
+      const wrap = document.getElementById('matcher-chips');
+      if (!matchers.length) {
+        wrap.innerHTML = '<p class="text-xs text-slate-400">No rules yet — every non-automated sender is currently captured.</p>';
+        return;
+      }
+      wrap.innerHTML = matchers.map((m, i) => \`
+        <span class="inline-flex items-center gap-1.5 bg-slate-100 text-slate-700 text-xs font-medium pl-2.5 pr-1.5 py-1.5 rounded-full">
+          <span class="text-slate-400">\${TYPE_LABEL[m.type] || m.type}</span>\${m.value.replace(/</g,'&lt;')}
+          <button type="button" onclick="removeMatcher(\${i})" class="text-slate-400 hover:text-red-600 leading-none px-1">&times;</button>
+        </span>\`).join('');
+    }
+    renderMatchers();
+
+    async function addMatcher() {
+      const input = document.getElementById('matcher-input');
+      const errEl = document.getElementById('matcher-error');
+      errEl.classList.add('hidden');
+      const value = input.value.trim();
+      if (!value) return;
+      const r = await fetch('/settings/email/sender-matchers', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'add', value }) });
+      const d = await r.json();
+      if (!d.ok) { errEl.textContent = d.error || 'Could not add that rule.'; errEl.classList.remove('hidden'); return; }
+      matchers = d.matchers; input.value = ''; renderMatchers();
+    }
+    async function removeMatcher(index) {
+      const m = matchers[index]; if (!m) return;
+      const r = await fetch('/settings/email/sender-matchers', { method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'remove', type: m.type, value: m.value }) });
+      const d = await r.json();
+      if (d.ok) { matchers = d.matchers; renderMatchers(); }
+    }
   </script>`;
 
   res.send(pageShell('Email Settings', 'email', body, req.query.msg, req.query.ok));
@@ -1017,6 +1073,38 @@ router.post('/email', requireAuth, async (req, res) => {
     res.redirect('/settings/email?ok=1&msg=Email+settings+saved.');
   } catch (err) {
     res.redirect('/settings/email?ok=0&msg=' + encodeURIComponent('Save failed: ' + err.message));
+  }
+});
+
+router.post('/email/sender-matchers', requireAuth, async (req, res) => {
+  const clientId = await resolveClientId(req);
+  const { action, value, type } = req.body || {};
+  try {
+    const { rows } = await pool.query('SELECT lead_sender_matchers FROM client_email_config WHERE client_id = $1', [clientId]);
+    const current = Array.isArray(rows[0]?.lead_sender_matchers) ? rows[0].lead_sender_matchers : [];
+
+    let next;
+    if (action === 'add') {
+      const trimmed = String(value || '').trim();
+      if (!trimmed) return res.json({ ok: false, error: 'Enter a sender, domain, or keyword.' });
+      next = sanitizeMatchers([...current, trimmed]);
+      if (next.length === current.length) {
+        return res.json({ ok: false, error: 'That doesn\'t look like a valid email, domain, or keyword (min 4 characters).' });
+      }
+    } else if (action === 'remove') {
+      next = current.filter(m => !(m.type === type && m.value === value));
+    } else {
+      return res.json({ ok: false, error: 'Unknown action.' });
+    }
+
+    await pool.query(`
+      INSERT INTO client_email_config (client_id, lead_sender_matchers, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (client_id) DO UPDATE SET lead_sender_matchers = EXCLUDED.lead_sender_matchers, updated_at = NOW()
+    `, [clientId, JSON.stringify(next)]);
+    res.json({ ok: true, matchers: next });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
   }
 });
 

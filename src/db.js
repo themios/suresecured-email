@@ -140,6 +140,7 @@ const MIGRATION_FILES = [
   '022_billing.sql',
   '023_twilio_sms.sql',
   '024_inbound_source.sql',
+  '025_lead_sender_matchers.sql',
 ];
 
 async function runMigrations() {
