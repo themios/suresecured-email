@@ -269,7 +269,7 @@ function buildHtml(body, salespersonName, unsubscribeUrl, brandConfig = {}, pixe
                 <span style="color:#ffffff;font-size:20px;font-weight:700;letter-spacing:-0.3px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
               </td>
               <td align="right">
-                <span style="color:#ffffff;font-size:11px;opacity:0.6;letter-spacing:0.5px">${website}</span>
+                <span style="color:#ffffff;font-size:11px;letter-spacing:0.5px">${website}</span>
               </td>
             </tr>
           </table>
@@ -781,7 +781,7 @@ function buildDigestHtml(bodyText, brandConfig = {}) {
                 <span style="color:#ffffff;font-size:20px;font-weight:700;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif">${name}</span>
               </td>
               <td align="right">
-                <span style="color:#ffffff;font-size:11px;opacity:0.6">Daily Digest</span>
+                <span style="color:#ffffff;font-size:11px">Daily Digest</span>
               </td>
             </tr>
           </table>
