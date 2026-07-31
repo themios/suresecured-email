@@ -1337,7 +1337,7 @@ router.get('/theme', requireAuth, async (req, res) => {
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-slate-500 mb-1">Background Color <span class="text-slate-400 font-normal">(surrounding)</span></label>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Background Color <span class="text-slate-400 font-normal">(signature &amp; footer band)</span></label>
           <div class="flex gap-2 items-center">
             <input type="color" name="bg_color" value="${esc(bc.bg_color || '#EDEBE7')}" class="h-9 w-12 rounded border cursor-pointer p-0.5 shrink-0">
             <input type="text" id="bg_hex" value="${esc(bc.bg_color || '#EDEBE7')}" class="flex-1 min-w-0 border rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
@@ -1346,20 +1346,34 @@ router.get('/theme', requireAuth, async (req, res) => {
         </div>
       </div>
 
-      <!-- Live preview -->
+      <!-- Live preview -- a scaled-down mockup of the actual outgoing email
+           template (lib/gmail.js buildHtml), not just a color swatch. Every
+           element here mirrors what a real send looks like: the header bar
+           and website label, the message body (always neutral dark text --
+           it never takes the primary/accent color, regardless of what's
+           picked here), the CTA button, and the signature/footer band. -->
       <div>
         <label class="block text-xs font-medium text-slate-500 mb-2">Preview</label>
-        <div id="preview-card" class="rounded-lg p-5 border" style="background:${esc(bc.bg_color || '#EDEBE7')}">
-          <div id="preview-bar" class="rounded-lg p-4 flex items-center gap-3" style="background:${esc(bc.primary_color || '#030302')}">
+        <div id="preview-card" class="rounded-lg border overflow-hidden">
+          <div id="preview-header" class="p-4 flex items-center gap-3" style="background:${esc(bc.primary_color || '#030302')}">
             <span style="color:#fff;font-size:16px;font-weight:700">${esc(bc.name || 'Your Business')}</span>
-            <span id="preview-btn" class="ml-auto px-4 py-1.5 rounded text-white text-sm font-semibold" style="background:${esc(bc.accent_color || '#E91111')}">${esc(bc.cta_label || 'Request a Quote')}</span>
+            <span style="color:#fff;font-size:11px;margin-left:auto">${esc(bc.website || 'yourwebsite.com')}</span>
+          </div>
+          <div class="p-4 bg-white">
+            <p style="color:#222222;font-size:13px;line-height:1.6;margin:0 0 12px 0">This is what your message text looks like — always dark and legible, no matter which colors you pick above.</p>
+            <span id="preview-btn" class="inline-block px-4 py-1.5 rounded text-white text-sm font-semibold" style="background:${esc(bc.accent_color || '#E91111')}">${esc(bc.cta_label || 'Request a Quote')}</span>
+          </div>
+          <div id="preview-sigband" class="p-3 border-t" style="background:${esc(bc.bg_color || '#EDEBE7')}">
+            <p id="preview-signame" style="color:${esc(bc.primary_color || '#030302')};font-weight:700;font-size:13px;margin:0">Your Name</p>
+            <p style="color:#5a5a58;font-size:11px;margin:2px 0 0">Signature details, phone, website</p>
           </div>
         </div>
         <div class="flex flex-wrap gap-x-6 gap-y-1 mt-2 text-xs text-slate-500">
-          <span class="inline-flex items-center gap-1.5"><span id="lg-primary" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.primary_color || '#030302')}"></span>Primary = header bar <span id="lg-primary-hex" class="font-mono text-slate-400">${esc(bc.primary_color || '#030302')}</span></span>
+          <span class="inline-flex items-center gap-1.5"><span id="lg-primary" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.primary_color || '#030302')}"></span>Primary = header bar &amp; signature name <span id="lg-primary-hex" class="font-mono text-slate-400">${esc(bc.primary_color || '#030302')}</span></span>
           <span class="inline-flex items-center gap-1.5"><span id="lg-accent" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.accent_color || '#E91111')}"></span>Accent = button <span id="lg-accent-hex" class="font-mono text-slate-400">${esc(bc.accent_color || '#E91111')}</span></span>
-          <span class="inline-flex items-center gap-1.5"><span id="lg-bg" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.bg_color || '#EDEBE7')}"></span>Background = surrounding <span id="lg-bg-hex" class="font-mono text-slate-400">${esc(bc.bg_color || '#EDEBE7')}</span></span>
+          <span class="inline-flex items-center gap-1.5"><span id="lg-bg" class="inline-block w-3 h-3 rounded-sm border" style="background:${esc(bc.bg_color || '#EDEBE7')}"></span>Background = signature &amp; footer band <span id="lg-bg-hex" class="font-mono text-slate-400">${esc(bc.bg_color || '#EDEBE7')}</span></span>
         </div>
+        <p class="text-xs text-slate-400 mt-2">The page surrounding the email card (outside this 600px-wide card) is always a fixed light gray — that part isn't themeable, since most inboxes render it, not your brand.</p>
       </div>
 
       <h2 class="font-semibold text-slate-700 text-sm uppercase tracking-wide pt-2">Logo</h2>
@@ -1391,12 +1405,17 @@ router.get('/theme', requireAuth, async (req, res) => {
     };
     var HEX = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
 
-    // Repaint the preview and legend from the current swatch values.
+    // Repaint the preview and legend from the current swatch values. Note
+    // what's deliberately NOT repainted here: the message body text and the
+    // header website label are fixed colors in the real template (dark text,
+    // white label) regardless of these swatches -- so the preview leaves them
+    // alone too, instead of implying they're themeable when they aren't.
     function render() {
       var p = C.primary.swatch.value, a = C.accent.swatch.value, b = C.bg.swatch.value;
-      document.getElementById('preview-bar').style.background  = p;
-      document.getElementById('preview-btn').style.background  = a;
-      document.getElementById('preview-card').style.background = b;
+      document.getElementById('preview-header').style.background  = p;
+      document.getElementById('preview-signame').style.color       = p;
+      document.getElementById('preview-btn').style.background     = a;
+      document.getElementById('preview-sigband').style.background = b;
       document.getElementById('lg-primary').style.background = p; document.getElementById('lg-primary-hex').textContent = p;
       document.getElementById('lg-accent').style.background  = a; document.getElementById('lg-accent-hex').textContent  = a;
       document.getElementById('lg-bg').style.background      = b; document.getElementById('lg-bg-hex').textContent      = b;
