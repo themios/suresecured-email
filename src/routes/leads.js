@@ -361,16 +361,22 @@ router.get('/:id', async (req, res) => {
 
         <!-- Contact card -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-          <div class="flex items-center gap-3 mb-4">
-            <div class="w-11 h-11 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center text-base font-bold flex-shrink-0">
-              ${esc((lead.first_name?.[0] || '?').toUpperCase())}
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="w-11 h-11 rounded-full bg-sky-100 text-sky-700 flex items-center justify-center text-base font-bold flex-shrink-0">
+                ${esc((lead.first_name?.[0] || '?').toUpperCase())}
+              </div>
+              <div>
+                <div class="font-bold text-slate-900 text-sm">${esc(name)}</div>
+                <span class="px-2 py-0.5 rounded-full text-xs font-medium ${stageInfo.color}">${stageInfo.label}</span>
+              </div>
             </div>
-            <div>
-              <div class="font-bold text-slate-900 text-sm">${esc(name)}</div>
-              <span class="px-2 py-0.5 rounded-full text-xs font-medium ${stageInfo.color}">${stageInfo.label}</span>
-            </div>
+            <button onclick="toggleEditLead()" id="edit-lead-toggle" title="Edit contact details"
+              class="text-slate-400 hover:text-sky-600 transition-colors p-1 flex-shrink-0">${ICONS.pencil}</button>
           </div>
-          <div class="space-y-1.5 text-xs">
+
+          <!-- View mode -->
+          <div id="lead-view" class="space-y-1.5 text-xs">
             ${lead.email   ? `<div class="flex gap-1.5"><span class="text-slate-400 w-14 flex-shrink-0">Email</span><span class="text-slate-700 break-all">${esc(lead.email)}</span></div>` : ''}
             ${lead.phone   ? `<div class="flex gap-1.5"><span class="text-slate-400 w-14 flex-shrink-0">Phone</span><span class="text-slate-700">${esc(lead.phone)}</span></div>` : ''}
             ${lead.city    ? `<div class="flex gap-1.5"><span class="text-slate-400 w-14 flex-shrink-0">City</span><span class="text-slate-700">${esc(lead.city)}</span></div>` : ''}
@@ -378,6 +384,26 @@ router.get('/:id', async (req, res) => {
             ${lead.product_interest ? `<div class="flex gap-1.5"><span class="text-slate-400 w-14 flex-shrink-0">Interest</span><span class="text-slate-700">${esc(lead.product_interest)}</span></div>` : ''}
             ${lead.salesperson_name ? `<div class="flex gap-1.5"><span class="text-slate-400 w-14 flex-shrink-0">Rep</span><span class="text-slate-700">${esc(lead.salesperson_name)}</span></div>` : ''}
             <div class="flex gap-1.5"><span class="text-slate-400 w-14 flex-shrink-0">Added</span><span class="text-slate-700">${new Date(lead.created_at).toLocaleDateString()}</span></div>
+          </div>
+
+          <!-- Edit mode (hidden by default) -->
+          <div id="lead-edit" class="hidden space-y-2">
+            <div><label class="block text-xs text-slate-400 mb-0.5">First name</label>
+              <input id="edit-first_name" value="${esc(lead.first_name || '')}" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"></div>
+            <div><label class="block text-xs text-slate-400 mb-0.5">Last name</label>
+              <input id="edit-last_name" value="${esc(lead.last_name || '')}" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"></div>
+            <div><label class="block text-xs text-slate-400 mb-0.5">Email</label>
+              <input id="edit-email" value="${esc(lead.email || '')}" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"></div>
+            <div><label class="block text-xs text-slate-400 mb-0.5">Phone</label>
+              <input id="edit-phone" value="${esc(lead.phone || '')}" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"></div>
+            <div><label class="block text-xs text-slate-400 mb-0.5">City</label>
+              <input id="edit-city" value="${esc(lead.city || '')}" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"></div>
+            <div><label class="block text-xs text-slate-400 mb-0.5">Product interest</label>
+              <input id="edit-product_interest" value="${esc(lead.product_interest || '')}" class="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500"></div>
+            <div class="flex gap-2 pt-1">
+              <button onclick="saveLeadEdit(${leadId})" class="flex-1 bg-sky-600 text-white text-xs font-medium rounded-lg py-1.5 hover:bg-sky-700">Save</button>
+              <button onclick="toggleEditLead()" class="flex-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg py-1.5 hover:bg-slate-200">Cancel</button>
+            </div>
           </div>
         </div>
 
@@ -480,6 +506,21 @@ router.get('/:id', async (req, res) => {
                      ${ICONS.warning} Suppress this lead
                    </button>`}
           </div>
+        </div>
+
+        <!-- Archive / Delete -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-100 p-4 space-y-2">
+          ${lead.stage !== 'dormant' ? `
+          <button onclick="archiveLead(${leadId})"
+            class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100 transition-colors text-left flex items-center gap-1.5">
+            ${ICONS.archive} Archive this lead
+          </button>` : `
+          <div class="text-xs text-slate-400 flex items-center gap-1.5">${ICONS.archive} Archived (Dormant)</div>`}
+          ${['operator', 'owner', 'admin'].includes(req.user.role) ? `
+          <button onclick="deleteLead(${leadId})"
+            class="w-full text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 transition-colors text-left flex items-center gap-1.5">
+            ${ICONS.trash} Delete this lead permanently
+          </button>` : ''}
         </div>
 
       </div>
@@ -687,6 +728,53 @@ router.get('/:id', async (req, res) => {
       else { showToast('Failed to suppress lead', 'error'); }
     }
 
+    function toggleEditLead() {
+      document.getElementById('lead-view').classList.toggle('hidden');
+      document.getElementById('lead-edit').classList.toggle('hidden');
+    }
+
+    async function saveLeadEdit(leadId) {
+      const payload = {
+        first_name: document.getElementById('edit-first_name').value,
+        last_name: document.getElementById('edit-last_name').value,
+        email: document.getElementById('edit-email').value,
+        phone: document.getElementById('edit-phone').value,
+        city: document.getElementById('edit-city').value,
+        product_interest: document.getElementById('edit-product_interest').value,
+      };
+      const res = await fetch('/leads/' + leadId + '/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { window.location.reload(); }
+      else { showToast(data.error || 'Failed to save changes', 'error'); }
+    }
+
+    async function archiveLead(leadId) {
+      if (!await showConfirm('Archive this lead? It moves to the Dormant stage and stops appearing in your active pipeline.', 'Archive Lead')) return;
+      const res = await fetch('/leads/' + leadId + '/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: 'dormant' }),
+      });
+      if (res.ok) { window.location.reload(); }
+      else { showToast('Failed to archive lead', 'error'); }
+    }
+
+    async function deleteLead(leadId) {
+      const ok = await showDestruct(
+        'Permanently delete this lead? This removes all activity history (emails, calls, notes) and cannot be undone. Their email is added to the suppression list so they cannot be re-imported.',
+        'Delete Lead', 'Delete Permanently'
+      );
+      if (!ok) return;
+      const res = await fetch('/leads/' + leadId + '/delete-data', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { window.location.href = '/leads'; }
+      else { showToast(data.error || 'Failed to delete lead', 'error'); }
+    }
+
     async function enrollmentAction(enrollmentId, action) {
       if (action === 'unenroll') {
         const ok = await showDestruct('Unenroll this lead from the sequence? This cannot be undone.', 'Unenroll Lead', 'Unenroll');
@@ -721,6 +809,39 @@ router.post('/:id/stage', async (req, res) => {
   if (!STAGES.includes(stage)) return res.status(400).json({ error: 'Invalid stage' });
   const { rowCount } = await pool.query(
     'UPDATE leads SET stage = $1 WHERE id = $2 AND client_id = $3', [stage, leadId, cid]
+  );
+  if (!rowCount) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+// ─── API: Edit Lead ─────────────────────────────────────────────────────────
+router.post('/:id/edit', async (req, res) => {
+  const cid = req.user.client_id;
+  const leadId = parseInt(req.params.id);
+  const { first_name, last_name, email, phone, city, product_interest } = req.body;
+
+  const cleanEmail = String(email || '').trim();
+  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    return res.status(400).json({ error: 'A valid email is required' });
+  }
+
+  // Editing the email is still scoped by client_id, so it can only ever
+  // collide with another lead inside the SAME tenant -- cross-tenant email
+  // reuse is allowed by design (leads.email has no global unique constraint).
+  const { rows: collision } = await pool.query(
+    'SELECT id FROM leads WHERE LOWER(email) = LOWER($1) AND client_id = $2 AND id != $3',
+    [cleanEmail, cid, leadId]
+  );
+  if (collision.length) {
+    return res.status(400).json({ error: 'Another lead already has this email address' });
+  }
+
+  const { rowCount } = await pool.query(
+    `UPDATE leads SET first_name = $1, last_name = $2, email = $3, phone = $4, city = $5, product_interest = $6
+     WHERE id = $7 AND client_id = $8`,
+    [(first_name || '').trim() || null, (last_name || '').trim() || null, cleanEmail,
+     (phone || '').trim() || null, (city || '').trim() || null, (product_interest || '').trim() || null,
+     leadId, cid]
   );
   if (!rowCount) return res.status(404).json({ error: 'Not found' });
   res.json({ ok: true });
