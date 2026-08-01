@@ -272,7 +272,7 @@ function ruleForm(sourceId, salespeople, sequences) {
   return `
   <form method="post" action="/settings/email-sources/${sourceId}/rules" class="flex flex-wrap items-end gap-2 mt-2 pt-2 border-t border-slate-100">
     <select name="match_type" class="${inp}"><option value="domain">domain</option><option value="email">email</option></select>
-    <input name="match_value" placeholder="cargurus.com" required class="${inp}" style="min-width:150px">
+    <input name="match_value" placeholder="example.com" required class="${inp}" style="min-width:150px">
     <select name="action" class="${inp}"><option value="capture">capture</option><option value="ignore">ignore</option></select>
     <select name="sequence_id" class="${inp}"><option value="">— sequence —</option>${seqOpts}</select>
     <select name="assign_salesperson_id" class="${inp}"><option value="">— assign —</option>${spOpts}</select>

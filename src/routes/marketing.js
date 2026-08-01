@@ -60,6 +60,9 @@ function esc(s) {
 // Blog posts. The sitemap and blog routes read from this.
 const BLOG_POSTS = require('./blog-posts');
 
+// Public legal pages, rendered from the markdown at the repo root.
+const { getDoc } = require('../lib/legalDocs');
+
 // ─── Public landing page ───────────────────────────────────────────────────
 
 function originOf(req) {
@@ -107,6 +110,29 @@ router.get('/blog/:slug', (req, res) => {
   res.set('Cache-Control', 'public, max-age=600');
   res.send(renderBlogPost(originOf(req), post));
 });
+
+// ─── Legal pages ────────────────────────────────────────────────────────────
+// Google's OAuth verification review requires a reachable privacy policy and
+// terms of service on the app's own domain. These are noindex until counsel
+// signs off on the content — see the open placeholders in the source markdown.
+function legalRoute(key) {
+  return (req, res) => {
+    const doc = getDoc(key);
+    if (!doc) return res.status(404).send(renderBlogNotFound(originOf(req)));
+    res.set('Cache-Control', 'public, max-age=600');
+    res.send(blogShell({
+      title: `${doc.title} — SalesWyze`,
+      description: doc.description,
+      canonical: originOf(req) + doc.slug,
+      bodyClass: 'is-post',
+      noindex: true,
+      content: `<article class="post-body"><h1>${doc.title}</h1>\n${doc.html}</article>`,
+    }));
+  };
+}
+
+router.get('/privacy', legalRoute('privacy'));
+router.get('/terms',   legalRoute('terms'));
 
 router.post(
   '/get-started',
