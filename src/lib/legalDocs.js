@@ -5,9 +5,14 @@
  * and the published page follows. Internal-only annotations are stripped on
  * load: the DRAFT status banner, the `[reference: src/...]` code pointers that
  * exist to show a lawyer where a claim comes from, and the trailing "Open items"
- * checklist. Bracketed `[Counsel: ...]` placeholders are deliberately NOT
- * stripped — they are unfinished legal text, and hiding them would make an
- * incomplete document look finished.
+ * checklist.
+ *
+ * Unfinished `[Counsel to draft ...]` placeholders are NOT hidden — an
+ * incomplete document that looks finished is worse than an obviously incomplete
+ * one. They are collapsed to a neutral "being finalized" marker instead, because
+ * the raw placeholders name internal planning docs (BUILD_PLAN.md,
+ * PRICING_STRATEGY.md) that must not appear on a public page. Once counsel fills
+ * them in there are no bracketed spans left and the rule becomes a no-op.
  */
 const fs   = require('fs');
 const path = require('path');
@@ -42,6 +47,9 @@ function stripInternal(md) {
     .replace(/\s*`?\[reference:[^\]]*\]`?/g, '')
     // Trailing "Open items before this can be published" checklist.
     .replace(/\n---\s*\n+\*\*Open items[\s\S]*$/m, '\n')
+    // Unfinished placeholders -> neutral marker. The raw text names internal
+    // planning docs, so it cannot be published verbatim; the gap stays visible.
+    .replace(/\[[^\]\n]{12,}\]/g, '{{PENDING}}')
     .trim();
 }
 
@@ -49,6 +57,7 @@ function stripInternal(md) {
 // bold, inline code, links, unordered/ordered lists, hr, paragraphs.
 function renderMarkdown(md) {
   const inline = (s) => esc(s)
+    .replace(/\{\{PENDING\}\}/g, '<em class="legal-pending">[This section is being finalized with counsel.]</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" rel="noopener">$1</a>');
