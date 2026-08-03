@@ -31,6 +31,7 @@ const twilioRouter      = require('./routes/twilio');
 const pixelRouter       = require('./routes/pixel');
 const emailClickRouter  = require('./routes/email-click');
 const marketingRouter   = require('./routes/marketing');
+const { router: umbrellaRouter, isUmbrellaHost } = require('./routes/umbrella');
 const { router: deliverabilityRouter } = require('./routes/deliverability');
 
 const app = express();
@@ -73,6 +74,12 @@ app.use('/pixel', pixelRouter);
 
 // Email click tracking (no auth — tracked email link redirect)
 app.use('/e', emailClickRouter);
+
+// Parent-brand site (wyzebiz.com). Must sit ahead of the marketing router,
+// which owns GET / for SalesWyze. Gated on the Host header, so every other
+// domain served by this service falls straight through.
+app.use('/', (req, res, next) =>
+  isUmbrellaHost(req) ? umbrellaRouter(req, res, next) : next());
 
 // Public marketing site — owns GET / and POST /get-started
 app.use('/', marketingRouter);
