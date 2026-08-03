@@ -10,6 +10,7 @@ const { ImapFlow } = require('imapflow');
 const { isAutomatedSender } = require('./emailSources');
 const { matchSender, buildGmailQuery } = require('./leadSenderMatchers');
 const { notifyNewLead } = require('./telegram');
+const { classifyAudience } = require('./leadAudience');
 
 /**
  * Fetch new inbound messages from a connected Gmail account since `sinceDate`.
@@ -94,7 +95,7 @@ async function fetchImapInbound(cfg, sinceDate) {
  *     that doesn't look like bulk/automated mail.
  * @returns {{captured: boolean, reason: string, leadId?: number}}
  */
-async function captureLeadFromMessage(pool, { clientId, salespersonId, inboundSequenceId, email, name, subject, hasListUnsubscribe, senderMatchers = [] }) {
+async function captureLeadFromMessage(pool, { clientId, salespersonId, inboundSequenceId, inboundSequenceIdB2b, email, name, subject, body, hasListUnsubscribe, senderMatchers = [] }) {
   if (senderMatchers.length) {
     if (!matchSender(email, senderMatchers)) return { captured: false, reason: 'no_matching_rule' };
   } else if (isAutomatedSender({ email, hasListUnsubscribe })) {
@@ -109,30 +110,38 @@ async function captureLeadFromMessage(pool, { clientId, salespersonId, inboundSe
   const [firstName, ...rest] = (name || '').split(' ');
   const lastName = rest.join(' ');
 
+  // Route dealers away from the homeowner sequence. Falls back to the B2C
+  // sequence when no B2B one is configured, so behavior is unchanged for
+  // tenants that never set it.
+  const { audience, reason: audienceReason } = classifyAudience({ email, subject, body });
+  const sequenceId = audience === 'B2B'
+    ? (inboundSequenceIdB2b || inboundSequenceId)
+    : inboundSequenceId;
+
   const { rows: newLead } = await pool.query(`
     INSERT INTO leads (email, first_name, last_name, stage, audience_type, client_id, created_at)
-    VALUES ($1, $2, $3, 'new', 'inbound', $4, NOW())
+    VALUES ($1, $2, $3, 'new', $4, $5, NOW())
     RETURNING id
-  `, [email, firstName || email, lastName || '', clientId]);
+  `, [email, firstName || email, lastName || '', audience, clientId]);
   if (!newLead[0]) return { captured: false, reason: 'insert_failed' };
   const leadId = newLead[0].id;
 
   await pool.query(
     `INSERT INTO lead_notes (lead_id, client_id, author_name, content) VALUES ($1, $2, $3, $4)`,
-    [leadId, clientId, 'Inbound', `[Inbound email] ${subject}\n\nFrom: ${name ? name + ' <' + email + '>' : email}`]
+    [leadId, clientId, 'Inbound', `[Inbound email] ${subject}\n\nFrom: ${name ? name + ' <' + email + '>' : email}\nClassified ${audience} (${audienceReason})`]
   );
 
-  notifyNewLead({ firstName, lastName, email, source: 'email' }).catch(() => {});
+  notifyNewLead({ firstName, lastName, email, source: `email · ${audience}` }).catch(() => {});
 
-  if (inboundSequenceId && salespersonId) {
+  if (sequenceId && salespersonId) {
     await pool.query(`
       INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, client_id, status, enrolled_at)
       VALUES ($1, $2, $3, $4, 'active', NOW())
       ON CONFLICT DO NOTHING
-    `, [leadId, inboundSequenceId, salespersonId, clientId]);
+    `, [leadId, sequenceId, salespersonId, clientId]);
   }
 
-  return { captured: true, reason: 'ok', leadId };
+  return { captured: true, reason: 'ok', leadId, audience };
 }
 
 module.exports = { fetchGmailInbound, fetchImapInbound, captureLeadFromMessage };

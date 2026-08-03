@@ -3,12 +3,80 @@ const router = express.Router();
 const { pool } = require('../db');
 const { v4: uuidv4 } = require('uuid');
 const { requireClientApiKey, requireAdminAuth } = require('../middleware/apiAuth');
+const { classifyAudience } = require('../lib/leadAudience');
+const { notifyNewLead } = require('../lib/telegram');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function toInt(v) {
   const n = parseInt(v, 10);
   return Number.isNaN(n) ? null : n;
+}
+
+/**
+ * Create (or match) a lead for a website form submission and enroll it in the
+ * sequence matching the form type. Best effort by design: a failure here must
+ * never lose the submission itself, so it returns null and the row is still
+ * written.
+ *
+ * Deliberately NOT reusing captureLeadFromMessage: that guards against bulk and
+ * automated senders, which is right for a mailbox but wrong here -- a form fill
+ * is an explicit human action and must never be filtered out as "automated."
+ */
+async function captureLeadFromSubmission({ clientId, salespersonId, formType, email, name }) {
+  if (!clientId) return null;
+  try {
+    const { rows: cfg } = await pool.query(
+      `SELECT form_capture_enabled, inbound_sequence_id, inbound_sequence_id_b2b
+         FROM client_email_config WHERE client_id = $1`, [clientId]
+    );
+    if (!cfg[0]?.form_capture_enabled) return null;
+
+    const { audience } = classifyAudience({ formType, email });
+    const clean = String(email || '').trim().toLowerCase() || null;
+
+    // Match an existing lead first so a repeat submitter is not duplicated and
+    // is not re-enrolled from the top of the sequence.
+    if (clean) {
+      const { rows: hit } = await pool.query(
+        'SELECT id FROM leads WHERE LOWER(email) = $1 AND client_id = $2', [clean, clientId]
+      );
+      if (hit[0]) return hit[0].id;
+    }
+
+    const [firstName, ...rest] = String(name || '').trim().split(/\s+/);
+    const { rows: created } = await pool.query(`
+      INSERT INTO leads (email, first_name, last_name, stage, audience_type, client_id, salesperson_id, created_at)
+      VALUES ($1, $2, $3, 'new', $4, $5, $6, NOW())
+      RETURNING id
+    `, [clean, firstName || clean || 'Website enquiry', rest.join(' ') || '', audience, clientId, salespersonId]);
+    const leadId = created[0]?.id;
+    if (!leadId) return null;
+
+    await pool.query(
+      `INSERT INTO lead_notes (lead_id, client_id, author_name, content) VALUES ($1, $2, $3, $4)`,
+      [leadId, clientId, 'Website form',
+       `[${formType} form] ${name || '(no name)'} <${clean || 'no email supplied'}>\nClassified ${audience} from the form type.` +
+       (clean ? '' : '\nNo email address supplied — follow up by phone or social.')]
+    );
+
+    notifyNewLead({ firstName: firstName || '', lastName: rest.join(' '), email: clean || '(no email)', source: `${formType} form · ${audience}` }).catch(() => {});
+
+    // No address means nothing to send to; the lead still exists for manual follow-up.
+    const sequenceId = audience === 'B2B'
+      ? (cfg[0].inbound_sequence_id_b2b || cfg[0].inbound_sequence_id)
+      : cfg[0].inbound_sequence_id;
+    if (clean && sequenceId && salespersonId) {
+      await pool.query(`
+        INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, client_id, status, enrolled_at)
+        VALUES ($1, $2, $3, $4, 'active', NOW()) ON CONFLICT DO NOTHING
+      `, [leadId, sequenceId, salespersonId, clientId]);
+    }
+    return leadId;
+  } catch (err) {
+    console.error('[form-capture] could not create lead:', err.message);
+    return null;
+  }
 }
 
 // Record a form submission with attribution (Shopify Flow / server-to-server)
@@ -26,12 +94,26 @@ router.post('/form-submission', requireClientApiKey, async (req, res) => {
   try {
     // req.apiClientId is the tenant behind the API key (null only for the shared
     // platform key). Stamp it so the submission is owned by the right tenant.
+    // Turn the submission into a lead. A quote or become-a-dealer form is the
+    // highest-intent contact the business gets and the person is expressly
+    // asking to be contacted -- but until this existed the row landed in
+    // form_submissions and nothing else, so inbound dealer enquiries sat
+    // unassigned and unanswered. The mailbox poller could never cover this:
+    // forms arrive as a server-to-server POST and never touch an inbox.
+    const leadId = safeLeadId || await captureLeadFromSubmission({
+      clientId: req.apiClientId,
+      salespersonId: safeSalespersonId,
+      formType: form_type || 'quote',
+      email: submitter_email,
+      name: submitter_name,
+    });
+
     await pool.query(
       `INSERT INTO form_submissions (token, lead_id, salesperson_id, form_type, submitter_email, submitter_name, raw_data, client_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [safeToken, safeLeadId, safeSalespersonId, form_type || 'quote', submitter_email || null, submitter_name || null, raw_data || {}, req.apiClientId]
+      [safeToken, leadId, safeSalespersonId, form_type || 'quote', submitter_email || null, submitter_name || null, raw_data || {}, req.apiClientId]
     );
-    res.json({ ok: true });
+    res.json({ ok: true, lead_id: leadId });
   } catch (err) {
     console.error('Form submission error:', err);
     res.status(500).json({ error: 'Server error' });

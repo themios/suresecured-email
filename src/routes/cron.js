@@ -54,7 +54,7 @@ async function sendSequencesHandler(req, res) {
   // way -- shared in lib/inboundCapture.js so it cannot drift between paths.
   try {
     const { rows: inboundTenants } = await pool.query(`
-      SELECT client_id, inbound_source, inbound_sequence_id, inbound_last_check_at, lead_sender_matchers
+      SELECT client_id, inbound_source, inbound_sequence_id, inbound_sequence_id_b2b, inbound_last_check_at, lead_sender_matchers
       FROM client_email_config
       WHERE inbound_capture_enabled = true
     `);
@@ -99,6 +99,7 @@ async function sendSequencesHandler(req, res) {
               clientId: tenant.client_id,
               salespersonId,
               inboundSequenceId: tenant.inbound_sequence_id,
+              inboundSequenceIdB2b: tenant.inbound_sequence_id_b2b,
               email: msg.email, name: msg.name, subject: msg.subject,
               hasListUnsubscribe: msg.hasListUnsubscribe,
               senderMatchers,

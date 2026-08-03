@@ -496,6 +496,14 @@ async function createTenantScopedTables() {
     ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_capture_enabled BOOLEAN DEFAULT false;
     ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_sequence_id INTEGER;
     ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_last_check_at TIMESTAMPTZ;
+    -- B2B counterpart to inbound_sequence_id. Dealer/reseller enquiries dropped
+    -- into the homeowner sequence get pitched on securing their own windows,
+    -- which reads as a mis-sent email; lib/leadAudience.js decides which applies.
+    ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS inbound_sequence_id_b2b INTEGER;
+    -- Web form intake (Shopify quote / become-a-dealer). Separate from the
+    -- mailbox poller: forms arrive as a server-to-server POST and never touch
+    -- an inbox, so inbound capture could never see them.
+    ALTER TABLE client_email_config ADD COLUMN IF NOT EXISTS form_capture_enabled BOOLEAN DEFAULT false;
   `);
 
   // CRM notes / activity log

@@ -856,13 +856,41 @@ router.get('/email', requireAuth, async (req, res) => {
         </p>
       </div>
 
-      <div>
-        <label class="block text-xs font-medium text-slate-500 mb-1">Auto-enroll new leads into sequence (optional)</label>
-        <select name="inbound_sequence_id" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
-          <option value="">— Don't auto-enroll —</option>
-          ${sequences.map(s => `<option value="${s.id}" ${cfg.inbound_sequence_id == s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
-        </select>
-        <p class="text-xs text-slate-400 mt-1">Runs every 15 minutes.</p>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Auto-enroll <strong>B2C</strong> (homeowner) leads into</label>
+          <select name="inbound_sequence_id" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <option value="">— Don't auto-enroll —</option>
+            ${sequences.map(s => `<option value="${s.id}" ${cfg.inbound_sequence_id == s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1">Auto-enroll <strong>B2B</strong> (dealer) leads into</label>
+          <select name="inbound_sequence_id_b2b" class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <option value="">— Use the B2C sequence —</option>
+            ${sequences.map(s => `<option value="${s.id}" ${cfg.inbound_sequence_id_b2b == s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mt-1">
+        Runs every 15 minutes. Each new lead is classified automatically: an explicit intent word
+        (&ldquo;dealer&rdquo;, &ldquo;wholesale&rdquo;, &ldquo;distributor&rdquo;&hellip;) routes B2B, otherwise a
+        consumer mailbox (gmail, yahoo, aol&hellip;) routes B2C and a company domain routes B2B.
+        Web forms skip the guessing entirely — the become-a-dealer form is always B2B, the quote form always B2C.
+      </p>
+
+      <div class="mt-4 pt-4 border-t border-slate-100">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" name="form_capture_enabled" value="1" ${cfg.form_capture_enabled ? 'checked' : ''}
+            class="w-4 h-4 rounded accent-sky-600">
+          <span class="text-sm text-slate-600">Also capture <strong>website form submissions</strong> as leads</span>
+        </label>
+        <p class="text-xs text-slate-400 mt-1">
+          Quote and become-a-dealer forms post straight to the app and never touch a mailbox, so the
+          inbound setting above cannot see them. With this on, each submission becomes a lead, is assigned,
+          and is enrolled in the matching sequence above. Submissions without an email address are still
+          captured for manual follow-up, but cannot be emailed.
+        </p>
       </div>
     </div>
 
@@ -1022,7 +1050,7 @@ router.get('/email', requireAuth, async (req, res) => {
 
 router.post('/email', requireAuth, async (req, res) => {
   const clientId = await resolveClientId(req);
-  const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass, inbound_capture_enabled, inbound_sequence_id, inbound_source } = req.body;
+  const { provider, smtp_host, smtp_port, smtp_secure, smtp_user, smtp_pass, from_name, from_email, reply_to, imap_host, imap_port, imap_user, imap_pass, inbound_capture_enabled, inbound_sequence_id, inbound_sequence_id_b2b, inbound_source, form_capture_enabled } = req.body;
   try {
     const { rows } = await pool.query('SELECT * FROM client_email_config WHERE client_id = $1', [clientId]);
     const ex = rows[0] || {};
@@ -1031,8 +1059,8 @@ router.post('/email', requireAuth, async (req, res) => {
     const smtpPassEnc = smtp_pass?.trim() ? encrypt(smtp_pass.trim()) : ex.smtp_pass_enc || null;
     const imapPassEnc = imap_pass?.trim() ? encrypt(imap_pass.trim()) : ex.imap_pass_enc || null;
     await pool.query(`
-      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,inbound_capture_enabled,inbound_sequence_id,inbound_source,enabled,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,true,NOW())
+      INSERT INTO client_email_config (client_id,provider,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass_enc,from_name,from_email,reply_to,imap_host,imap_port,imap_user,imap_pass_enc,inbound_capture_enabled,inbound_sequence_id,inbound_sequence_id_b2b,inbound_source,form_capture_enabled,enabled,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,true,NOW())
       ON CONFLICT (client_id) DO UPDATE SET
         provider=EXCLUDED.provider, smtp_host=EXCLUDED.smtp_host, smtp_port=EXCLUDED.smtp_port,
         smtp_secure=EXCLUDED.smtp_secure, smtp_user=EXCLUDED.smtp_user, smtp_pass_enc=EXCLUDED.smtp_pass_enc,
@@ -1041,6 +1069,8 @@ router.post('/email', requireAuth, async (req, res) => {
         imap_pass_enc=EXCLUDED.imap_pass_enc,
         inbound_capture_enabled=EXCLUDED.inbound_capture_enabled,
         inbound_sequence_id=EXCLUDED.inbound_sequence_id,
+        inbound_sequence_id_b2b=EXCLUDED.inbound_sequence_id_b2b,
+        form_capture_enabled=EXCLUDED.form_capture_enabled,
         inbound_source=EXCLUDED.inbound_source,
         -- This page has no separate "disable my email config" control, so
         -- saving always means "this is my active config." Without this, the
@@ -1069,7 +1099,9 @@ router.post('/email', requireAuth, async (req, res) => {
       imapPassEnc,
       inbound_capture_enabled === '1',
       inbound_sequence_id ? parseInt(inbound_sequence_id) : null,
+      inbound_sequence_id_b2b ? parseInt(inbound_sequence_id_b2b) : null,
       inbound_source === 'imap' ? 'imap' : 'gmail',
+      form_capture_enabled === '1',
     ]);
     res.redirect('/settings/email?ok=1&msg=Email+settings+saved.');
   } catch (err) {
