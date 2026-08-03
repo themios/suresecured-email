@@ -563,7 +563,7 @@ ${seoHead(origin)}
 
 <footer class="site-footer">
   <div class="wrap footer-inner">
-    <span>SalesWyze is built and run by the team behind SureSecured.</span>
+    <span>SalesWyze is part of <a href="https://wyzebiz.com">WyzeBiz</a>, built and run by the team behind SureSecured.</span>
     <a href="/login">Client sign in →</a>
   </div>
 </footer>
@@ -596,7 +596,7 @@ function siteNavHtml(active) {
 function siteFooterHtml() {
   return `<footer class="site-footer">
   <div class="wrap footer-inner">
-    <span>SalesWyze is built and run by the team behind SureSecured.</span>
+    <span>SalesWyze is part of <a href="https://wyzebiz.com">WyzeBiz</a>, built and run by the team behind SureSecured.</span>
     <a href="/login">Client sign in →</a>
   </div>
 </footer>`;
