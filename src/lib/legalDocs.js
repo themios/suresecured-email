@@ -30,21 +30,6 @@ const DOCS = {
     title: 'Terms of Service',
     description: 'The terms governing use of the SalesWyze platform.',
   },
-  // Platform-level documents served on the parent-brand domain. These are the
-  // ones Google's OAuth verification reviews, because the consent screen points
-  // at wyzebiz.com — they must cover every vertical, not just SalesWyze.
-  wyzebizPrivacy: {
-    file:  'WYZEBIZ_PRIVACY_DRAFT.md',
-    slug:  '/privacy',
-    title: 'Privacy Policy',
-    description: 'How Wyze Business Solutions collects, uses, and retains data across DealerWyze, RealtyWyze, ProWyze, and SalesWyze.',
-  },
-  wyzebizTerms: {
-    file:  'WYZEBIZ_TERMS_DRAFT.md',
-    slug:  '/terms',
-    title: 'Terms of Service',
-    description: 'The terms governing use of the Wyze Business Solutions platform.',
-  },
 };
 
 function esc(s) {
