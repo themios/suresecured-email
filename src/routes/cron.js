@@ -16,6 +16,7 @@ const { sendSms } = require('../lib/telnyx');
 const { sendSms: sendTwilioSms } = require('../lib/twilio');
 const { safeDecrypt } = require('../lib/crypto');
 const { fetchGmailInbound, fetchImapInbound, captureLeadFromMessage } = require('../lib/inboundCapture');
+const { defaultSalespersonId } = require('../lib/assignment');
 const { setFirstTouchAttribution } = require('../lib/attribution');
 const { sendTelegram, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 const { runDueAgents } = require('../lib/agents/scheduler');
@@ -72,13 +73,10 @@ async function sendSequencesHandler(req, res) {
         if (tenant.inbound_source === 'imap') {
           const clientCfg = await getClientEmailConfig(tenant.client_id);
           messages = await fetchImapInbound(clientCfg, since);
-          if (tenant.inbound_sequence_id) {
-            const { rows: spRows } = await pool.query(
-              `SELECT id FROM salespeople WHERE client_id = $1 AND active = true ORDER BY id LIMIT 1`,
-              [tenant.client_id]
-            );
-            salespersonId = spRows[0]?.id || null;
-          }
+          // Resolve unconditionally. This used to be gated on
+          // inbound_sequence_id being set, which meant a tenant that configured
+          // ONLY the B2B sequence got no owner and therefore no enrolment.
+          salespersonId = await defaultSalespersonId(pool, tenant.client_id);
         } else {
           const { rows: acctRows } = await pool.query(`
             SELECT ea.salesperson_id, ea.email AS gmail_email

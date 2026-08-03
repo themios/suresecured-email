@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { requireClientApiKey, requireAdminAuth } = require('../middleware/apiAuth');
 const { classifyAudience } = require('../lib/leadAudience');
 const { notifyNewLead } = require('../lib/telegram');
+const { resolveOwner } = require('../lib/assignment');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -32,6 +33,11 @@ async function captureLeadFromSubmission({ clientId, salespersonId, formType, em
     );
     if (!cfg[0]?.form_capture_enabled) return null;
 
+    // Without an owner the lead is created but never enrolled -- the exact
+    // failure that stranded five dealer enquiries. Fall back to the tenant's
+    // default rep when the submission carries no attribution.
+    const ownerId = await resolveOwner(pool, clientId, salespersonId);
+
     const { audience } = classifyAudience({ formType, email });
     const clean = String(email || '').trim().toLowerCase() || null;
 
@@ -49,7 +55,7 @@ async function captureLeadFromSubmission({ clientId, salespersonId, formType, em
       INSERT INTO leads (email, first_name, last_name, stage, audience_type, client_id, salesperson_id, created_at)
       VALUES ($1, $2, $3, 'new', $4, $5, $6, NOW())
       RETURNING id
-    `, [clean, firstName || clean || 'Website enquiry', rest.join(' ') || '', audience, clientId, salespersonId]);
+    `, [clean, firstName || clean || 'Website enquiry', rest.join(' ') || '', audience, clientId, ownerId]);
     const leadId = created[0]?.id;
     if (!leadId) return null;
 
@@ -66,11 +72,11 @@ async function captureLeadFromSubmission({ clientId, salespersonId, formType, em
     const sequenceId = audience === 'B2B'
       ? (cfg[0].inbound_sequence_id_b2b || cfg[0].inbound_sequence_id)
       : cfg[0].inbound_sequence_id;
-    if (clean && sequenceId && salespersonId) {
+    if (clean && sequenceId && ownerId) {
       await pool.query(`
         INSERT INTO contact_enrollments (lead_id, sequence_id, salesperson_id, client_id, status, enrolled_at)
         VALUES ($1, $2, $3, $4, 'active', NOW()) ON CONFLICT DO NOTHING
-      `, [leadId, sequenceId, salespersonId, clientId]);
+      `, [leadId, sequenceId, ownerId, clientId]);
     }
     return leadId;
   } catch (err) {
