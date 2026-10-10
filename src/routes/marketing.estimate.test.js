@@ -9,17 +9,18 @@ const http = require('node:http');
 const express = require('express');
 const { createMemoryStore } = require('../test/memoryEstimateStore');
 
-const spy = { sent: [], model: [], alerts: [], sendFails: false };
+const spy = { sent: [], model: [], alerts: [], sendFails: false, alertFails: false, senderRows: [{ client_id: 1 }] };
 const store = createMemoryStore();
 
 function stub(rel, exports) {
   const abs = require.resolve(path.join(__dirname, rel));
   require.cache[abs] = { id: abs, filename: abs, loaded: true, exports };
 }
-stub('../db', { pool: { query: async (sql) => (/FROM email_accounts|FROM salespeople/.test(sql) ? { rows: [{ salesperson_id: 1, client_id: 1 }] } : { rows: [] }) } });
+stub('../db', { pool: { query: async (sql, params) => (/FROM salespeople/.test(sql) ? { rows: spy.senderRows, params } : { rows: [] }) } });
 stub('../lib/gmail', { sendDirectEmail: async (m) => { if (spy.sendFails) throw new Error('535 Authentication credentials invalid'); spy.sent.push(m); } });
 stub('../lib/openrouter', { callOpenRouter: async (prompt, opts) => { spy.model.push({ prompt, opts }); return 'You are sitting on people who already know your business, and nobody followed up with them.'; } });
-stub('../lib/telegram', { sendTelegram: async (t) => { spy.alerts.push(t); } });
+stub('../lib/telegram', { sendTelegram: async () => {}, sendTelegramStrict: async (t) => { if (spy.alertFails) throw new Error('telegram http 401'); spy.alerts.push(t); } });
+process.env.PLATFORM_SALESPERSON_ID = '1';
 const estimateStore = require('../lib/estimateStore');
 estimateStore.createPgStore = () => store;
 
@@ -44,7 +45,7 @@ async function submit(fields, { ip = freshIp(), headers = {} } = {}) {
   });
 }
 const tokenFrom = (msg) => /\/get-started\/confirm\/([A-Za-z0-9_-]{43})/.exec(msg.textBody)[1];
-function reset() { spy.sent.length = 0; spy.model.length = 0; spy.alerts.length = 0; spy.sendFails = false; store.leads.length = 0; store.verifications.length = 0; store.quotas.clear(); }
+function reset() { spy.sent.length = 0; spy.model.length = 0; spy.alerts.length = 0; spy.sendFails = false; spy.alertFails = false; spy.senderRows = [{ client_id: 1 }]; process.env.PLATFORM_SALESPERSON_ID = '1'; store.leads.length = 0; store.verifications.length = 0; store.quotas.clear(); }
 
 test('unverified submission: no AI call, no estimate email, one fixed-text confirmation', async () => {
   reset();
@@ -210,6 +211,74 @@ test('a request that crashed mid-claim is blocked while the lease is live and wo
   assert.strictEqual((await post()).status, 200, 'expired lease allows a retry');
 });
 
+test('P1 (round 2): no explicit platform sender means no email, never a fallback to some other mailbox', async () => {
+  for (const setup of [() => { delete process.env.PLATFORM_SALESPERSON_ID; }, () => { process.env.PLATFORM_SALESPERSON_ID = 'abc'; }, () => { spy.senderRows = []; }]) {
+    reset(); setup();
+    const res = await submit({ email: 'nosender@example.com' });
+    assert.strictEqual(res.headers.get('location'), '/?submitted=confirm#apply');
+    assert.strictEqual(spy.sent.length, 0, 'nothing is sent without an owned sender');
+    assert.strictEqual(store.leads[0].confirm_email_status, 'failed');
+    assert.match(store.leads[0].confirm_email_error, /PLATFORM_SALESPERSON_ID/);
+  }
+  reset();
+});
+
+test('P2 (round 2): a retry reuses the stored narrative and never repeats the model call', async () => {
+  reset();
+  await submit({ email: 'once@example.com' });
+  const token = tokenFrom(spy.sent[0]);
+  const url = `${base}/get-started/confirm/${token}`;
+  const post = () => fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': freshIp() }, body: '' });
+  // First attempt: the model runs and the narrative is saved, then rendering "crashes" before completion.
+  const hash = estimateStore.sha256(token);
+  const claim = await store.claimVerification(hash, 120000);
+  await store.saveNarrative(hash, claim.nonce, claim.lead.id, 'Saved narrative that the retry must reuse as is.');
+  store.verifications[0].claimedAt = Date.now() - 3 * 60_000; // lease expired, request died
+  const before = spy.model.length;
+  const res = await post();
+  assert.strictEqual(res.status, 200);
+  assert.match(await res.text(), /Saved narrative that the retry must reuse as is\./);
+  assert.strictEqual(spy.model.length, before, 'no second model call for the same token');
+});
+
+test('P2 (round 2): a request whose lease was taken over cannot complete or email', async () => {
+  reset();
+  await submit({ email: 'fence@example.com' });
+  const hash = estimateStore.sha256(tokenFrom(spy.sent[0]));
+  const first = await store.claimVerification(hash, 120000);
+  store.verifications[0].claimedAt = Date.now() - 3 * 60_000;
+  const second = await store.claimVerification(hash, 120000);
+  assert.ok(second, 'lease expired so a new claim is allowed');
+  assert.strictEqual(await store.completeVerification(hash, first.nonce), false, 'stale owner cannot complete');
+  assert.strictEqual(await store.saveNarrative(hash, first.nonce, first.lead.id, 'stale'), false, 'stale owner cannot save');
+  assert.strictEqual(await store.completeVerification(hash, second.nonce), true);
+});
+
+test('P2 (round 3): a recorded-status failure after a successful send is not reported as a mail failure', async () => {
+  reset();
+  const orig = store.setConfirmStatus;
+  store.setConfirmStatus = async (id, status, err) => { if (status === 'sent') throw new Error('db blip'); return orig(id, status, err); };
+  try {
+    await submit({ email: 'sent@example.com' });
+    await new Promise(r => setTimeout(r, 20));
+    assert.strictEqual(spy.sent.length, 1);
+    assert.notStrictEqual(store.leads[0].confirm_email_status, 'failed', 'delivery succeeded, must not be marked failed');
+    assert.ok(!spy.alerts.some(a => /failing to send/.test(a)), 'no false mail-failure alert');
+  } finally { store.setConfirmStatus = orig; }
+});
+
+test('P2 (round 4): an undelivered abuse alert is logged as a failure, not swallowed', async () => {
+  reset(); spy.alertFails = true;
+  const logged = [];
+  const origErr = console.error; console.error = (...a) => { logged.push(a.join(' ')); };
+  try {
+    const ip = freshIp();
+    for (let i = 0; i < 7; i++) await submit({ email: `alertfail${i}@example.com` }, { ip });
+    await new Promise(r => setTimeout(r, 30));
+  } finally { console.error = origErr; }
+  assert.ok(logged.some(l => /ALERT NOT DELIVERED/.test(l)), 'failed alert delivery is visible in the log');
+});
+
 test('mail failure is recorded and alerted, and the visitor sees the same page', async () => {
   reset(); spy.sendFails = true;
   const res = await submit({ email: 'k@example.com' });
@@ -233,4 +302,15 @@ test('abuse evaluator flags the incident signature and stays quiet for normal tr
   assert.ok(evaluateAbuse(incident).some(f => /SUSPECTED ABUSE/.test(f)));
   assert.deepStrictEqual(evaluateAbuse({ submitted: 4, confirm_sent: 4, confirm_failed: 0, quota_blocked: 0, verified: 2, tripped: [] }), []);
   assert.ok(evaluateAbuse({ submitted: 3, confirm_sent: 0, confirm_failed: 3, quota_blocked: 0, verified: 0, tripped: [] }).some(f => /failed to send/.test(f)));
+});
+
+test('sendTelegramStrict rejects when Telegram is not configured (so "sent" means delivered)', async () => {
+  const saved = [process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID];
+  delete process.env.TELEGRAM_BOT_TOKEN; delete process.env.TELEGRAM_CHAT_ID;
+  try {
+    const real = require('node:module')._load; // bypass the stub used above
+    delete require.cache[require.resolve('../lib/telegram')];
+    const { sendTelegramStrict } = require('../lib/telegram');
+    await assert.rejects(sendTelegramStrict('x'), /not configured/);
+  } finally { [process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID] = saved.map(v => v || ''); }
 });

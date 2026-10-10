@@ -63,7 +63,7 @@ platform email an address they do not own.
 **What protects against that.** Prevents: proof of inbox ownership, single-use hashed
 tokens, fixed link origin (not the Host header), strict input bounds, caps counted in the
 database so they survive restarts. Detects: failed-send status per lead, alert on first
-quota trip, daily abuse report. Verified with 17 tests (no database), 5 tests against a
+quota trip, daily abuse report. Verified with 23 tests (no database), 5 tests against a
 real Postgres (50 parallel requests admit exactly the limit, 20 parallel uses of one token
 succeed exactly once), a full migration run on an empty database, and 3 deliberate
 regressions that each turned a test red.
@@ -74,7 +74,7 @@ button, then the estimate.
 **Rollback.** Redeploy the previous deployment. Migration 026 only adds columns and
 tables, so the old code ignores them. Nothing to undo.
 
-**Condition before deploy.** Repair and test the tenant mail login first, or accept that no
+**Conditions before deploy.** (1) Set `PLATFORM_SALESPERSON_ID` in Railway to the salesperson whose identity platform mail should use. There is deliberately no fallback, so without it no confirmation email is sent (leads are saved, status "failed", alert fires). This is a configuration change that needs your approval. (2) Repair and test the tenant mail login first, or accept that no
 confirmation emails go out. Do the repair AFTER Hold B is live, never before Hold A or B.
 
 **Recommendation: APPROVE after Hold A is live and Codex has reviewed the branch.** The

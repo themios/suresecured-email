@@ -64,34 +64,57 @@ function createPgStore(pool) {
     },
 
     // Claim for a short lease so only one request builds the estimate. Marks the lead
-    // verified (inbox ownership is proven at this point). Returns the lead row, or
+    // verified (inbox ownership is proven at this point). Returns { lead, nonce } or
     // null if the token is unknown, expired, completed, or claimed by a live request.
+    // The nonce fences every later write: a request whose lease was taken over by a
+    // newer claim can no longer save, complete or release.
     async claimVerification(tokenHash, leaseMs) {
+      const nonce = crypto.randomBytes(16).toString('hex');
       const { rows } = await pool.query(
         `WITH t AS (
-           UPDATE estimate_verifications SET claimed_at = now()
+           UPDATE estimate_verifications SET claimed_at = now(), claim_nonce = $3
             WHERE token_hash = $1 AND completed_at IS NULL AND expires_at > now()
               AND (claimed_at IS NULL OR claimed_at < now() - ($2::double precision * interval '1 millisecond'))
             RETURNING lead_id)
          UPDATE platform_leads l
             SET verify_status = 'verified', verified_at = COALESCE(l.verified_at, now())
            FROM t WHERE l.id = t.lead_id
-         RETURNING l.id, l.business_name, l.email, l.trade, l.list_size, l.deal_value`,
-        [tokenHash, leaseMs]
+         RETURNING l.id, l.business_name, l.email, l.trade, l.list_size, l.deal_value, l.estimate_narrative`,
+        [tokenHash, leaseMs, nonce]
       );
-      return rows[0] || null;
+      return rows[0] ? { lead: rows[0], nonce } : null;
     },
 
-    // The estimate was produced. The token can never be used again.
-    async completeVerification(tokenHash) {
-      await pool.query(`UPDATE estimate_verifications SET completed_at = now() WHERE token_hash = $1`, [tokenHash]);
+    // Persist the narrative before rendering, so a retry reuses it and never repeats
+    // the model call. Returns false if the claim was taken over.
+    async saveNarrative(tokenHash, nonce, leadId, narrative) {
+      const { rowCount } = await pool.query(
+        `UPDATE platform_leads l SET estimate_narrative = $4
+           FROM estimate_verifications v
+          WHERE v.token_hash = $1 AND v.claim_nonce = $2 AND v.completed_at IS NULL
+            AND l.id = v.lead_id AND l.id = $3`,
+        [tokenHash, nonce, leadId, narrative]
+      );
+      return rowCount === 1;
+    },
+
+    // The estimate was produced. Only the current claim owner can complete, and only
+    // once. Returns false if it was not the owner (the caller must then not send mail).
+    async completeVerification(tokenHash, nonce) {
+      const { rowCount } = await pool.query(
+        `UPDATE estimate_verifications SET completed_at = now()
+          WHERE token_hash = $1 AND claim_nonce = $2 AND completed_at IS NULL`,
+        [tokenHash, nonce]
+      );
+      return rowCount === 1;
     },
 
     // Production of the estimate failed after the claim. Free the token for a retry.
-    async releaseVerification(tokenHash) {
+    async releaseVerification(tokenHash, nonce) {
       await pool.query(
-        `UPDATE estimate_verifications SET claimed_at = NULL WHERE token_hash = $1 AND completed_at IS NULL`,
-        [tokenHash]
+        `UPDATE estimate_verifications SET claimed_at = NULL, claim_nonce = NULL
+          WHERE token_hash = $1 AND claim_nonce = $2 AND completed_at IS NULL`,
+        [tokenHash, nonce]
       );
     },
 

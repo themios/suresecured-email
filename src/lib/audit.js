@@ -108,7 +108,8 @@ function parseMoney(v) {
 
 // `useAi: false` skips the model and uses the plain narrative. The estimate math
 // is identical either way, so a spent AI quota never blocks a verified visitor.
-async function generateAudit(trade, list_size, dealInput, { useAi = true } = {}) {
+// `narrative` reuses text produced earlier, so a retry never repeats the model call.
+async function generateAudit(trade, list_size, dealInput, { useAi = true, narrative = null } = {}) {
   const b = benchmarkFor(trade);
   const count = listCount(list_size);
   // Prefer the value they typed in. Everyone's business is different, and their
@@ -122,7 +123,7 @@ async function generateAudit(trade, list_size, dealInput, { useAi = true } = {})
     deal,
     usedTheirValue: !!provided,
     rows: auditMath(count, deal),
-    narrative: useAi ? await generateNarrative(b.label, count) : fallbackNarrative(b.label, count),
+    narrative: narrative || (useAi ? await generateNarrative(b.label, count) : fallbackNarrative(b.label, count)),
   };
 }
 

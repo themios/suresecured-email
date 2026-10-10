@@ -4,29 +4,21 @@ const { pool } = require('../db');
 const { leadFormLimiter } = require('../middleware/rateLimit');
 const { generateAudit, renderAuditEmail } = require('../lib/audit');
 const { sendDirectEmail } = require('../lib/gmail');
-const { sendTelegram } = require('../lib/telegram');
+const { sendTelegramStrict } = require('../lib/telegram');
 const { createEstimateHandlers } = require('../lib/estimateFlow');
 const { createPgStore } = require('../lib/estimateStore');
 
-// Who the platform sends its own mail as (the audit copy). Prefer an explicit
-// PLATFORM_SALESPERSON_ID; otherwise use the first connected, enabled Gmail
-// identity (lowest client_id = the owner's own tenant). Returns null if no
-// mailbox is connected, in which case we just skip the emailed copy.
+// Who the platform sends its own mail as. It must be named explicitly with
+// PLATFORM_SALESPERSON_ID. There is no fallback to "the first connected mailbox":
+// public form traffic must never be able to send through a customer's identity.
+// Returns null (and the caller fails, recorded and alerted) when it is unset, not a
+// whole number, or not an active salesperson.
 async function platformSender() {
-  const envSp = parseInt(process.env.PLATFORM_SALESPERSON_ID, 10);
-  if (Number.isInteger(envSp)) {
-    const { rows } = await pool.query('SELECT client_id FROM salespeople WHERE id = $1', [envSp]);
-    if (rows[0]) return { salespersonId: envSp, clientId: rows[0].client_id };
-  }
-  const { rows } = await pool.query(
-    `SELECT ea.salesperson_id, s.client_id
-       FROM email_accounts ea
-       JOIN salespeople s ON s.id = ea.salesperson_id
-      WHERE ea.enabled = true AND ea.oauth_refresh_token IS NOT NULL
-      ORDER BY s.client_id ASC, ea.salesperson_id ASC
-      LIMIT 1`
-  );
-  return rows[0] ? { salespersonId: rows[0].salesperson_id, clientId: rows[0].client_id } : null;
+  const raw = String(process.env.PLATFORM_SALESPERSON_ID || '').trim();
+  if (!/^[0-9]+$/.test(raw)) return null;
+  const id = parseInt(raw, 10);
+  const { rows } = await pool.query('SELECT client_id FROM salespeople WHERE id = $1 AND active = true', [id]);
+  return rows[0] ? { salespersonId: id, clientId: rows[0].client_id } : null;
 }
 
 // Email the prospect their own copy of the estimate, so we land in their inbox
@@ -64,7 +56,7 @@ function publicOrigin() {
 // submitter typed appears in it, so it cannot carry their message to a third party.
 async function sendConfirmation({ to, link }) {
   const sender = await platformSender();
-  if (!sender) throw new Error('no connected mailbox for platform mail');
+  if (!sender) throw new Error('PLATFORM_SALESPERSON_ID is not set to an active salesperson');
   const platformName = process.env.PLATFORM_FROM_NAME || 'SalesWyze';
   const supportEmail = process.env.PLATFORM_FROM_EMAIL || 'support@saleswyze.com';
   const text = [
@@ -206,7 +198,7 @@ const estimate = createEstimateHandlers({
   renderReport: renderAuditReport,
   renderConfirm: renderConfirmPage,
   publicOrigin,
-  alert: sendTelegram,
+  alert: sendTelegramStrict,
 });
 
 router.post('/get-started', leadFormLimiter, express.urlencoded({ extended: false, limit: '20kb' }), estimate.submit);

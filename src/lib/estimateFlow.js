@@ -82,7 +82,8 @@ function createEstimateHandlers(deps) {
     const r = await store.consumeQuota(bucket, windowMs, limit);
     if (!r.allowed && r.firstDenial) {
       log.warn(`[abuse] quota tripped: ${label}`);
-      alert(`<b>Form quota tripped</b>: ${label} (limit ${limit}). Check /cron/form-abuse-report.`).catch(() => {});
+      alert(`<b>Form quota tripped</b>: ${label} (limit ${limit}). Check /cron/form-abuse-report.`)
+        .catch(e => log.error('[abuse] ALERT NOT DELIVERED (quota tripped):', label, e.message));
     }
     return r.allowed;
   }
@@ -90,7 +91,7 @@ function createEstimateHandlers(deps) {
   // At most one operator alert per hour for a given condition.
   function alertOncePerHour(key, text) {
     store.consumeQuota(`alert:${key}:hour`, HOUR, 1).then(r => {
-      if (r.allowed) alert(`<b>Estimate form</b>: ${text}`).catch(() => {});
+      if (r.allowed) alert(`<b>Estimate form</b>: ${text}`).catch(e => log.error('[abuse] ALERT NOT DELIVERED:', text.slice(0, 80), e.message));
     }).catch(() => {});
   }
 
@@ -127,16 +128,22 @@ function createEstimateHandlers(deps) {
     }
 
     const token = newToken();
+    let delivered = false;
     try {
       await store.createVerification(leadId, sha256(token), new Date(Date.now() + LIMITS.TOKEN_TTL_MS));
       await sendConfirmation({ to: f.email, link: `${publicOrigin()}/get-started/confirm/${token}` });
-      await store.setConfirmStatus(leadId, 'sent');
+      delivered = true;
     } catch (err) {
       // Recorded and alerted, never silent: a form that accepts leads but cannot
       // reach them is a failure the operator must see.
       log.error('[estimate] confirmation email failed:', err.message);
       await store.setConfirmStatus(leadId, 'failed', err.message).catch(() => {});
-      alertOncePerHour('confirm-send-failed', `confirmation emails are failing to send (${err.message.slice(0, 120)})`);
+      alertOncePerHour('confirm-send-failed', `confirmation emails are failing to send (${String(err.message).slice(0, 120)})`);
+    }
+    if (delivered) {
+      // A failure to record a successful send is a database problem, not a mail problem.
+      await store.setConfirmStatus(leadId, 'sent').catch(err =>
+        log.error('[estimate] confirmation sent but status not recorded:', err.message));
     }
     return res.redirect(THANKS);
   }
@@ -162,19 +169,30 @@ function createEstimateHandlers(deps) {
       return res.status(429).send(renderConfirm({ token, state: 'invalid' }));
     }
     const hash = sha256(token);
-    const lead = await store.claimVerification(hash, LIMITS.CLAIM_LEASE_MS);
-    if (!lead) return res.status(410).send(renderConfirm({ token, state: 'invalid' }));
+    const claim = await store.claimVerification(hash, LIMITS.CLAIM_LEASE_MS);
+    if (!claim) return res.status(410).send(renderConfirm({ token, state: 'invalid' }));
+    const { lead, nonce } = claim;
 
     // From here the token is claimed. Any failure releases it so the visitor can retry.
+    // A narrative saved by an earlier attempt is reused, so a retry never repeats the
+    // model call. Every write below is fenced by the claim nonce.
     let html, audit;
     try {
-      const useAi = await quota('ai:estimates:day', DAY, LIMITS.AI_ESTIMATES_GLOBAL_PER_DAY, 'estimate model calls per day');
-      audit = await generateAudit(lead.trade, lead.list_size, lead.deal_value, { useAi });
+      let narrative = lead.estimate_narrative || null;
+      if (!narrative) {
+        const useAi = await quota('ai:estimates:day', DAY, LIMITS.AI_ESTIMATES_GLOBAL_PER_DAY, 'estimate model calls per day');
+        narrative = (await generateAudit(lead.trade, lead.list_size, lead.deal_value, { useAi })).narrative;
+        await store.saveNarrative(hash, nonce, lead.id, narrative);
+      }
+      audit = await generateAudit(lead.trade, lead.list_size, lead.deal_value, { useAi: false, narrative });
       html = renderReport(publicOrigin(), { audit, businessName: lead.business_name });
-      await store.completeVerification(hash);
+      if (!(await store.completeVerification(hash, nonce))) {
+        // Our lease was taken over by a newer request. Do not send anything.
+        return res.status(410).send(renderConfirm({ token, state: 'invalid' }));
+      }
     } catch (err) {
       log.error('[estimate] estimate failed after claim, token released:', err.message);
-      await store.releaseVerification(hash).catch(() => {});
+      await store.releaseVerification(hash, nonce).catch(() => {});
       throw err;
     }
     emailAuditCopy({ to: lead.email, businessName: lead.business_name, audit, origin: publicOrigin() })

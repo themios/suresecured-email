@@ -10,7 +10,8 @@ ALTER TABLE platform_leads
   ADD COLUMN IF NOT EXISTS verified_at         TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS deal_value          VARCHAR(50),
   ADD COLUMN IF NOT EXISTS confirm_email_status TEXT,
-  ADD COLUMN IF NOT EXISTS confirm_email_error  TEXT;
+  ADD COLUMN IF NOT EXISTS confirm_email_error  TEXT,
+  ADD COLUMN IF NOT EXISTS estimate_narrative   TEXT;   -- stored once so a retry never repeats the model call
 
 ALTER TABLE platform_leads
   DROP CONSTRAINT IF EXISTS platform_leads_verify_status_chk;
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS estimate_verifications (
   lead_id    INTEGER NOT NULL REFERENCES platform_leads(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE,
   expires_at TIMESTAMPTZ NOT NULL,
+  claim_nonce  TEXT,          -- owner of the live claim, fences complete/release/save
   claimed_at   TIMESTAMPTZ,   -- set when a visitor presses Confirm; expires as a lease
   completed_at TIMESTAMPTZ,   -- set once the estimate was produced; the token is then dead
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()

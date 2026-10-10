@@ -49,7 +49,7 @@ dropped into the hopper, with the only guard being a sensor a bot can trivially 
 | C6 | Alert on first quota trip, alert on failed confirmation send, per-lead send status | Detective | Detects | Prevention cannot cover a broken mail login. This makes it visible within the hour. |
 | C7 | Daily abuse report with the incident signature (many submissions, few confirmations) | Detective | Detects | Catches a slow attack that stays under the caps. |
 | C8 | Per-feature model labels | Detective | Detects | The log can now say which feature spends. |
-| C9 | 17 regression tests, 5 database tests, migration registration test | Test | Detects before deploy | See the effectiveness section. |
+| C9 | 23 regression tests, 5 database tests, migration registration test | Test | Detects before deploy | See the effectiveness section. |
 
 Rejected as primary controls: CAPTCHA (the captured spam includes adverts for CAPTCHA
 solving software, so bots are already solving them), Cyrillic or keyword filters (the
@@ -128,3 +128,10 @@ path, which reopens this analysis (standard/CAPA.md, Effectiveness).
 
 Lesson for the public-forms draft: validate to ONE canonical value, then count, store and
 deliver that same value. Counting one string and mailing another is a bypass.
+| 2026-10-10 | Codex, PR 1 (round 2) | P2: an expired claim could repeat the model call for one token | AI_OUTPUT | Fixed: narrative persisted before rendering and reused on retry, claim fenced by a nonce so a stale request cannot complete or email. Residual: a crash between the model call and the save can repeat one call, bounded by the lease and the daily cap. |
+| 2026-10-10 | Codex, PR 1 (round 2) | P1: sender fell back to the lowest enabled mailbox with no ownership check, so form traffic could send through a customer identity | AUTHZ | Fixed: `PLATFORM_SALESPERSON_ID` is required, validated as an active salesperson, no fallback. Fail closed, recorded and alerted. |
+| 2026-10-10 | Codex, PR 1 (round 2) | P2: a failure to record a successful send was reported as a mail failure | SILENT_FAILURE | Fixed: delivery and status recording are separate steps. |
+| 2026-10-10 | Codex, PR 1 (round 2) | P2: the alert helper resolved on Telegram errors, so a control could fail silently | SILENT_FAILURE | Fixed: strict helper rejects on transport and non-2xx, failures are logged, the daily report returns 502 if its alert did not arrive. |
+
+Second lesson for the public-forms draft: never infer which identity sends platform mail
+from ordering. Name it explicitly and fail closed.

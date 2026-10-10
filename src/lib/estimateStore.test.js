@@ -21,19 +21,26 @@ test('quota: 50 parallel events against a limit of 10 admit exactly 10, and aler
   assert.strictEqual(results.filter(r => r.firstDenial).length, 1);
 });
 
-test('token: 20 parallel claims of one token succeed exactly once, release/complete behave, lead verified', opts, async () => {
+test('token: 20 parallel claims of one token succeed exactly once, fenced writes, release/complete behave', opts, async () => {
   const leadId = await store.insertLead({ business_name: 'T', email: 't@example.com', trade: 'roofing', list_size: '500_2000', deal_value: '3000' });
   const hash = sha256(`tok-${Date.now()}-${Math.random()}`);
   await store.createVerification(leadId, hash, new Date(Date.now() + 60_000));
   assert.strictEqual(await store.peekVerification(hash), true);
   const results = await Promise.all(Array.from({ length: 20 }, () => store.claimVerification(hash, 120000)));
   assert.strictEqual(results.filter(Boolean).length, 1);
-  assert.strictEqual(results.find(Boolean).id, leadId);
-  assert.strictEqual(await store.peekVerification(hash), true, 'claimed but not completed: still retryable after release');
-  await store.releaseVerification(hash);
-  assert.ok(await store.claimVerification(hash, 120000), 'released token can be claimed again');
-  assert.strictEqual(await store.claimVerification(hash, 120000), null, 'live lease blocks a second claim');
-  await store.completeVerification(hash);
+  const won = results.find(Boolean);
+  assert.strictEqual(won.lead.id, leadId);
+  assert.strictEqual(await store.saveNarrative(hash, 'not-the-owner', leadId, 'x'), false, 'wrong nonce cannot save');
+  assert.strictEqual(await store.saveNarrative(hash, won.nonce, leadId, 'kept narrative'), true);
+  assert.strictEqual(await store.completeVerification(hash, 'not-the-owner'), false, 'wrong nonce cannot complete');
+  await store.releaseVerification(hash, 'not-the-owner');
+  assert.strictEqual(await store.claimVerification(hash, 120000), null, 'wrong-nonce release did not free the claim');
+  await store.releaseVerification(hash, won.nonce);
+  const again = await store.claimVerification(hash, 120000);
+  assert.ok(again, 'released token can be claimed again');
+  assert.strictEqual(again.lead.estimate_narrative, 'kept narrative', 'saved narrative survives the retry');
+  assert.strictEqual(await store.completeVerification(hash, won.nonce), false, 'previous owner is fenced out');
+  assert.strictEqual(await store.completeVerification(hash, again.nonce), true);
   assert.strictEqual(await store.claimVerification(hash, 0), null, 'completed token is dead even with an expired lease');
   assert.strictEqual(await store.peekVerification(hash), false);
   const { rows } = await pool.query('SELECT verify_status, verified_at FROM platform_leads WHERE id=$1', [leadId]);
@@ -54,10 +61,14 @@ test('token: a crashed claim becomes claimable again once the lease has expired'
   const leadId = await store.insertLead({ business_name: 'T3', email: 't3@example.com' });
   const hash = sha256(`lease-${Date.now()}-${Math.random()}`);
   await store.createVerification(leadId, hash, new Date(Date.now() + 60_000));
-  assert.ok(await store.claimVerification(hash, 120000));
+  const first = await store.claimVerification(hash, 120000);
+  assert.ok(first);
   assert.strictEqual(await store.claimVerification(hash, 120000), null);
   await new Promise(r => setTimeout(r, 60));
-  assert.ok(await store.claimVerification(hash, 20), 'lease of 20ms has expired');
+  const second = await store.claimVerification(hash, 20);
+  assert.ok(second, 'lease of 20ms has expired');
+  assert.notStrictEqual(second.nonce, first.nonce);
+  assert.strictEqual(await store.completeVerification(hash, first.nonce), false);
 });
 
 test('abuse snapshot and prune run against the real schema', opts, async () => {
