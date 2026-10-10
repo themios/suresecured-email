@@ -4,6 +4,9 @@ const { pool } = require('../db');
 const { leadFormLimiter } = require('../middleware/rateLimit');
 const { generateAudit, renderAuditEmail } = require('../lib/audit');
 const { sendDirectEmail } = require('../lib/gmail');
+const { sendTelegram } = require('../lib/telegram');
+const { createEstimateHandlers } = require('../lib/estimateFlow');
+const { createPgStore } = require('../lib/estimateStore');
 
 // Who the platform sends its own mail as (the audit copy). Prefer an explicit
 // PLATFORM_SALESPERSON_ID; otherwise use the first connected, enabled Gmail
@@ -51,6 +54,63 @@ async function emailAuditCopy({ to, businessName, audit, origin }) {
   });
 }
 
+// Emailed links use one fixed origin. The request's Host header is attacker
+// controlled and must never decide where a token link points.
+function publicOrigin() {
+  return String(process.env.PUBLIC_ORIGIN || 'https://saleswyze.com').replace(/\/+$/, '');
+}
+
+// The only mail an unverified submission can cause. Fixed text: nothing the
+// submitter typed appears in it, so it cannot carry their message to a third party.
+async function sendConfirmation({ to, link }) {
+  const sender = await platformSender();
+  if (!sender) throw new Error('no connected mailbox for platform mail');
+  const platformName = process.env.PLATFORM_FROM_NAME || 'SalesWyze';
+  const supportEmail = process.env.PLATFORM_FROM_EMAIL || 'support@saleswyze.com';
+  const text = [
+    'Someone asked for a free estimate for this email address on saleswyze.com.',
+    '',
+    'To see it, open this link and press Confirm:',
+    link,
+    '',
+    'The link works once and expires in 24 hours.',
+    'If this was not you, ignore this message. Nothing happens unless the link is used.',
+    '',
+    `${platformName} | ${supportEmail}`,
+  ].join('\n');
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#211a12;line-height:1.5;">
+  <p>Someone asked for a free estimate for this email address on saleswyze.com.</p>
+  <p>To see it, open the link below and press Confirm.</p>
+  <p><a href="${esc(link)}" style="background:#b4531f;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 22px;border-radius:6px;display:inline-block;">Confirm and see my estimate</a></p>
+  <p style="font-size:14px;color:#5f5342;">The link works once and expires in 24 hours. If this was not you, ignore this message. Nothing happens unless the link is used.</p>
+  <p style="font-size:13px;color:#8a7960;">${esc(platformName)} | ${esc(supportEmail)}</p>
+</div>`;
+  await sendDirectEmail({
+    fromName: platformName,
+    sendAs: process.env.PLATFORM_FROM_EMAIL || undefined,
+    replyTo: supportEmail,
+    to,
+    subject: 'Confirm your email to see your SalesWyze estimate',
+    htmlBody: html,
+    textBody: text,
+    salespersonId: sender.salespersonId,
+    clientId: sender.clientId,
+  });
+}
+
+function renderConfirmPage({ token, state }) {
+  const body = state === 'ready'
+    ? `<h1>One more step</h1>
+  <p>Press the button to confirm this email address and see your estimate.</p>
+  <form method="POST" action="/get-started/confirm/${esc(token)}"><button type="submit">Confirm and see my estimate</button></form>`
+    : `<h1>This link has expired or was already used</h1>
+  <p>Go back to <a href="/">saleswyze.com</a> and send the form again for a new link.</p>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex"><meta name="referrer" content="no-referrer"><title>Confirm your email | SalesWyze</title>
+<style>body{font-family:Arial,Helvetica,sans-serif;background:#f6f0e6;color:#211a12;margin:0;padding:48px 16px}main{max-width:480px;margin:0 auto}button{background:#b4531f;color:#fff;border:0;border-radius:6px;padding:13px 24px;font-size:16px;font-weight:700;cursor:pointer}a{color:#b4531f}</style>
+</head><body><main>${body}</main></body></html>`;
+}
+
 function fmtMoney(n) { return '$' + Math.round(n).toLocaleString('en-US'); }
 
 function esc(s) {
@@ -71,10 +131,11 @@ function originOf(req) {
 }
 
 router.get('/', (req, res) => {
-  const submitted = req.query.submitted === '1';
+  const submitted = req.query.submitted === '1' || req.query.submitted === 'confirm';
+  const submittedKind = req.query.submitted === 'confirm' ? 'confirm' : 'plain';
   const formError = req.query.error === '1';
   res.set('Cache-Control', 'no-store');
-  res.send(renderLanding({ submitted, formError, origin: originOf(req) }));
+  res.send(renderLanding({ submitted, submittedKind, formError, origin: originOf(req) }));
 });
 
 // SEO: let crawlers and AI answer engines discover and read the site.
@@ -134,60 +195,23 @@ function legalRoute(key) {
 router.get('/privacy', legalRoute('privacy'));
 router.get('/terms',   legalRoute('terms'));
 
-router.post(
-  '/get-started',
-  leadFormLimiter,
-  express.urlencoded({ extended: false }),
-  async (req, res) => {
-    const {
-      business_name,
-      contact_name,
-      email,
-      phone,
-      trade,
-      list_size,
-      deal_value,
-      message,
-      company_website, // honeypot — real visitors never fill this in
-    } = req.body;
+// Verified-recipient flow (incident 2026-10-10): submission stores the lead and
+// sends one fixed-text confirmation email. The estimate, the model call and the
+// estimate email happen only after the single-use link is used.
+const estimate = createEstimateHandlers({
+  store: createPgStore(pool),
+  sendConfirmation,
+  generateAudit,
+  emailAuditCopy,
+  renderReport: renderAuditReport,
+  renderConfirm: renderConfirmPage,
+  publicOrigin,
+  alert: sendTelegram,
+});
 
-    if (company_website) {
-      // Bot filled the honeypot. Pretend it worked and move on.
-      return res.redirect('/?submitted=1#apply');
-    }
-
-    const emailOk = typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-    if (!business_name || !business_name.trim() || !emailOk) {
-      return res.redirect('/?error=1#apply');
-    }
-
-    try {
-      await pool.query(
-        `INSERT INTO platform_leads (business_name, contact_name, trade, email, phone, list_size, message, source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'landing_page')`,
-        [
-          business_name.trim().slice(0, 255),
-          (contact_name || '').trim().slice(0, 255) || null,
-          (trade || '').trim().slice(0, 100) || null,
-          email.trim().slice(0, 255),
-          (phone || '').trim().slice(0, 50) || null,
-          (list_size || '').trim().slice(0, 50) || null,
-          (message || '').trim().slice(0, 2000) || null,
-        ]
-      );
-    } catch (err) {
-      console.error('[marketing] platform_leads insert failed:', err.message);
-      return res.redirect('/?error=1#apply');
-    }
-
-    // CONTAINMENT (incident 2026-10-10, form relay abuse): an unverified public
-    // submission must not trigger a model call or an outbound email. Until a
-    // verified-recipient flow exists, the lead is stored and the visitor gets the
-    // plain thank-you. The estimate generator and email sender stay defined above
-    // and below but are not reachable from this route.
-    return res.redirect('/?submitted=1#apply');
-  }
-);
+router.post('/get-started', leadFormLimiter, express.urlencoded({ extended: false, limit: '20kb' }), estimate.submit);
+router.get('/get-started/confirm/:token', estimate.confirmPage);
+router.post('/get-started/confirm/:token', leadFormLimiter, express.urlencoded({ extended: false, limit: '1kb' }), estimate.confirmPost);
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
@@ -247,7 +271,7 @@ function seoHead(origin) {
 ${ld}`;
 }
 
-function renderLanding({ submitted, formError, origin = '' }) {
+function renderLanding({ submitted, submittedKind = 'plain', formError, origin = '' }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -498,8 +522,11 @@ ${seoHead(origin)}
         <div class="apply-success" role="status">
           ${icon('check')}
           <div>
-            <strong>Got it.</strong>
-            <span>We'll look at what you sent and get back to you shortly.</span>
+            ${submittedKind === 'confirm'
+              ? `<strong>Check your email.</strong>
+            <span>If that address is right, a confirmation link is on its way. Open it to see your estimate. We also have what you sent and will get back to you.</span>`
+              : `<strong>Got it.</strong>
+            <span>We'll look at what you sent and get back to you shortly.</span>`}
           </div>
         </div>` : `
         <form method="POST" action="/get-started" class="apply-form" novalidate>

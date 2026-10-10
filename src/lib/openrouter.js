@@ -11,11 +11,12 @@ const DEFAULT_MODEL = 'google/gemini-2.5-flash';
  * Used by the agent runner for per-tenant cost accounting. Callers who only
  * want the text should use callOpenRouter (below), which wraps this.
  */
-function callOpenRouterRaw(prompt, { model = DEFAULT_MODEL, title = 'SalesPilot Agent' } = {}) {
+function callOpenRouterRaw(prompt, { model = DEFAULT_MODEL, title = 'SalesPilot Agent', maxTokens } = {}) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify({
       model,
       messages: [{ role: 'user', content: prompt }],
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
     });
 
     const req = https.request({
@@ -58,8 +59,10 @@ function callOpenRouterRaw(prompt, { model = DEFAULT_MODEL, title = 'SalesPilot 
   });
 }
 
-async function callOpenRouter(prompt) {
-  const { content } = await callOpenRouterRaw(prompt, { title: 'SalesPilot Digest' });
+// `title` is the label OpenRouter's activity log shows. Every feature passes its
+// own so spend can be attributed (the estimate form once hid under "Digest").
+async function callOpenRouter(prompt, { title = 'SalesPilot Digest', maxTokens } = {}) {
+  const { content } = await callOpenRouterRaw(prompt, { title, maxTokens });
   return content;
 }
 
@@ -105,7 +108,7 @@ Classify this reply. Respond with valid JSON only — no explanation, no markdow
 }`;
 
   try {
-    const raw = await callOpenRouter(prompt);
+    const raw = await callOpenRouter(prompt, { title: 'SalesPilot Reply Classifier', maxTokens: 300 });
     // Strip any markdown fences if model adds them
     const clean = raw.replace(/```[a-z]*\n?/gi, '').trim();
     return JSON.parse(clean);

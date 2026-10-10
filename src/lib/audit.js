@@ -33,6 +33,8 @@ const INDUSTRY_BENCHMARKS = [
   { match: /(security|screen|door|window|fence|gate)/i,         label: 'security screens',  deal: 2400 },
   { match: /(retail|store|shop|boutique|ecommerce|e-commerce)/i, label: 'retail',            deal: 300 },
 ];
+// Hard ceiling on the model's reply for the estimate intro (2 to 3 short sentences).
+const ESTIMATE_MAX_TOKENS = 200;
 const DEFAULT_BENCHMARK = { label: 'your industry', deal: 2400 };
 
 function benchmarkFor(text) {
@@ -87,7 +89,7 @@ Return only the sentences, no heading.`;
   const LINGO = /\b(delve|unlock|leverage|robust|seamless|elevate|supercharge|crucial|comprehensive|furthermore|moreover|utilize|realm|tapestry|foster|bolster|effortless|cutting.edge|revolutioniz|empower|streamline|harness|game.chang|unleash|elevate)\b/i;
   try {
     const text = await Promise.race([
-      callOpenRouter(prompt),
+      callOpenRouter(prompt, { title: 'SalesWyze Estimate', maxTokens: ESTIMATE_MAX_TOKENS }),
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000)),
     ]);
     const clean = sanitize(text);
@@ -104,7 +106,9 @@ function parseMoney(v) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-async function generateAudit(trade, list_size, dealInput) {
+// `useAi: false` skips the model and uses the plain narrative. The estimate math
+// is identical either way, so a spent AI quota never blocks a verified visitor.
+async function generateAudit(trade, list_size, dealInput, { useAi = true } = {}) {
   const b = benchmarkFor(trade);
   const count = listCount(list_size);
   // Prefer the value they typed in. Everyone's business is different, and their
@@ -118,7 +122,7 @@ async function generateAudit(trade, list_size, dealInput) {
     deal,
     usedTheirValue: !!provided,
     rows: auditMath(count, deal),
-    narrative: await generateNarrative(b.label, count),
+    narrative: useAi ? await generateNarrative(b.label, count) : fallbackNarrative(b.label, count),
   };
 }
 
