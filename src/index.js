@@ -204,6 +204,8 @@ async function start() {
   // for every tenant with a connected seed inbox — no-op until one is connected.
   // Runs after send-sequences has had all day to generate real mail to check.
   cron.schedule('0 8 * * *', () => fireCron('seed-check'));
+  // Public estimate form read-out + abuse flags (incident 2026-10-10) — 06:15 UTC.
+  cron.schedule('15 6 * * *', () => fireCron('form-abuse-report'));
 }
 
 // Only boot the server + scheduler when run directly. Tests require this module

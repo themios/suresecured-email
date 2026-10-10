@@ -18,8 +18,10 @@ const { safeDecrypt } = require('../lib/crypto');
 const { fetchGmailInbound, fetchImapInbound, captureLeadFromMessage } = require('../lib/inboundCapture');
 const { defaultSalespersonId } = require('../lib/assignment');
 const { setFirstTouchAttribution } = require('../lib/attribution');
-const { sendTelegram, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
+const { sendTelegram, sendTelegramStrict, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 const { runDueAgents } = require('../lib/agents/scheduler');
+const { createPgStore } = require('../lib/estimateStore');
+const { evaluateAbuse } = require('../lib/estimateFlow');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -833,6 +835,33 @@ router.post('/daily-digest', cronAuth, async (req, res) => {
   }
 
   res.json({ ok: true, processed, skipped, errors, date: today, errorDetails });
+});
+
+/**
+ * POST /cron/form-abuse-report
+ * Daily read-out of the public estimate form (incident 2026-10-10). Sends the
+ * 24h numbers to the operator and flags the abuse signature: many submissions,
+ * almost no confirmations. Also prunes old quota counters.
+ */
+router.post('/form-abuse-report', cronAuth, async (req, res) => {
+  try {
+    const store = createPgStore(pool);
+    const snap = await store.abuseSnapshot();
+    const flags = evaluateAbuse(snap);
+    await store.pruneQuota();
+    const line = `submitted ${snap.submitted}, confirmation sent ${snap.confirm_sent}, failed ${snap.confirm_failed}, quota-blocked ${snap.quota_blocked}, verified ${snap.verified}`;
+    console.log('[form-abuse]', line, flags.length ? `FLAGS: ${flags.join('; ')}` : 'ok');
+    let alertError = null;
+    if (flags.length) {
+      try { await sendTelegramStrict(`<b>Estimate form, last 24h</b>\n${line}\n${flags.join('\n')}`); }
+      catch (e) { alertError = e.message; console.error('[form-abuse] ALERT NOT DELIVERED:', e.message); }
+    }
+    // A flagged report whose alert did not arrive is a failed control: say so with 502.
+    return res.status(alertError ? 502 : 200).json({ ok: !alertError, ...snap, flags, alertError });
+  } catch (err) {
+    console.error('[form-abuse] report failed:', err.message);
+    res.status(500).json({ ok: false });
+  }
 });
 
 /**

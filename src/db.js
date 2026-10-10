@@ -141,6 +141,7 @@ const MIGRATION_FILES = [
   '023_twilio_sms.sql',
   '024_inbound_source.sql',
   '025_lead_sender_matchers.sql',
+  '026_estimate_verification.sql',
 ];
 
 async function runMigrations() {
@@ -547,4 +548,4 @@ async function seedLandingPageMatrix() {
   }
 }
 
-module.exports = { pool, initDb };
+module.exports = { pool, initDb, MIGRATION_FILES };
