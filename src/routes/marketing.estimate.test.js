@@ -62,6 +62,17 @@ test('unverified submission: no AI call, no estimate email, one fixed-text confi
   assert.strictEqual(store.leads[0].verify_status, 'pending');
 });
 
+test('P1 (round 3): platform mail always carries an explicit From address (the SMTP fallback ignores sendAs)', async () => {
+  reset();
+  await submit({ email: 'from@example.com' });
+  assert.strictEqual(spy.sent[0].fromAddress, 'support@saleswyze.com');
+  const token = tokenFrom(spy.sent[0]);
+  await fetch(`${base}/get-started/confirm/${token}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': freshIp() }, body: '' });
+  await new Promise(r => setTimeout(r, 30));
+  assert.strictEqual(spy.sent.length, 2, 'confirmation plus estimate email');
+  assert.strictEqual(spy.sent[1].fromAddress, 'support@saleswyze.com');
+});
+
 test('confirmation link is built from the fixed origin, not the Host header', async () => {
   reset();
   await submit({ email: 'b@example.com' }, { headers: { host: 'evil.example' } });

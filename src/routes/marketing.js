@@ -35,6 +35,7 @@ async function emailAuditCopy({ to, businessName, audit, origin }) {
   const fromEmail = process.env.PLATFORM_FROM_EMAIL || 'support@saleswyze.com';
   await sendDirectEmail({
     fromName,
+    fromAddress: fromEmail,   // the SES/SMTP fallback needs an explicit From
     sendAs: process.env.PLATFORM_FROM_EMAIL || undefined,
     replyTo: fromEmail,
     to,
@@ -79,6 +80,7 @@ async function sendConfirmation({ to, link }) {
 </div>`;
   await sendDirectEmail({
     fromName: platformName,
+    fromAddress: supportEmail,   // the SES/SMTP fallback needs an explicit From
     sendAs: process.env.PLATFORM_FROM_EMAIL || undefined,
     replyTo: supportEmail,
     to,

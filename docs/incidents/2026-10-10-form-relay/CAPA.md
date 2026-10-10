@@ -49,7 +49,7 @@ dropped into the hopper, with the only guard being a sensor a bot can trivially 
 | C6 | Alert on first quota trip, alert on failed confirmation send, per-lead send status | Detective | Detects | Prevention cannot cover a broken mail login. This makes it visible within the hour. |
 | C7 | Daily abuse report with the incident signature (many submissions, few confirmations) | Detective | Detects | Catches a slow attack that stays under the caps. |
 | C8 | Per-feature model labels | Detective | Detects | The log can now say which feature spends. |
-| C9 | 23 regression tests, 5 database tests, migration registration test | Test | Detects before deploy | See the effectiveness section. |
+| C9 | 24 regression tests, 5 database tests, migration registration test | Test | Detects before deploy | See the effectiveness section. |
 
 Rejected as primary controls: CAPTCHA (the captured spam includes adverts for CAPTCHA
 solving software, so bots are already solving them), Cyrillic or keyword filters (the
@@ -135,3 +135,4 @@ deliver that same value. Counting one string and mailing another is a bypass.
 
 Second lesson for the public-forms draft: never infer which identity sends platform mail
 from ordering. Name it explicitly and fail closed.
+| 2026-10-10 | Codex, PR 1 (round 3) | P1: the SMTP/SES fallback ignores `sendAs`, so platform mail had no From address and would fail wherever Gmail is not connected | INTEGRATION | Fixed: both platform emails pass an explicit From address. Test added, mutation checked. |
