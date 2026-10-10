@@ -49,7 +49,7 @@ dropped into the hopper, with the only guard being a sensor a bot can trivially 
 | C6 | Alert on first quota trip, alert on failed confirmation send, per-lead send status | Detective | Detects | Prevention cannot cover a broken mail login. This makes it visible within the hour. |
 | C7 | Daily abuse report with the incident signature (many submissions, few confirmations) | Detective | Detects | Catches a slow attack that stays under the caps. |
 | C8 | Per-feature model labels | Detective | Detects | The log can now say which feature spends. |
-| C9 | 13 regression tests, 4 database tests, migration registration test | Test | Detects before deploy | See the effectiveness section. |
+| C9 | 17 regression tests, 5 database tests, migration registration test | Test | Detects before deploy | See the effectiveness section. |
 
 Rejected as primary controls: CAPTCHA (the captured spam includes adverts for CAPTCHA
 solving software, so bots are already solving them), Cyrillic or keyword filters (the
@@ -118,3 +118,13 @@ path, which reopens this analysis (standard/CAPA.md, Effectiveness).
 3. Cleanup of 10,731 spam rows (owner approval).
 4. Codex review of the remediation branch (S4).
 5. Decide whether to adopt the standard in this project (engineering.yml).
+
+## Review log
+
+| Date | Reviewer | Finding | Class | Disposition |
+|---|---|---|---|---|
+| 2026-10-10 | Codex, PR 1 | P1: the email check accepted display-name syntax, so one inbox could be reached under many quota keys and the per-inbox cap bypassed | INPUT | Fixed: one bare addr-spec only, and the counted address is the mailed address. Test added, mutation checked. |
+| 2026-10-10 | Codex, PR 1 | P2: the token was consumed before the estimate was built, so a mid-way failure stranded a verified visitor | DATA_INTEGRITY | Fixed: claim with a 2 minute lease, complete after success, release on failure. Test added, mutation checked, real Postgres test added. |
+
+Lesson for the public-forms draft: validate to ONE canonical value, then count, store and
+deliver that same value. Counting one string and mailing another is a bypass.

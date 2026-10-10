@@ -17,6 +17,7 @@ const LIMITS = Object.freeze({
   CONFIRM_POST_PER_IP_PER_HOUR: 30,
   AI_ESTIMATES_GLOBAL_PER_DAY: 100,     // model calls for estimates
   TOKEN_TTL_MS: DAY,
+  CLAIM_LEASE_MS: 2 * MINUTE,           // a claimed token is retryable after this
 });
 
 const FIELD_MAX = Object.freeze({
@@ -24,7 +25,10 @@ const FIELD_MAX = Object.freeze({
   phone: 50, list_size: 50, message: 2000, deal_value: 50,
 });
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// One bare addr-spec and nothing else. The mailer parses display names, comments and
+// lists, so anything beyond plain local@domain could reach a different inbox than the
+// one we counted. Quoted locals, angle brackets, commas and semicolons are rejected.
+const EMAIL_RE = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
@@ -157,15 +161,25 @@ function createEstimateHandlers(deps) {
     if (!(await quota(`confirmpost:ip:${ipKey}:hour`, HOUR, LIMITS.CONFIRM_POST_PER_IP_PER_HOUR, 'confirmation attempts per IP'))) {
       return res.status(429).send(renderConfirm({ token, state: 'invalid' }));
     }
-    const lead = await store.consumeVerification(sha256(token));
+    const hash = sha256(token);
+    const lead = await store.claimVerification(hash, LIMITS.CLAIM_LEASE_MS);
     if (!lead) return res.status(410).send(renderConfirm({ token, state: 'invalid' }));
 
-    const useAi = await quota('ai:estimates:day', DAY, LIMITS.AI_ESTIMATES_GLOBAL_PER_DAY, 'estimate model calls per day');
-    const audit = await generateAudit(lead.trade, lead.list_size, lead.deal_value, { useAi });
-    const origin = publicOrigin();
-    emailAuditCopy({ to: lead.email, businessName: lead.business_name, audit, origin })
+    // From here the token is claimed. Any failure releases it so the visitor can retry.
+    let html, audit;
+    try {
+      const useAi = await quota('ai:estimates:day', DAY, LIMITS.AI_ESTIMATES_GLOBAL_PER_DAY, 'estimate model calls per day');
+      audit = await generateAudit(lead.trade, lead.list_size, lead.deal_value, { useAi });
+      html = renderReport(publicOrigin(), { audit, businessName: lead.business_name });
+      await store.completeVerification(hash);
+    } catch (err) {
+      log.error('[estimate] estimate failed after claim, token released:', err.message);
+      await store.releaseVerification(hash).catch(() => {});
+      throw err;
+    }
+    emailAuditCopy({ to: lead.email, businessName: lead.business_name, audit, origin: publicOrigin() })
       .catch(err => log.error('[estimate] estimate email failed:', err.message));
-    return res.send(renderReport(origin, { audit, businessName: lead.business_name }));
+    return res.send(html);
   }
 
   return { submit, confirmPage, confirmPost };

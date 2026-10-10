@@ -23,19 +23,22 @@ function createMemoryStore() {
       const l = leads.find(x => x.id === id); l.confirm_email_status = status; l.confirm_email_error = error || null;
     },
     async createVerification(leadId, tokenHash, expiresAt) {
-      verifications.push({ leadId, tokenHash, expiresAt, usedAt: null });
+      verifications.push({ leadId, tokenHash, expiresAt, claimedAt: null, completedAt: null });
     },
     async peekVerification(tokenHash) {
       const v = verifications.find(x => x.tokenHash === tokenHash);
-      return !!v && !v.usedAt && v.expiresAt > new Date();
+      return !!v && !v.completedAt && v.expiresAt > new Date();
     },
-    async consumeVerification(tokenHash) {
+    async claimVerification(tokenHash, leaseMs) {
       const v = verifications.find(x => x.tokenHash === tokenHash);
-      if (!v || v.usedAt || v.expiresAt <= new Date()) return null;
-      v.usedAt = new Date();
+      if (!v || v.completedAt || v.expiresAt <= new Date()) return null;
+      if (v.claimedAt && Date.now() - v.claimedAt < leaseMs) return null;
+      v.claimedAt = Date.now();
       const l = leads.find(x => x.id === v.leadId); l.verify_status = 'verified';
       return { id: l.id, business_name: l.business_name, email: l.email, trade: l.trade, list_size: l.list_size, deal_value: l.deal_value };
     },
+    async completeVerification(tokenHash) { verifications.find(x => x.tokenHash === tokenHash).completedAt = Date.now(); },
+    async releaseVerification(tokenHash) { const v = verifications.find(x => x.tokenHash === tokenHash); if (v && !v.completedAt) v.claimedAt = null; },
     async abuseSnapshot() { return {}; },
     async pruneQuota() {},
     sha256,

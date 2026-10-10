@@ -160,6 +160,56 @@ test('malformed input is rejected, not stored, and never a 500', async () => {
   assert.strictEqual(spy.sent.length, 0);
 });
 
+test('P1 review finding: display-name, list and comment syntax is rejected, so one inbox cannot be reached under many quota keys', async () => {
+  reset();
+  for (const bad of ['a<victim@example.com>', 'b<victim@example.com>', '"x"@example.com', 'x,victim@example.com', 'x;victim@example.com', 'victim@example.com (c)', 'victim@example.com>', '<victim@example.com>', 'victim@@example.com', 'victim@example']) {
+    const res = await submit({ email: bad });
+    assert.strictEqual(res.headers.get('location'), '/?error=1#apply', `must reject ${bad}`);
+  }
+  assert.strictEqual(store.leads.length, 0);
+  assert.strictEqual(spy.sent.length, 0);
+});
+
+test('P1: the address that is counted is the address that is mailed', async () => {
+  reset();
+  await submit({ email: 'Real.Person+tag@Example.com' });
+  assert.strictEqual(spy.sent.length, 1);
+  assert.strictEqual(spy.sent[0].to, 'Real.Person+tag@Example.com');
+  assert.ok(!/[<>,;"]/.test(spy.sent[0].to));
+});
+
+test('P2 review finding: a failure after the token is claimed releases it, and the visitor can retry', async () => {
+  reset();
+  await submit({ email: 'retry@example.com' });
+  const token = tokenFrom(spy.sent[0]);
+  const url = `${base}/get-started/confirm/${token}`;
+  const post = () => fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': freshIp() }, body: '' });
+  const audit = require('../lib/audit'); const real = audit.generateAudit;
+  // generateAudit is captured by reference in marketing.js, so fail the model layer instead
+  const orig = store.consumeQuota; let boom = true;
+  store.consumeQuota = async (b, w, l) => { if (boom && b === 'ai:estimates:day') { boom = false; throw new Error('db blip'); } return orig(b, w, l); };
+  try {
+    assert.strictEqual((await post()).status, 500, 'first attempt fails');
+    assert.strictEqual(store.verifications[0].completedAt, null);
+    assert.strictEqual(store.verifications[0].claimedAt, null, 'claim released');
+    const second = await post();
+    assert.strictEqual(second.status, 200, 'retry succeeds, visitor is not stranded');
+    assert.strictEqual((await post()).status, 410, 'after success the token is dead');
+  } finally { store.consumeQuota = orig; audit.generateAudit = real; }
+});
+
+test('a request that crashed mid-claim is blocked while the lease is live and works after it expires', async () => {
+  reset();
+  await submit({ email: 'lease@example.com' });
+  const token = tokenFrom(spy.sent[0]);
+  const hash = estimateStore.sha256(token);
+  await store.claimVerification(hash, 120000); // a request that then died
+  const post = () => fetch(`${base}/get-started/confirm/${token}`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-forwarded-for': freshIp() }, body: '' });
+  assert.strictEqual((await post()).status, 410, 'live lease blocks');
+  store.verifications[0].claimedAt = Date.now() - 3 * 60_000;
+  assert.strictEqual((await post()).status, 200, 'expired lease allows a retry');
+});
+
 test('mail failure is recorded and alerted, and the visitor sees the same page', async () => {
   reset(); spy.sendFails = true;
   const res = await submit({ email: 'k@example.com' });

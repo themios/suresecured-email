@@ -53,30 +53,46 @@ function createPgStore(pool) {
       );
     },
 
-    // Read-only check used by the confirmation page. Does not consume the token.
+    // Read-only check used by the confirmation page. Does not claim the token.
     async peekVerification(tokenHash) {
       const { rowCount } = await pool.query(
-        `SELECT 1 FROM estimate_verifications WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`,
+        `SELECT 1 FROM estimate_verifications
+          WHERE token_hash = $1 AND completed_at IS NULL AND expires_at > now()`,
         [tokenHash]
       );
       return rowCount === 1;
     },
 
-    // Single-use: marks the token used and the lead verified in one statement.
-    // Returns the lead row, or null if the token is unknown, used or expired.
-    async consumeVerification(tokenHash) {
+    // Claim for a short lease so only one request builds the estimate. Marks the lead
+    // verified (inbox ownership is proven at this point). Returns the lead row, or
+    // null if the token is unknown, expired, completed, or claimed by a live request.
+    async claimVerification(tokenHash, leaseMs) {
       const { rows } = await pool.query(
         `WITH t AS (
-           UPDATE estimate_verifications SET used_at = now()
-            WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+           UPDATE estimate_verifications SET claimed_at = now()
+            WHERE token_hash = $1 AND completed_at IS NULL AND expires_at > now()
+              AND (claimed_at IS NULL OR claimed_at < now() - ($2::double precision * interval '1 millisecond'))
             RETURNING lead_id)
          UPDATE platform_leads l
             SET verify_status = 'verified', verified_at = COALESCE(l.verified_at, now())
            FROM t WHERE l.id = t.lead_id
          RETURNING l.id, l.business_name, l.email, l.trade, l.list_size, l.deal_value`,
-        [tokenHash]
+        [tokenHash, leaseMs]
       );
       return rows[0] || null;
+    },
+
+    // The estimate was produced. The token can never be used again.
+    async completeVerification(tokenHash) {
+      await pool.query(`UPDATE estimate_verifications SET completed_at = now() WHERE token_hash = $1`, [tokenHash]);
+    },
+
+    // Production of the estimate failed after the claim. Free the token for a retry.
+    async releaseVerification(tokenHash) {
+      await pool.query(
+        `UPDATE estimate_verifications SET claimed_at = NULL WHERE token_hash = $1 AND completed_at IS NULL`,
+        [tokenHash]
+      );
     },
 
     // 24h picture used by the daily abuse report.

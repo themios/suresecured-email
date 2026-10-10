@@ -17,13 +17,15 @@ ALTER TABLE platform_leads
 ALTER TABLE platform_leads
   ADD CONSTRAINT platform_leads_verify_status_chk CHECK (verify_status IN ('pending', 'verified'));
 
--- Only the SHA-256 of a token is stored, so a database read never yields a usable link.
+-- A token is claimed (2 minute lease) while the estimate is built and completed after, so a
+-- failure mid-way never strands a verified visitor. Only the SHA-256 of a token is stored, so a database read never yields a usable link.
 CREATE TABLE IF NOT EXISTS estimate_verifications (
   id         BIGSERIAL PRIMARY KEY,
   lead_id    INTEGER NOT NULL REFERENCES platform_leads(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL UNIQUE,
   expires_at TIMESTAMPTZ NOT NULL,
-  used_at    TIMESTAMPTZ,
+  claimed_at   TIMESTAMPTZ,   -- set when a visitor presses Confirm; expires as a lease
+  completed_at TIMESTAMPTZ,   -- set once the estimate was produced; the token is then dead
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS estimate_verifications_lead_idx ON estimate_verifications (lead_id);
