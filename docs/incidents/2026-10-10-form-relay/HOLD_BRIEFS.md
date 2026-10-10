@@ -63,7 +63,7 @@ platform email an address they do not own.
 **What protects against that.** Prevents: proof of inbox ownership, single-use hashed
 tokens, fixed link origin (not the Host header), strict input bounds, caps counted in the
 database so they survive restarts. Detects: failed-send status per lead, alert on first
-quota trip, daily abuse report. Verified with 24 tests (no database), 5 tests against a
+quota trip, daily abuse report. Verified with 25 tests (no database), 5 tests against a
 real Postgres (50 parallel requests admit exactly the limit, 20 parallel uses of one token
 succeed exactly once), a full migration run on an empty database, and 3 deliberate
 regressions that each turned a test red.

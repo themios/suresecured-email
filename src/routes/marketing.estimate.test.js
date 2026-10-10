@@ -73,6 +73,15 @@ test('P1 (round 3): platform mail always carries an explicit From address (the S
   assert.strictEqual(spy.sent[1].fromAddress, 'support@saleswyze.com');
 });
 
+test('P1 (round 4): with no platform address set, the configured SMTP sender is the From and support stays the reply-to', async () => {
+  reset(); process.env.SES_FROM_EMAIL = 'sales@owned-by-provider.example';
+  try {
+    await submit({ email: 'smtp@example.com' });
+    assert.strictEqual(spy.sent[0].fromAddress, 'sales@owned-by-provider.example');
+    assert.strictEqual(spy.sent[0].replyTo, 'support@saleswyze.com');
+  } finally { delete process.env.SES_FROM_EMAIL; }
+});
+
 test('confirmation link is built from the fixed origin, not the Host header', async () => {
   reset();
   await submit({ email: 'b@example.com' }, { headers: { host: 'evil.example' } });
