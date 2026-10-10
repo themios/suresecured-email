@@ -180,20 +180,12 @@ router.post(
       return res.redirect('/?error=1#apply');
     }
 
-    // Hand them their recoverable-revenue estimate immediately. Computed from
-    // industry + list size, so no manual work. Falls back to the plain thank-you
-    // if generation fails for any reason.
-    try {
-      const audit = await generateAudit(trade, list_size, deal_value);
-      // Send them a copy for their inbox (and to put us in their contacts).
-      // Fire-and-forget: the page must render even if mail is slow or down.
-      emailAuditCopy({ to: email.trim(), businessName: business_name, audit, origin: originOf(req) })
-        .catch(err => console.error('[marketing] audit email failed:', err.message));
-      return res.send(renderAuditReport(originOf(req), { audit, businessName: business_name }));
-    } catch (err) {
-      console.error('[marketing] audit generation failed:', err.message);
-      return res.redirect('/?submitted=1#apply');
-    }
+    // CONTAINMENT (incident 2026-10-10, form relay abuse): an unverified public
+    // submission must not trigger a model call or an outbound email. Until a
+    // verified-recipient flow exists, the lead is stored and the visitor gets the
+    // plain thank-you. The estimate generator and email sender stay defined above
+    // and below but are not reachable from this route.
+    return res.redirect('/?submitted=1#apply');
   }
 );
 
