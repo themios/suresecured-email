@@ -93,14 +93,29 @@ test('Codex P1/P2: alert gate is a rolling interval, and a released claim lets t
   const key = `test:${Date.now()}`;
   const first = await gate.claim(key, 6 * 3600_000);
   assert.ok(first);
-  assert.strictEqual(await gate.claim(key, 6 * 3600_000), null, 'suppressed inside the interval');
+  assert.strictEqual(await gate.claim(key, 6 * 3600_000), null, 'suppressed while claimed');
   await gate.release(key, first);
   const again = await gate.claim(key, 6 * 3600_000);
   assert.ok(again, 'released claim admits the next attempt');
+  await gate.confirm(key, again);
   await pool.query(`UPDATE form_quota SET window_start = now() - interval '6 hours 1 minute' WHERE bucket = $1`, [`alert-sent:${key}`]);
   assert.ok(await gate.claim(key, 6 * 3600_000), 'due again once the interval has passed');
   const parallel = await Promise.all(Array.from({ length: 10 }, () => gate.claim(`${key}:p`, 3600_000)));
   assert.strictEqual(parallel.filter(Boolean).length, 1, 'ten parallel claims, one alert');
+});
+
+test('Codex final P2: an unconfirmed claim blocks only for the lease; a confirmed one for the interval', opts, async () => {
+  const gate = dv.createAlertGate(pool);
+  const key = `lease:${Date.now()}`;
+  const b = `alert-sent:${key}`;
+  assert.ok(await gate.claim(key, 6 * 3600_000));
+  assert.strictEqual(await gate.claim(key, 6 * 3600_000), null, 'pending claim blocks inside the lease');
+  await pool.query(`UPDATE form_quota SET window_start = now() - interval '11 minutes' WHERE bucket = $1`, [b]);
+  const retry = await gate.claim(key, 6 * 3600_000);
+  assert.ok(retry, 'a claim abandoned mid-send expires with the lease');
+  await gate.confirm(key, retry);
+  await pool.query(`UPDATE form_quota SET window_start = now() - interval '11 minutes' WHERE bucket = $1 AND count = 1`, [b]);
+  assert.strictEqual(await gate.claim(key, 6 * 3600_000), null, 'a delivered alert suppresses for the full interval');
 });
 
 test('Codex round 3 P2: a delivered data-health alert is not reported as a tripped spam limit', opts, async () => {

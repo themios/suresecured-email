@@ -65,24 +65,28 @@ reverted, the test went red, the fix was restored).
 | 2 | Alert suppression used clock-aligned buckets, not an interval from the last alert | P2 | SILENT_FAILURE | Rolling alert gate |
 | 3 | Gate rows set `alerted_at`, which the form abuse report reads as a tripped spam limit | P2 | SILENT_FAILURE | Gate leaves it NULL |
 | own | Release matched nothing: JS Date milliseconds against database microseconds. Caught only by the real-database test. | P1 equivalent | SILENT_FAILURE | Claim time carried as text |
+| final head | A process that died between claiming and sending an alert left it marked as sent for up to 24 hours | P2 | SILENT_FAILURE | Two-phase gate: claim expires after a 10 minute lease, delivered only after confirm |
+| final head | 46 counts ran one after another, so slow tables could delay the page and alerts by minutes | P2 | SILENT_FAILURE | 4 at a time under a 20 second budget, the rest Unavailable |
+| final head | A Reveal id above the integer range gave 503 instead of 404 | P3 | INPUT | Range bound before the read |
 
-Final-commit review: Codex reacted with approval and raised no new findings. The thread
+Review of `d3184af`: approval, no new findings. Review of the documentation head
+`6996635` (code identical) raised three further findings in unchanged code, fixed above. The thread
 "Alert when a registered table is missing" still displays because GitHub re-anchors the
 round 1 comment (created 07:26 on commit `6e75c94`). It was fixed in `35dc026`.
 
-Pattern worth noting: five of nine defects were SILENT_FAILURE in the monitor itself.
+Pattern worth noting: seven of twelve defects were SILENT_FAILURE in the monitor itself.
 A detective control has its own silent failure modes and needs its own tests.
 
 ## 4. Test evidence
 
 | Evidence | Result |
 |---|---|
-| Route tests without a database (`src/routes/dataVisibility.test.js`) | 24 pass. Every acceptance criterion plus each finding. |
-| Real-database tests (`src/test/dataRegistry.test.js`) on an empty Postgres 16 built by `initDb` | 7 pass. 46 of 46 tables registered, 40 parallel reveals admit exactly 30, 10 parallel alert claims admit 1. |
+| Route tests without a database (`src/routes/dataVisibility.test.js`) | 26 pass. Every acceptance criterion plus each finding. |
+| Real-database tests (`src/test/dataRegistry.test.js`) on an empty Postgres 16 built by `initDb` | 8 pass. 46 of 46 tables registered, 40 parallel reveals admit exactly 30, 10 parallel alert claims admit 1. |
 | Previously skipped estimate store tests | 5 pass. They had never run in CI before this PR. |
 | Full suite, local with database | Pass, 0 failures, 0 skipped |
 | CI (GitHub Actions with Postgres service) | Pass on `d3184af`. Logs show AC13 and AC14 executed, not skipped. |
-| Mutation checks | 9: operator gate widened, masking removed, registry entry removed, alert release removed, CDN script in reveal, CDN script in pages, interval check removed, `alerted_at` set, and the original routine-alert grouping (PR on form alerts). Each turned a test red. |
+| Mutation checks | 12, including id bound removed, snapshot made serial with no budget, and claim lease set to the full interval: operator gate widened, masking removed, registry entry removed, alert release removed, CDN script in reveal, CDN script in pages, interval check removed, `alerted_at` set, and the original routine-alert grouping (PR on form alerts). Each turned a test red. |
 | Browser check, local copy | Both pages rendered at desktop and phone width. The spike was flagged, scam HTML shown as text, links not clickable, masking held. One reveal produced one audit row. A customer owner received the same "Cannot GET" response as a nonexistent path. |
 | Production | **Not yet verified.** See section 4b. |
 

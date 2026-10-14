@@ -99,7 +99,8 @@ function createDataVisibilityRouter(deps) {
 
   router.post('/form-submissions/:id/reveal', sameOrigin, async (req, res, next) => {
     const id = req.params.id;
-    if (!/^\d{1,10}$/.test(id)) return next('router');
+    // platform_leads.id is a Postgres integer; anything larger cannot exist.
+    if (!/^\d{1,10}$/.test(id) || Number(id) > 2147483647) return next('router');
     let rec;
     try { rec = await store.getSubmission(Number(id)); }
     catch (err) {

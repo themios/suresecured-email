@@ -45,7 +45,7 @@ const store = {
     return { total: 0, last24h: 0, last7d: 0, lastHour: 0, prior7d: 0, newest: null };
   },
   async listSubmissions(f) { spy.listCalls.push(f); return { total: LEADS.length, rows: LEADS }; },
-  async getSubmission(id) { const r = LEADS.find(l => l.id === id); return r ? { id: r.id, email: r.email, phone: r.phone } : null; },
+  async getSubmission(id) { if (id > 2147483647) throw new Error('value is out of range for type integer'); const r = LEADS.find(l => l.id === id); return r ? { id: r.id, email: r.email, phone: r.phone } : null; },
 };
 const quotaCounts = new Map();
 async function quota(bucket, windowMs, limit) {
@@ -55,15 +55,19 @@ async function quota(bucket, windowMs, limit) {
   return { allowed: n <= limit, count: n, firstDenial: n === limit + 1 };
 }
 async function audit(e) { if (state.auditFails) throw new Error('db down'); spy.audits.push({ ...e, at: state.now }); }
-// Same contract as createAlertGate: rolling interval from the last delivered alert.
+// Same contract as createAlertGate: claimed (pending) rows expire after the lease,
+// delivered rows suppress for the interval.
 const sentAt = new Map();
 const gate = {
   async claim(key, intervalMs) {
-    const last = sentAt.get(key);
-    if (last != null && last > state.now - intervalMs) return null;
-    sentAt.set(key, state.now); return { at: state.now };
+    const rows = sentAt.get(key) || [];
+    const blocked = rows.some(r => (r.delivered ? r.at > state.now - intervalMs : r.at > state.now - dv.LIMITS.ALERT_CLAIM_LEASE_MS));
+    if (blocked) return null;
+    const claim = { at: state.now, delivered: false };
+    sentAt.set(key, [...rows, claim]); return claim;
   },
-  async release(key, claim) { spy.released.push(key); if (sentAt.get(key) === claim.at) sentAt.delete(key); },
+  async confirm(key, claim) { claim.delivered = true; },
+  async release(key, claim) { spy.released.push(key); sentAt.set(key, (sentAt.get(key) || []).filter(r => r !== claim)); },
 };
 // Same contract as recordRevealIfAllowed: rolling 60 minutes counted from the audit trail.
 async function recordReveal({ userId, actorEmail, targetId, ip, limit }) {
@@ -215,6 +219,7 @@ test('AC7: reveal of a missing or malformed id is 404; a cross-site origin is re
   reset();
   assert.strictEqual((await post('/admin/data/form-submissions/99999/reveal', cookieFor(1))).status, 404);
   assert.strictEqual((await post('/admin/data/form-submissions/1e3/reveal', cookieFor(1))).status, 404);
+  assert.strictEqual((await post('/admin/data/form-submissions/2147483648/reveal', cookieFor(1))).status, 404, 'Codex final P3: beyond integer range is not found, not an error');
   assert.strictEqual((await post('/admin/data/form-submissions/7/reveal', cookieFor(1), { origin: 'https://evil.example' })).status, 404);
   assert.strictEqual(spy.audits.length, 0);
 });
@@ -285,6 +290,31 @@ test('Codex P1: data pages load nothing from another server and forbid script', 
     assert.match(csp, /default-src 'none'/, p);
     assert.ok(!/script-src/.test(csp), `${p}: no script source allowed`);
   }
+});
+
+test('Codex final P2: an alert claimed by a process that died mid-send is retried after the lease', async () => {
+  reset(); state.spikeTable = 'platform_leads';
+  // Simulate the crash: a claim exists, never confirmed or released.
+  await gate.claim('data-spike:platform_leads', dv.LIMITS.ANOMALY_REPEAT_MS);
+  const deps = { store, gate, alert: async (t) => spy.alerts.push(t), log: { error() {} } };
+  await dv.runAnomalyCheck(deps);
+  assert.strictEqual(spy.alerts.length, 0, 'inside the lease: another sender may still be delivering');
+  state.now += dv.LIMITS.ALERT_CLAIM_LEASE_MS + 60_000;
+  await dv.runAnomalyCheck(deps);
+  assert.strictEqual(spy.alerts.length, 1, 'after the lease the alert goes out instead of waiting 6 hours');
+});
+
+test('Codex final P2: the health snapshot stays inside its time budget when tables are slow', async () => {
+  reset();
+  const slow = { ...store, tableStats: async (n, h) => { await new Promise(r => setTimeout(r, 200)); return store.tableStats(n, h); } };
+  const t0 = Date.now();
+  const snap = await dv.dataHealthSnapshot(slow, { error() {} }, { budgetMs: 250, concurrency: 4 });
+  const ms = Date.now() - t0;
+  assert.ok(ms < 1000, `took ${ms} ms; serial would take about ${46 * 200} ms`);
+  const unavailable = snap.rows.filter(r => r.status === 'unavailable').length;
+  assert.ok(unavailable >= 30, `${unavailable} tables marked Unavailable, never shown as 0`);
+  assert.strictEqual(snap.rows.length, Object.keys(REGISTRY).length, 'every table still has a row, in registry order');
+  assert.strictEqual(snap.rows[0].name, Object.keys(REGISTRY)[0]);
 });
 
 test('AC10: normal traffic sends nothing', async () => {

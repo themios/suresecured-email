@@ -17,6 +17,9 @@ const LIMITS = Object.freeze({
   ANOMALY_MIN_PER_HOUR: 50,      // below this an hour is never a spike (quiet tables are noisy in ratio)
   ANOMALY_MULTIPLIER: 5,         // a spike is this many times the previous 7 days' average hour
   ANOMALY_REPEAT_MS: 6 * HOUR,   // at most one spike alert per table in this window
+  ALERT_CLAIM_LEASE_MS: 10 * 60_000, // an alert claimed but never confirmed is retried after this
+  SNAPSHOT_CONCURRENCY: 4,       // tables counted in parallel (pool max is 20)
+  SNAPSHOT_BUDGET_MS: 20_000,    // no new count starts after this; the rest show "Unavailable"
 });
 
 // Same signals as the 2026-10-10 cleanup: Cyrillic text, or a link in the business name.
@@ -172,24 +175,37 @@ function createPgDataStore(pool) {
 // ─── Data health snapshot ───────────────────────────────────────────────────
 // Returns one row per registered table plus the list of unregistered tables.
 // A count that could not be read is null with status 'unavailable', never 0.
-async function dataHealthSnapshot(store, log = console) {
+async function dataHealthSnapshot(store, log = console, opts = {}) {
+  const concurrency = opts.concurrency || LIMITS.SNAPSHOT_CONCURRENCY;
+  const deadline = Date.now() + (opts.budgetMs || LIMITS.SNAPSHOT_BUDGET_MS);
   const schema = await store.schema();
   const present = new Map(schema.map(r => [r.name, r.has_created_at]));
   const unregistered = schema.map(r => r.name).filter(n => !Object.prototype.hasOwnProperty.call(REGISTRY, n));
-  const rows = [];
-  for (const [name, meta] of Object.entries(REGISTRY)) {
-    if (!present.has(name)) {
-      rows.push({ name, ...meta, status: 'missing' });
-      continue;
-    }
-    try {
-      const s = await store.tableStats(name, present.get(name));
-      rows.push({ name, ...meta, ...s, hasCreatedAt: present.get(name), status: isSpike(s) ? 'spike' : 'normal' });
-    } catch (err) {
-      log.error('[data-health] count failed:', name, err.message);
-      rows.push({ name, ...meta, status: 'unavailable' });
+  const entries = Object.entries(REGISTRY);
+  const rows = new Array(entries.length);
+  // A few counts at a time under one overall budget. Each count is also cut off by the
+  // statement timeout, so the page answers within budget plus one timeout at worst.
+  let next = 0;
+  async function worker() {
+    while (next < entries.length) {
+      const i = next++;
+      const [name, meta] = entries[i];
+      if (!present.has(name)) { rows[i] = { name, ...meta, status: 'missing' }; continue; }
+      if (Date.now() > deadline) {
+        log.error('[data-health] count skipped, time budget used:', name);
+        rows[i] = { name, ...meta, status: 'unavailable' };
+        continue;
+      }
+      try {
+        const st = await store.tableStats(name, present.get(name));
+        rows[i] = { name, ...meta, ...st, hasCreatedAt: present.get(name), status: isSpike(st) ? 'spike' : 'normal' };
+      } catch (err) {
+        log.error('[data-health] count failed:', name, err.message);
+        rows[i] = { name, ...meta, status: 'unavailable' };
+      }
     }
   }
+  await Promise.all(Array.from({ length: concurrency }, worker));
   return { rows, unregistered };
 }
 
@@ -202,13 +218,21 @@ async function runAnomalyCheck({ store, gate, alert, log = console }) {
   const send = async (key, intervalMs, text) => {
     const claim = await gate.claim(key, intervalMs);
     if (!claim) return;
-    try { await alert(text); result.alerted.push(key); }
-    catch (e) {
+    try {
+      await alert(text);
+      result.alerted.push(key);
+    } catch (e) {
       result.alertErrors.push(`${key}: ${e.message}`);
       log.error('[data-health] ALERT NOT DELIVERED:', key, e.message);
       await gate.release(key, claim).catch(err =>
-        log.error('[data-health] could not release alert claim, next retry may be suppressed:', key, err.message));
+        log.error('[data-health] could not release alert claim, retried after the lease:', key, err.message));
+      return;
     }
+    // Delivered: the claim becomes the start of the suppression interval. If this write
+    // fails the claim stays pending and the alert may repeat after the lease. A
+    // duplicate is preferred to silence.
+    await gate.confirm(key, claim).catch(err =>
+      log.error('[data-health] delivered alert not confirmed, may repeat after the lease:', key, err.message));
   };
 
   const snap = await dataHealthSnapshot(store, log);
@@ -247,10 +271,12 @@ async function runAnomalyCheck({ store, gate, alert, log = console }) {
 }
 
 // ─── Alert gate: rolling suppression interval ───────────────────────────────
-// One form_quota row per delivered alert, stamped with the time it was claimed.
-// "Due" means no row for this key inside the interval. Claim is atomic under an
-// advisory lock; release deletes the claim. Rows are pruned after 8 days, longer
-// than any interval used here (at most 24 hours).
+// One form_quota row per alert, stamped when claimed. count 0 = claimed, sending;
+// count 1 = delivered. A key is due when there is no delivered row inside the interval
+// and no claimed row inside the lease. A claim left behind by a process that died
+// mid-send expires with the lease, so the alert is retried rather than lost. Claim is
+// atomic under an advisory lock. Rows are pruned after 8 days, longer than any
+// interval used here (at most 24 hours).
 function createAlertGate(pool) {
   const bucket = (key) => `alert-sent:${key}`;
   return {
@@ -260,13 +286,16 @@ function createAlertGate(pool) {
         await c.query('BEGIN');
         await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [bucket(key)]);
         const recent = await c.query(
-          `SELECT 1 FROM form_quota WHERE bucket = $1 AND window_start > now() - ($2::double precision * interval '1 millisecond')`,
-          [bucket(key), intervalMs]);
+          `SELECT 1 FROM form_quota
+            WHERE bucket = $1
+              AND ((count = 1 AND window_start > now() - ($2::double precision * interval '1 millisecond'))
+                OR (count = 0 AND window_start > now() - ($3::double precision * interval '1 millisecond')))`,
+          [bucket(key), intervalMs, LIMITS.ALERT_CLAIM_LEASE_MS]);
         if (recent.rowCount) { await c.query('ROLLBACK'); return null; }
         const { rows } = await c.query(
           // alerted_at stays NULL: the form abuse report reads non-null alerted_at as a
           // tripped spam limit, and these rows are not one.
-          `INSERT INTO form_quota (bucket, window_start, count) VALUES ($1, clock_timestamp(), 1)
+          `INSERT INTO form_quota (bucket, window_start, count) VALUES ($1, clock_timestamp(), 0)
            RETURNING window_start::text AS at`, [bucket(key)]);
         await c.query('COMMIT');
         // As text: a JS Date keeps milliseconds, the column keeps microseconds, and a
@@ -278,6 +307,10 @@ function createAlertGate(pool) {
       } finally {
         c.release();
       }
+    },
+    async confirm(key, claim) {
+      const r = await pool.query('UPDATE form_quota SET count = 1 WHERE bucket = $1 AND window_start = $2::timestamptz', [bucket(key), claim.at]);
+      if (r.rowCount !== 1) throw new Error(`alert claim not found for ${key}`);
     },
     async release(key, claim) {
       const r = await pool.query('DELETE FROM form_quota WHERE bucket = $1 AND window_start = $2::timestamptz', [bucket(key), claim.at]);
