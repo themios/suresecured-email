@@ -22,6 +22,7 @@ const { sendTelegram, sendTelegramStrict, notifyHotReply, notifyDailySummary } =
 const { runDueAgents } = require('../lib/agents/scheduler');
 const { createPgStore } = require('../lib/estimateStore');
 const { evaluateAbuse, formatAbuseReport } = require('../lib/estimateFlow');
+const { createPgDataStore, createAlertGate, runAnomalyCheck, createCheckFailureAlerter } = require('../lib/dataVisibility');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -870,6 +871,32 @@ router.post('/form-abuse-report', cronAuth, async (req, res) => {
  * Run after send-sequences cron (e.g., every 6 hours or nightly).
  * Auth: Authorization: Bearer <CRON_SECRET>
  */
+/**
+ * POST /cron/data-anomaly-check
+ * Hourly. Alerts on sudden growth in any registered table and on tables that no
+ * screen or check covers (spec 2026-10-14 data visibility). Alerts carry table
+ * labels and counts only. A check that cannot run is reported, never silent.
+ */
+const alertCheckFailure = createCheckFailureAlerter(sendTelegramStrict);
+router.post('/data-anomaly-check', cronAuth, async (req, res) => {
+  try {
+    const result = await runAnomalyCheck({
+      store: createPgDataStore(pool),
+      gate: createAlertGate(pool),
+      alert: sendTelegramStrict,
+    });
+    console.log('[data-health]', JSON.stringify(result));
+    return res.status(result.alertErrors.length ? 502 : 200).json({ ok: !result.alertErrors.length, ...result });
+  } catch (err) {
+    // The database itself may be down, so the shared de-duplication counter cannot be
+    // used. Fallback: remember in this process when the last failure alert went out,
+    // so manual retries or duplicate triggers do not repeat it within the hour.
+    console.error('[data-health] check failed:', err.message);
+    const sent = await alertCheckFailure();
+    return res.status(500).json({ ok: false, alert: sent });
+  }
+});
+
 router.post('/score-leads', cronAuth, async (req, res) => {
   let updated = 0, errors = 0;
 

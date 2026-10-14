@@ -1,0 +1,403 @@
+// Data visibility: counts for every registered table, a masked view of website form
+// submissions, and an hourly anomaly check. Spec: specs/2026-10-14-data-visibility.md
+//
+// Boundary: this module reads only tables named in dataRegistry.js and the one detail
+// table platform_leads. No table name, column name or SQL fragment ever comes from a
+// request. Every read runs in a READ ONLY transaction with a statement timeout.
+const { REGISTRY, TABLE_NAME_RE } = require('./dataRegistry');
+
+const HOUR = 3_600_000, DAY = 24 * HOUR;
+
+// Every limit is a named constant. Changing one is a reviewed code change.
+const LIMITS = Object.freeze({
+  PAGE_SIZE: 50,                 // form submissions per page
+  MAX_PAGE: 200,                 // 10,000 records reachable by paging; beyond that, filter
+  REVEALS_PER_HOUR: 30,          // full email/phone shown, per operator
+  STATEMENT_TIMEOUT_MS: 5_000,   // a slow count shows "Unavailable", never blocks the page
+  ANOMALY_MIN_PER_HOUR: 50,      // below this an hour is never a spike (quiet tables are noisy in ratio)
+  ANOMALY_MULTIPLIER: 5,         // a spike is this many times the previous 7 days' average hour
+  ANOMALY_REPEAT_MS: 6 * HOUR,   // at most one spike alert per table in this window
+  ALERT_CLAIM_LEASE_MS: 10 * 60_000, // an alert claimed but never confirmed is retried after this
+  SNAPSHOT_CONCURRENCY: 4,       // tables counted in parallel (pool max is 20)
+  SNAPSHOT_BUDGET_MS: 20_000,    // no new count starts after this; the rest show "Unavailable"
+});
+
+// Same signals as the 2026-10-10 cleanup: Cyrillic text, or a link in the business name.
+// A heuristic for sorting only. It never hides or deletes a record.
+const CYRILLIC_RE = /[Ѐ-ӿ]/;
+function looksLikeSpam(row) {
+  if (row.verify_status === 'verified') return false;
+  const name = String(row.business_name || ''), msg = String(row.message || '');
+  return CYRILLIC_RE.test(name) || CYRILLIC_RE.test(msg) || /https?:\/\//i.test(name);
+}
+const SPAM_SQL = `(verify_status <> 'verified' AND (business_name ~ '[Ѐ-ӿ]' OR coalesce(message, '') ~ '[Ѐ-ӿ]' OR business_name ~* 'https?://'))`;
+
+// A mask keeps a hint only when enough stays hidden: a short value is hidden whole.
+const MASK_MIN_EMAIL_LOCAL = 3;   // shorter local parts show no first letter
+const MASK_MIN_PHONE_DIGITS = 8;  // shorter numbers show no last digits
+function maskEmail(email) {
+  const s = String(email || '');
+  const at = s.lastIndexOf('@');
+  if (at < 1) return s ? '•••' : '';
+  return at < MASK_MIN_EMAIL_LOCAL ? `•••${s.slice(at)}` : `${s[0]}•••${s.slice(at)}`;
+}
+function maskPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.length < MASK_MIN_PHONE_DIGITS ? '••••' : `•••• ${digits.slice(-4)}`;
+}
+
+const ident = (name) => {
+  if (!TABLE_NAME_RE.test(name) || !Object.prototype.hasOwnProperty.call(REGISTRY, name)) {
+    throw new Error(`refusing unregistered table: ${String(name).slice(0, 64)}`);
+  }
+  return `"${name}"`;
+};
+
+// ─── Filters from the request, bounded to known values ─────────────────────
+function readFilters(query) {
+  const q = query || {};
+  const one = (v) => (typeof v === 'string' ? v : undefined); // repeated keys arrive as arrays
+  const pageRaw = one(q.page);
+  const page = pageRaw === undefined ? 1 : (/^\d{1,4}$/.test(pageRaw) ? Number(pageRaw) : NaN);
+  // A real calendar date only: Date.parse rolls 2026-02-31 into March, so the parts must
+  // round-trip exactly or Postgres would reject the cast and the page would fail.
+  const date = (v) => {
+    const m = typeof v === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!m) return null;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? v : null;
+  };
+  const tri = (v) => (v === 'yes' || v === 'no' ? v : 'any');
+  return {
+    page,
+    from: date(one(q.from)),
+    to: date(one(q.to)),
+    confirmed: tri(one(q.confirmed)),
+    spam: tri(one(q.spam)),
+  };
+}
+function pageAllowed(page) {
+  return Number.isInteger(page) && page >= 1 && page <= LIMITS.MAX_PAGE;
+}
+
+// ─── Anomaly rule ───────────────────────────────────────────────────────────
+function isSpike({ lastHour, prior7d }) {
+  if (lastHour == null || prior7d == null) return false;
+  const avgHour = prior7d / (7 * 24);
+  return lastHour > LIMITS.ANOMALY_MIN_PER_HOUR && lastHour > LIMITS.ANOMALY_MULTIPLIER * avgHour;
+}
+
+// ─── Postgres store ─────────────────────────────────────────────────────────
+function createPgDataStore(pool) {
+  async function readOnly(fn) {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN READ ONLY');
+      await c.query(`SET LOCAL statement_timeout = ${Number(LIMITS.STATEMENT_TIMEOUT_MS)}`);
+      const out = await fn(c);
+      await c.query('COMMIT');
+      return out;
+    } catch (err) {
+      await c.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      c.release();
+    }
+  }
+
+  return {
+    // Tables that exist, and which of them have a created_at column.
+    async schema() {
+      return readOnly(async (c) => {
+        const { rows } = await c.query(
+          `SELECT t.table_name AS name,
+                  EXISTS (SELECT 1 FROM information_schema.columns k
+                           WHERE k.table_schema = t.table_schema AND k.table_name = t.table_name
+                             AND k.column_name = 'created_at') AS has_created_at
+             FROM information_schema.tables t
+            WHERE t.table_schema = current_schema() AND t.table_type = 'BASE TABLE'
+            ORDER BY t.table_name`);
+        return rows;
+      });
+    },
+
+    // Counts for one registered table. Each table in its own transaction so one slow or
+    // broken table shows "Unavailable" without taking the others with it.
+    async tableStats(name, hasCreatedAt) {
+      const t = ident(name);
+      return readOnly(async (c) => {
+        const sql = hasCreatedAt
+          ? `SELECT count(*)::bigint AS total,
+                    count(*) FILTER (WHERE created_at > now() - interval '24 hours')::bigint AS last24h,
+                    count(*) FILTER (WHERE created_at > now() - interval '7 days')::bigint AS last7d,
+                    count(*) FILTER (WHERE created_at > now() - interval '1 hour')::bigint AS last_hour,
+                    count(*) FILTER (WHERE created_at <= now() - interval '1 hour'
+                                       AND created_at > now() - interval '7 days 1 hour')::bigint AS prior7d,
+                    max(created_at) AS newest
+               FROM ${t}`
+          : `SELECT count(*)::bigint AS total FROM ${t}`;
+        const r = (await c.query(sql)).rows[0];
+        const n = (v) => (v == null ? null : Number(v));
+        return {
+          total: n(r.total), last24h: n(r.last24h), last7d: n(r.last7d),
+          lastHour: n(r.last_hour), prior7d: n(r.prior7d), newest: r.newest || null,
+        };
+      });
+    },
+
+    async listSubmissions(f) {
+      const where = [], vals = [];
+      if (f.from) { vals.push(f.from); where.push(`created_at >= $${vals.length}::date`); }
+      if (f.to) { vals.push(f.to); where.push(`created_at < ($${vals.length}::date + 1)`); }
+      if (f.confirmed === 'yes') where.push(`verify_status = 'verified'`);
+      if (f.confirmed === 'no') where.push(`verify_status <> 'verified'`);
+      if (f.spam === 'yes') where.push(SPAM_SQL);
+      if (f.spam === 'no') where.push(`NOT ${SPAM_SQL}`);
+      const w = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      return readOnly(async (c) => {
+        const total = Number((await c.query(`SELECT count(*)::bigint AS n FROM platform_leads ${w}`, vals)).rows[0].n);
+        const { rows } = await c.query(
+          `SELECT id, created_at, business_name, contact_name, trade, message, email, phone,
+                  verify_status, confirm_email_status
+             FROM platform_leads ${w}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ${LIMITS.PAGE_SIZE} OFFSET ${(f.page - 1) * LIMITS.PAGE_SIZE}`, vals);
+        return { total, rows };
+      });
+    },
+
+    async getSubmission(id) {
+      return readOnly(async (c) => {
+        const { rows } = await c.query('SELECT id, email, phone FROM platform_leads WHERE id = $1', [id]);
+        return rows[0] || null;
+      });
+    },
+  };
+}
+
+// ─── Data health snapshot ───────────────────────────────────────────────────
+// Returns one row per registered table plus the list of unregistered tables.
+// A count that could not be read is null with status 'unavailable', never 0.
+async function dataHealthSnapshot(store, log = console, opts = {}) {
+  const concurrency = opts.concurrency || LIMITS.SNAPSHOT_CONCURRENCY;
+  const deadline = Date.now() + (opts.budgetMs || LIMITS.SNAPSHOT_BUDGET_MS);
+  const schema = await store.schema();
+  const present = new Map(schema.map(r => [r.name, r.has_created_at]));
+  const unregistered = schema.map(r => r.name).filter(n => !Object.prototype.hasOwnProperty.call(REGISTRY, n));
+  const entries = Object.entries(REGISTRY);
+  const rows = new Array(entries.length);
+  // A few counts at a time under one overall budget. Each count is also cut off by the
+  // statement timeout, so the page answers within budget plus one timeout at worst.
+  let next = 0;
+  async function worker() {
+    while (next < entries.length) {
+      const i = next++;
+      const [name, meta] = entries[i];
+      if (!present.has(name)) { rows[i] = { name, ...meta, status: 'missing' }; continue; }
+      if (Date.now() > deadline) {
+        log.error('[data-health] count skipped, time budget used:', name);
+        rows[i] = { name, ...meta, status: 'unavailable' };
+        continue;
+      }
+      try {
+        const st = await store.tableStats(name, present.get(name));
+        rows[i] = { name, ...meta, ...st, hasCreatedAt: present.get(name), status: isSpike(st) ? 'spike' : 'normal' };
+      } catch (err) {
+        log.error('[data-health] count failed:', name, err.message);
+        rows[i] = { name, ...meta, status: 'unavailable' };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return { rows, unregistered };
+}
+
+// ─── Hourly anomaly check ───────────────────────────────────────────────────
+// Alerts carry table labels and counts only: no record contents, no organization.
+async function runAnomalyCheck({ store, gate, alert, log = console }) {
+  const result = { spikes: [], unregistered: [], unavailable: [], missing: [], alerted: [], alertErrors: [] };
+  // Suppression is a rolling interval measured from the last DELIVERED alert. A failed
+  // delivery gives its claim back, so the next hourly run tries again.
+  const send = async (key, intervalMs, text) => {
+    const claim = await gate.claim(key, intervalMs);
+    if (!claim) return;
+    try {
+      await alert(text);
+      result.alerted.push(key);
+    } catch (e) {
+      result.alertErrors.push(`${key}: ${e.message}`);
+      log.error('[data-health] ALERT NOT DELIVERED:', key, e.message);
+      await gate.release(key, claim).catch(err =>
+        log.error('[data-health] could not release alert claim, retried after the lease:', key, err.message));
+      return;
+    }
+    // Delivered: the claim becomes the start of the suppression interval. If this write
+    // fails the claim stays pending and the alert may repeat after the lease. A
+    // duplicate is preferred to silence.
+    await gate.confirm(key, claim).catch(err =>
+      log.error('[data-health] delivered alert not confirmed, may repeat after the lease:', key, err.message));
+  };
+
+  const snap = await dataHealthSnapshot(store, log);
+  for (const r of snap.rows) {
+    if (r.status === 'unavailable') result.unavailable.push(r.name);
+    if (r.status === 'missing') result.missing.push(r.name);
+    if (r.status === 'spike') result.spikes.push(r);
+  }
+  // All due spikes go out as ONE message, so a broad incident costs one delivery, not
+  // one per table. Each table keeps its own suppression claim.
+  const due = [];
+  for (const r of result.spikes) {
+    const claim = await gate.claim(`data-spike:${r.name}`, LIMITS.ANOMALY_REPEAT_MS);
+    if (claim) due.push({ r, claim });
+  }
+  result.spikes = result.spikes.map(r => r.name);
+  if (due.length) {
+    const lines = due.map(({ r }) =>
+      `${escHtml(r.label)}: ${r.lastHour.toLocaleString('en-US')} in the last hour (normal about ${(r.prior7d / (7 * 24)).toFixed(1)} an hour)`);
+    const text = `<b>Data health: sudden growth in ${due.length} table(s)</b>\n${lines.join('\n')}\n` +
+      `This can be a bot, an import, or a fault that repeats an action.\n` +
+      `Action: open Admin, Data health, and check what arrived.`;
+    try {
+      await alert(text);
+      for (const { r, claim } of due) {
+        result.alerted.push(`data-spike:${r.name}`);
+        await gate.confirm(`data-spike:${r.name}`, claim).catch(err =>
+          log.error('[data-health] delivered alert not confirmed, may repeat after the lease:', r.name, err.message));
+      }
+    } catch (e) {
+      result.alertErrors.push(`data-spike: ${e.message}`);
+      log.error('[data-health] ALERT NOT DELIVERED: data-spike', e.message);
+      for (const { r, claim } of due) {
+        await gate.release(`data-spike:${r.name}`, claim).catch(err =>
+          log.error('[data-health] could not release alert claim, retried after the lease:', r.name, err.message));
+      }
+    }
+  }
+  if (snap.unregistered.length) {
+    result.unregistered = snap.unregistered;
+    await send('data-unregistered', DAY,
+      `<b>Data health: tables nobody can see</b>\n` +
+      `${snap.unregistered.length} table(s) exist that are not in the data registry, so no screen or check covers them.\n` +
+      `Action: add each one to the registry (src/lib/dataRegistry.js) with a screen or a reason.`);
+  }
+  if (result.unavailable.length) {
+    await send('data-unavailable', HOUR,
+      `<b>Data health: some counts could not be read</b>\n` +
+      `${result.unavailable.length} table(s) did not answer within ${LIMITS.STATEMENT_TIMEOUT_MS / 1000} seconds or returned an error. Their growth is not being watched right now.\n` +
+      `Action: check the server log for "[data-health] count failed".`);
+  }
+  if (result.missing.length) {
+    await send('data-missing', HOUR,
+      `<b>Data health: expected tables are missing</b>\n` +
+      `${result.missing.length} table(s) the platform relies on do not exist in the database. A failed upgrade or an accidental removal can cause this, and features that use them will fail.\n` +
+      `Action: check the latest deploy and the server log for database errors.`);
+  }
+  return result;
+}
+
+// ─── Alert gate: rolling suppression interval ───────────────────────────────
+// One form_quota row per alert, stamped when claimed. count 0 = claimed, sending;
+// count 1 = delivered. A key is due when there is no delivered row inside the interval
+// and no claimed row inside the lease. A claim left behind by a process that died
+// mid-send expires with the lease, so the alert is retried rather than lost. Claim is
+// atomic under an advisory lock. Rows are pruned after 8 days, longer than any
+// interval used here (at most 24 hours).
+function createAlertGate(pool) {
+  const bucket = (key) => `alert-sent:${key}`;
+  return {
+    async claim(key, intervalMs) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [bucket(key)]);
+        const recent = await c.query(
+          `SELECT 1 FROM form_quota
+            WHERE bucket = $1
+              AND ((count = 1 AND window_start > now() - ($2::double precision * interval '1 millisecond'))
+                OR (count = 0 AND window_start > now() - ($3::double precision * interval '1 millisecond')))`,
+          [bucket(key), intervalMs, LIMITS.ALERT_CLAIM_LEASE_MS]);
+        if (recent.rowCount) { await c.query('ROLLBACK'); return null; }
+        const { rows } = await c.query(
+          // alerted_at stays NULL: the form abuse report reads non-null alerted_at as a
+          // tripped spam limit, and these rows are not one.
+          `INSERT INTO form_quota (bucket, window_start, count) VALUES ($1, clock_timestamp(), 0)
+           RETURNING window_start::text AS at`, [bucket(key)]);
+        await c.query('COMMIT');
+        // As text: a JS Date keeps milliseconds, the column keeps microseconds, and a
+        // rounded value would match nothing on release.
+        return { at: rows[0].at };
+      } catch (err) {
+        await c.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        c.release();
+      }
+    },
+    async confirm(key, claim) {
+      const r = await pool.query('UPDATE form_quota SET count = 1 WHERE bucket = $1 AND window_start = $2::timestamptz', [bucket(key), claim.at]);
+      if (r.rowCount !== 1) throw new Error(`alert claim not found for ${key}`);
+    },
+    async release(key, claim) {
+      const r = await pool.query('DELETE FROM form_quota WHERE bucket = $1 AND window_start = $2::timestamptz', [bucket(key), claim.at]);
+      if (r.rowCount !== 1) throw new Error(`alert claim not found for ${key}`);
+    },
+  };
+}
+
+// ─── "The check itself failed" alert ───────────────────────────────────────
+// Used when the database is down, so the shared alert gate cannot be used. The last
+// delivery time is kept in this process: repeated or manual triggers within the hour
+// stay quiet, and a failed delivery leaves the next attempt free to try.
+const CHECK_FAILURE_ALERT_EVERY_MS = HOUR;
+function createCheckFailureAlerter(alert, { now = () => Date.now(), log = console } = {}) {
+  let lastSent = -Infinity;
+  return async function alertCheckFailure() {
+    if (now() - lastSent < CHECK_FAILURE_ALERT_EVERY_MS) return 'suppressed';
+    lastSent = now();
+    try {
+      await alert('<b>Data health: the hourly check could not run</b>\nTable growth is not being watched until it works again.\nAction: check the server log for "[data-health] check failed".');
+      return 'sent';
+    } catch (e) {
+      lastSent = -Infinity;
+      log.error('[data-health] ALERT NOT DELIVERED (check failed):', e.message);
+      return 'failed';
+    }
+  };
+}
+
+// ─── Reveal: rolling limit and audit in one step ────────────────────────────
+// The audit log is the counter: reveals by this operator in the last 60 minutes.
+// A per-operator advisory lock makes check-and-record atomic, so parallel requests
+// cannot slip past the limit. If the entry is not written, nothing is revealed.
+async function recordRevealIfAllowed(pool, { userId, actorEmail, targetId, ip, limit }) {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('data-reveal:' || $1::text))`, [userId]);
+    const { rows } = await c.query(
+      `SELECT count(*)::int AS n FROM audit_log
+        WHERE user_id = $1 AND action = 'form_submissions.reveal' AND created_at > now() - interval '60 minutes'`,
+      [userId]);
+    if (rows[0].n >= limit) { await c.query('ROLLBACK'); return { allowed: false }; }
+    await c.query(
+      `INSERT INTO audit_log (client_id, user_id, actor_email, action, target_type, target_id, detail, ip)
+       VALUES (NULL, $1, $2, 'form_submissions.reveal', 'platform_lead', $3, '{}', $4)`,
+      [userId, actorEmail, String(targetId), ip]);
+    await c.query('COMMIT');
+    return { allowed: true };
+  } catch (err) {
+    await c.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    c.release();
+  }
+}
+
+const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+module.exports = {
+  LIMITS, createPgDataStore, createAlertGate, createCheckFailureAlerter, dataHealthSnapshot, runAnomalyCheck, recordRevealIfAllowed, isSpike,
+  readFilters, pageAllowed, maskEmail, maskPhone, looksLikeSpam,
+};
