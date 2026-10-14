@@ -82,18 +82,27 @@ function createEstimateHandlers(deps) {
     const r = await store.consumeQuota(bucket, windowMs, limit);
     if (!r.allowed && r.firstDenial) {
       log.warn(`[abuse] quota tripped: ${label}`);
-      alert(`<b>Form quota tripped</b>: ${label} (limit ${limit}). Check /cron/form-abuse-report.`)
-        .catch(e => log.error('[abuse] ALERT NOT DELIVERED (quota tripped):', label, e.message));
+      if (ROUTINE_LIMITS.has(label)) {
+        // Each bot IP or address is its own bucket, so a flood trips these every few
+        // minutes. One alert a day says an attack is on; the nightly summary counts it.
+        alertOnce('routine-limits', DAY, quotaAlertText(label, limit) +
+          '\nFurther limits like this today are counted in the nightly summary, not sent one by one.');
+      } else {
+        alert(quotaAlertText(label, limit))
+          .catch(e => log.error('[abuse] ALERT NOT DELIVERED (quota tripped):', label, e.message));
+      }
     }
     return r.allowed;
   }
 
-  // At most one operator alert per hour for a given condition.
-  function alertOncePerHour(key, text) {
-    store.consumeQuota(`alert:${key}:hour`, HOUR, 1).then(r => {
-      if (r.allowed) alert(`<b>Estimate form</b>: ${text}`).catch(e => log.error('[abuse] ALERT NOT DELIVERED:', text.slice(0, 80), e.message));
+  // At most one operator alert per window for a given condition.
+  function alertOnce(key, windowMs, text) {
+    const suffix = windowMs === HOUR ? 'hour' : 'day';
+    store.consumeQuota(`alert:${key}:${suffix}`, windowMs, 1).then(r => {
+      if (r.allowed) alert(text).catch(e => log.error('[abuse] ALERT NOT DELIVERED:', text.slice(0, 80), e.message));
     }).catch(() => {});
   }
+  const alertOncePerHour = (key, text) => alertOnce(key, HOUR, text);
 
   async function submit(req, res) {
     const f = readFields(req.body);
@@ -138,7 +147,7 @@ function createEstimateHandlers(deps) {
       // reach them is a failure the operator must see.
       log.error('[estimate] confirmation email failed:', err.message);
       await store.setConfirmStatus(leadId, 'failed', err.message).catch(() => {});
-      alertOncePerHour('confirm-send-failed', `confirmation emails are failing to send (${String(err.message).slice(0, 120)})`);
+      alertOncePerHour('confirm-send-failed', sendFailureAlertText(err.message));
     }
     if (delivered) {
       // A failure to record a successful send is a database problem, not a mail problem.
@@ -219,4 +228,68 @@ function evaluateAbuse(snap) {
   return flags;
 }
 
-module.exports = { evaluateAbuse, ABUSE_MIN_SUBMISSIONS, ABUSE_MIN_CONFIRM_RATE, createEstimateHandlers, LIMITS, FIELD_MAX, canonicalAddress, readFields, sha256, newToken, TOKEN_RE };
+// Operator alerts go to Telegram (HTML mode). Each says what happened, what it
+// means, and whether anything needs doing, in words a non-programmer can act on.
+// Limits that trip per bot IP or address: they mean "protection working", not "act".
+const ROUTINE_LIMITS = new Set([
+  'confirmation emails per source IP',
+  'confirmation emails per address',
+  'confirmation attempts per IP',
+]);
+
+const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function quotaAlertText(label, limit) {
+  const texts = {
+    'confirmation emails per source IP':
+      `One computer asked for more than ${limit} confirmation emails today. Requests from it are blocked until tomorrow. This is the spam protection working.\nNo action needed.`,
+    'confirmation emails per address':
+      `One email address was typed into the form more than ${limit} times today. No more emails go to it until tomorrow. This is the spam protection working.\nNo action needed.`,
+    'confirmation emails per day (global)':
+      `The form reached its limit of ${limit} confirmation emails today. Nobody else gets one until tomorrow, real visitors included. Their details are still saved.\nAction: if this happens several days running, the form is under steady attack.`,
+    'stored submissions per hour':
+      `More than ${limit} form submissions arrived in the last hour. Extra ones are not saved until the hour is over. This is almost certainly a bot, but a real visitor in this hour would be lost.\nAction: if it repeats, the form is under heavy attack.`,
+    'confirmation attempts per IP':
+      `One computer pressed Confirm more than ${limit} times in an hour. It is blocked for the rest of the hour.\nNo action needed.`,
+  };
+  return `<b>Estimate form: spam limit reached</b>\n${texts[label] || `Limit reached: ${escHtml(label)} (${limit}).`}`;
+}
+
+function sendFailureAlertText(errMessage) {
+  const raw = String(errMessage || '');
+  const cause = /\b535\b|auth/i.test(raw)
+    ? 'the sending mailbox rejected its password'
+    : escHtml(raw.slice(0, 120));
+  return `<b>Estimate form: confirmation emails are failing to send</b>\n` +
+    `People who fill in the form are not getting their confirmation link. Their details are still saved.\n` +
+    `Cause: ${cause}.\n` +
+    `Action: fix the sending mailbox login. This alert repeats at most once an hour until it works.`;
+}
+
+function formatAbuseReport(snap) {
+  const n = (x) => Number(x || 0).toLocaleString('en-US');
+  const abuse = evaluateAbuse(snap).some(f => f.startsWith('SUSPECTED ABUSE'));
+  const lines = [
+    '<b>Estimate form, last 24 hours</b>',
+    `${n(snap.submitted)} form submissions`,
+    `${n(snap.verified)} people confirmed their email`,
+    `${n(snap.confirm_sent)} confirmation emails delivered`,
+    `${n(snap.confirm_failed)} confirmation emails failed to send`,
+    `${n(snap.quota_blocked)} stopped by the spam limits before any email`,
+    '',
+  ];
+  if (abuse) {
+    lines.push('Looks like a spam bot. Real visitors confirm their email. Bots using other people\'s addresses cannot.');
+    lines.push(snap.confirm_sent > 0
+      ? `${n(snap.confirm_sent)} confirmation emails still reached addresses the bot typed in. The daily limit keeps that number capped.`
+      : 'No email reached the addresses the bot typed in.');
+  }
+  if (snap.confirm_failed > 0) {
+    lines.push('Action: confirmation emails are failing, so real visitors are not getting their link. Fix the sending mailbox login.');
+  } else if (abuse) {
+    lines.push('No action needed. The limits are holding.');
+  }
+  return lines.join('\n');
+}
+
+module.exports = { evaluateAbuse, formatAbuseReport, quotaAlertText, sendFailureAlertText, ABUSE_MIN_SUBMISSIONS, ABUSE_MIN_CONFIRM_RATE, createEstimateHandlers, LIMITS, FIELD_MAX, canonicalAddress, readFields, sha256, newToken, TOKEN_RE };

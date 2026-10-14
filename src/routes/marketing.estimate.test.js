@@ -145,7 +145,17 @@ test('per-IP cap: one source gets at most 5 confirmation emails a day', async ()
   const ip = freshIp();
   for (let i = 0; i < 9; i++) await submit({ email: `ip${i}@example.com` }, { ip });
   assert.strictEqual(spy.sent.length, 5);
-  assert.ok(spy.alerts.some(a => /per source IP/.test(a)), 'operator is alerted when a cap trips');
+  assert.ok(spy.alerts.some(a => /One computer asked for more than 5 confirmation emails/.test(a)), 'operator is alerted when a cap trips');
+});
+
+test('routine limits alert once a day, not once per bot IP', async () => {
+  reset();
+  for (let k = 0; k < 4; k++) {
+    const ip = freshIp();
+    for (let i = 0; i < 7; i++) await submit({ email: `noise${k}x${i}@example.com` }, { ip });
+  }
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(spy.alerts.filter(a => /One computer asked for more than 5/.test(a)).length, 1, 'four tripped IPs, one alert');
 });
 
 test('global cap: a distributed flood (many IPs, many addresses) sends at most 100 emails', async () => {
@@ -154,7 +164,7 @@ test('global cap: a distributed flood (many IPs, many addresses) sends at most 1
   assert.strictEqual(spy.sent.length, 100);
   assert.strictEqual(spy.model.length, 0, 'flood causes zero model calls');
   assert.ok(store.leads.some(l => l.confirm_email_status === 'quota_blocked'));
-  assert.strictEqual(spy.alerts.filter(a => /\(global\)/.test(a)).length, 1, 'one alert per window, not one per request');
+  assert.strictEqual(spy.alerts.filter(a => /reached its limit of 100 confirmation emails/.test(a)).length, 1, 'one alert per window, not one per request');
 });
 
 test('AI cap: when the daily model budget is spent, a verified visitor still gets the estimate without a model call', async () => {
@@ -322,6 +332,23 @@ test('abuse evaluator flags the incident signature and stays quiet for normal tr
   assert.ok(evaluateAbuse(incident).some(f => /SUSPECTED ABUSE/.test(f)));
   assert.deepStrictEqual(evaluateAbuse({ submitted: 4, confirm_sent: 4, confirm_failed: 0, quota_blocked: 0, verified: 2, tripped: [] }), []);
   assert.ok(evaluateAbuse({ submitted: 3, confirm_sent: 0, confirm_failed: 3, quota_blocked: 0, verified: 0, tripped: [] }).some(f => /failed to send/.test(f)));
+});
+
+test('operator alerts are plain English: what happened, and whether to act', () => {
+  const { formatAbuseReport, quotaAlertText, sendFailureAlertText } = require('../lib/estimateFlow');
+  const bot = formatAbuseReport({ submitted: 1429, confirm_sent: 0, confirm_failed: 67, quota_blocked: 1362, verified: 0, tripped: [] });
+  assert.match(bot, /1,429 form submissions/);
+  assert.match(bot, /Looks like a spam bot/);
+  assert.match(bot, /No email reached the addresses the bot typed in/);
+  assert.match(bot, /Action: .*Fix the sending mailbox login/);
+  assert.doesNotMatch(bot, /bucket|quota-blocked|SUSPECTED/, 'no internal jargon');
+  const holding = formatAbuseReport({ submitted: 2000, confirm_sent: 100, confirm_failed: 0, quota_blocked: 1900, verified: 0, tripped: [] });
+  assert.match(holding, /100 confirmation emails still reached addresses the bot typed in/);
+  assert.match(holding, /No action needed/);
+  assert.match(quotaAlertText('confirmation emails per source IP', 5), /No action needed/);
+  assert.match(quotaAlertText('confirmation emails per day \(global\)', 100), /Action:/);
+  assert.match(sendFailureAlertText('Invalid login: 535 Authentication credentials invalid'), /rejected its password/);
+  assert.match(sendFailureAlertText('<script>'), /&lt;script&gt;/, 'raw errors are escaped for Telegram HTML');
 });
 
 test('sendTelegramStrict rejects when Telegram is not configured (so "sent" means delivered)', async () => {
