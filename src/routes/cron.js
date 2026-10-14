@@ -883,6 +883,7 @@ router.post('/data-anomaly-check', cronAuth, async (req, res) => {
     const result = await runAnomalyCheck({
       store: createPgDataStore(pool),
       quota: (b, w, l) => quotaStore.consumeQuota(b, w, l),
+      release: (b, w) => quotaStore.releaseQuota(b, w),
       alert: sendTelegramStrict,
     });
     console.log('[data-health]', JSON.stringify(result));

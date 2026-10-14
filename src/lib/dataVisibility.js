@@ -53,7 +53,14 @@ function readFilters(query) {
   const one = (v) => (typeof v === 'string' ? v : undefined); // repeated keys arrive as arrays
   const pageRaw = one(q.page);
   const page = pageRaw === undefined ? 1 : (/^\d{1,4}$/.test(pageRaw) ? Number(pageRaw) : NaN);
-  const date = (v) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) ? v : null);
+  // A real calendar date only: Date.parse rolls 2026-02-31 into March, so the parts must
+  // round-trip exactly or Postgres would reject the cast and the page would fail.
+  const date = (v) => {
+    const m = typeof v === 'string' && /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+    if (!m) return null;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3] ? v : null;
+  };
   const tri = (v) => (v === 'yes' || v === 'no' ? v : 'any');
   return {
     page,
@@ -188,18 +195,26 @@ async function dataHealthSnapshot(store, log = console) {
 
 // ─── Hourly anomaly check ───────────────────────────────────────────────────
 // Alerts carry table labels and counts only: no record contents, no organization.
-async function runAnomalyCheck({ store, quota, alert, log = console }) {
-  const result = { spikes: [], unregistered: [], unavailable: [], alerted: [], alertErrors: [] };
+async function runAnomalyCheck({ store, quota, release, alert, log = console }) {
+  const result = { spikes: [], unregistered: [], unavailable: [], missing: [], alerted: [], alertErrors: [] };
+  // The suppression window counts only alerts that were delivered. A failed delivery
+  // gives the slot back, so the next hourly run tries again instead of going quiet.
   const send = async (key, windowMs, text) => {
     const q = await quota(`alert:${key}`, windowMs, 1);
     if (!q.allowed) return;
     try { await alert(text); result.alerted.push(key); }
-    catch (e) { result.alertErrors.push(`${key}: ${e.message}`); log.error('[data-health] ALERT NOT DELIVERED:', key, e.message); }
+    catch (e) {
+      result.alertErrors.push(`${key}: ${e.message}`);
+      log.error('[data-health] ALERT NOT DELIVERED:', key, e.message);
+      await release(`alert:${key}`, windowMs).catch(err =>
+        log.error('[data-health] could not release alert slot, next retry may be suppressed:', key, err.message));
+    }
   };
 
   const snap = await dataHealthSnapshot(store, log);
   for (const r of snap.rows) {
     if (r.status === 'unavailable') result.unavailable.push(r.name);
+    if (r.status === 'missing') result.missing.push(r.name);
     if (r.status !== 'spike') continue;
     result.spikes.push(r.name);
     const avg = (r.prior7d / (7 * 24)).toFixed(1);
@@ -222,12 +237,46 @@ async function runAnomalyCheck({ store, quota, alert, log = console }) {
       `${result.unavailable.length} table(s) did not answer within ${LIMITS.STATEMENT_TIMEOUT_MS / 1000} seconds or returned an error. Their growth is not being watched right now.\n` +
       `Action: check the server log for "[data-health] count failed".`);
   }
+  if (result.missing.length) {
+    await send('data-missing', HOUR,
+      `<b>Data health: expected tables are missing</b>\n` +
+      `${result.missing.length} table(s) the platform relies on do not exist in the database. A failed upgrade or an accidental removal can cause this, and features that use them will fail.\n` +
+      `Action: check the latest deploy and the server log for database errors.`);
+  }
   return result;
+}
+
+// ─── Reveal: rolling limit and audit in one step ────────────────────────────
+// The audit log is the counter: reveals by this operator in the last 60 minutes.
+// A per-operator advisory lock makes check-and-record atomic, so parallel requests
+// cannot slip past the limit. If the entry is not written, nothing is revealed.
+async function recordRevealIfAllowed(pool, { userId, actorEmail, targetId, ip, limit }) {
+  const c = await pool.connect();
+  try {
+    await c.query('BEGIN');
+    await c.query(`SELECT pg_advisory_xact_lock(hashtext('data-reveal:' || $1::text))`, [userId]);
+    const { rows } = await c.query(
+      `SELECT count(*)::int AS n FROM audit_log
+        WHERE user_id = $1 AND action = 'form_submissions.reveal' AND created_at > now() - interval '60 minutes'`,
+      [userId]);
+    if (rows[0].n >= limit) { await c.query('ROLLBACK'); return { allowed: false }; }
+    await c.query(
+      `INSERT INTO audit_log (client_id, user_id, actor_email, action, target_type, target_id, detail, ip)
+       VALUES (NULL, $1, $2, 'form_submissions.reveal', 'platform_lead', $3, '{}', $4)`,
+      [userId, actorEmail, String(targetId), ip]);
+    await c.query('COMMIT');
+    return { allowed: true };
+  } catch (err) {
+    await c.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    c.release();
+  }
 }
 
 const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 module.exports = {
-  LIMITS, createPgDataStore, dataHealthSnapshot, runAnomalyCheck, isSpike,
+  LIMITS, createPgDataStore, dataHealthSnapshot, runAnomalyCheck, recordRevealIfAllowed, isSpike,
   readFilters, pageAllowed, maskEmail, maskPhone, looksLikeSpam,
 };

@@ -76,6 +76,29 @@ test('AC14: form submission queries, spam and confirmed filters, and counts agai
   assert.strictEqual(await store.getSubmission(999999), null);
 });
 
+test('Codex P2: the rolling reveal limit holds under 40 parallel requests', opts, async () => {
+  const { rows } = await pool.query(`INSERT INTO users (email, password_hash, role) VALUES ('reveal-op@example.test', 'x', 'operator') RETURNING id`);
+  const userId = rows[0].id;
+  const results = await Promise.all(Array.from({ length: 40 }, (_, i) =>
+    dv.recordRevealIfAllowed(pool, { userId, actorEmail: 'reveal-op@example.test', targetId: i + 1, ip: null, limit: 30 })));
+  assert.strictEqual(results.filter(r => r.allowed).length, 30);
+  const n = (await pool.query(`SELECT count(*)::int AS n FROM audit_log WHERE user_id = $1 AND action = 'form_submissions.reveal'`, [userId])).rows[0].n;
+  assert.strictEqual(n, 30, 'one audit entry per allowed reveal, none for refused ones');
+  await pool.query(`UPDATE audit_log SET created_at = now() - interval '61 minutes' WHERE user_id = $1`, [userId]);
+  assert.strictEqual((await dv.recordRevealIfAllowed(pool, { userId, actorEmail: 'x', targetId: 1, ip: null, limit: 30 })).allowed, true, 'entries older than 60 minutes no longer count');
+});
+
+test('Codex P1: releasing an alert slot lets the next attempt through', opts, async () => {
+  const { createPgStore } = require('../lib/estimateStore');
+  const q = createPgStore(pool);
+  const bucket = `alert:test:${Date.now()}`;
+  assert.strictEqual((await q.consumeQuota(bucket, 6 * 3600_000, 1)).allowed, true);
+  assert.strictEqual((await q.consumeQuota(bucket, 6 * 3600_000, 1)).allowed, false);
+  await q.releaseQuota(bucket, 6 * 3600_000);
+  await q.releaseQuota(bucket, 6 * 3600_000);
+  assert.strictEqual((await q.consumeQuota(bucket, 6 * 3600_000, 1)).allowed, true);
+});
+
 test('reads cannot write: the store refuses an unregistered table name', opts, async () => {
   const store = dv.createPgDataStore(pool);
   await assert.rejects(store.tableStats('pg_shadow', false), /unregistered/);

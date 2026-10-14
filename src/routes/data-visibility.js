@@ -13,10 +13,8 @@ const jwt = require('jsonwebtoken');
 const { shell, esc } = require('../lib/layout');
 const dv = require('../lib/dataVisibility');
 
-const HOUR = 3_600_000;
-
 function createDataVisibilityRouter(deps) {
-  const { store, quota, audit, loadUser, jwtSecret, log = console } = deps;
+  const { store, audit, recordReveal, loadUser, jwtSecret, log = console } = deps;
   const router = express.Router();
 
   // Identity from the session only. Any doubt (no cookie, bad token, inactive user,
@@ -97,15 +95,6 @@ function createDataVisibilityRouter(deps) {
   router.post('/form-submissions/:id/reveal', sameOrigin, async (req, res, next) => {
     const id = req.params.id;
     if (!/^\d{1,10}$/.test(id)) return next('router');
-    let q;
-    try { q = await quota(`reveal:user:${req.user.id}:hour`, HOUR, dv.LIMITS.REVEALS_PER_HOUR); }
-    catch (err) {
-      log.error('[form-submissions] reveal quota failed:', err.message);
-      return refuse(res, 503, 'Reveal', 'The reveal limit could not be checked, so nothing is shown.', req.user);
-    }
-    if (!q.allowed) {
-      return refuse(res, 429, 'Reveal', `You have revealed ${dv.LIMITS.REVEALS_PER_HOUR} records in the last hour, which is the limit. Try again later.`, req.user);
-    }
     let rec;
     try { rec = await store.getSubmission(Number(id)); }
     catch (err) {
@@ -113,18 +102,24 @@ function createDataVisibilityRouter(deps) {
       return refuse(res, 503, 'Reveal', 'The record could not be read right now.', req.user);
     }
     if (!rec) return next('router');
-    try { await trace(req, 'form_submissions.reveal', {}, String(rec.id)); }
-    catch (err) {
-      log.error('[form-submissions] audit write failed, reveal withheld:', err.message);
+    // Rolling 60-minute limit and the audit entry, decided and written in one step.
+    let r;
+    try {
+      r = await recordReveal({ userId: req.user.id, actorEmail: req.user.email, targetId: rec.id,
+                               ip: req.ip || null, limit: dv.LIMITS.REVEALS_PER_HOUR });
+    } catch (err) {
+      log.error('[form-submissions] reveal not recorded, withheld:', err.message);
       return refuse(res, 503, 'Reveal', 'This reveal could not be recorded in the audit log, so it is not shown.', req.user);
     }
-    res.send(shell('Reveal', 'data', page(`Submission #${rec.id}`, `
-      <dl class="grid grid-cols-[120px_1fr] gap-y-2 text-sm">
-        <dt class="text-slate-500">Email</dt><dd class="font-mono break-all">${esc(rec.email)}</dd>
-        <dt class="text-slate-500">Phone</dt><dd class="font-mono">${esc(rec.phone || '—')}</dd>
-      </dl>
-      <p class="text-xs text-slate-500 mt-4">This reveal was recorded in the audit log.</p>
-      <p class="mt-6"><a class="text-blue-600 underline" href="/admin/data/form-submissions">Back to form submissions</a></p>`), { user: req.user }));
+    if (!r.allowed) {
+      return refuse(res, 429, 'Reveal', `You have revealed ${dv.LIMITS.REVEALS_PER_HOUR} records in the last 60 minutes, which is the limit. Try again later.`, req.user);
+    }
+    // The full address is on this response only. It is a self-contained page: no
+    // third-party script or stylesheet, and a policy that forbids any script at all,
+    // so nothing loaded from elsewhere can read the revealed values.
+    res.set('Content-Security-Policy',
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'");
+    res.send(renderReveal(rec));
   });
 
   return router;
@@ -250,14 +245,27 @@ function renderSubmissions(f, data) {
     </p>`);
 }
 
+function renderReveal(rec) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>Submission #${esc(rec.id)} | Data</title>
+<style>body{font-family:Arial,Helvetica,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:40px 16px}
+main{max-width:560px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:24px}
+h1{font-size:18px;margin:0 0 16px}dl{display:grid;grid-template-columns:90px 1fr;gap:8px;margin:0}
+dt{color:#64748b}dd{margin:0;font-family:monospace;word-break:break-all}
+p{font-size:13px;color:#64748b;margin:16px 0 0}a{color:#2563eb}</style></head>
+<body><main><h1>Submission #${esc(rec.id)}</h1>
+<dl><dt>Email</dt><dd>${esc(rec.email)}</dd><dt>Phone</dt><dd>${esc(rec.phone || '—')}</dd></dl>
+<p>This reveal was recorded in the audit log.</p>
+<p><a href="/admin/data/form-submissions">Back to form submissions</a></p></main></body></html>`;
+}
+
 // ─── Production wiring ──────────────────────────────────────────────────────
 function defaultRouter() {
   const { pool } = require('../db');
-  const { createPgStore } = require('../lib/estimateStore');
-  const quotaStore = createPgStore(pool);
   return createDataVisibilityRouter({
     store: dv.createPgDataStore(pool),
-    quota: (b, w, l) => quotaStore.consumeQuota(b, w, l),
+    recordReveal: (args) => dv.recordRevealIfAllowed(pool, args),
     // Strict: throws when the trace cannot be written, so the caller withholds the data.
     audit: async ({ userId, actorEmail, action, targetType, targetId, detail, ip }) => {
       await pool.query(
