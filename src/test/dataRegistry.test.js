@@ -103,6 +103,13 @@ test('Codex P1/P2: alert gate is a rolling interval, and a released claim lets t
   assert.strictEqual(parallel.filter(Boolean).length, 1, 'ten parallel claims, one alert');
 });
 
+test('Codex round 3 P2: a delivered data-health alert is not reported as a tripped spam limit', opts, async () => {
+  const { createPgStore } = require('../lib/estimateStore');
+  await dv.createAlertGate(pool).claim(`report:${Date.now()}`, 3600_000);
+  const snap = await createPgStore(pool).abuseSnapshot();
+  assert.ok(!snap.tripped.some(t => String(t.bucket).startsWith('alert-sent:')), JSON.stringify(snap.tripped));
+});
+
 test('reads cannot write: the store refuses an unregistered table name', opts, async () => {
   const store = dv.createPgDataStore(pool);
   await assert.rejects(store.tableStats('pg_shadow', false), /unregistered/);

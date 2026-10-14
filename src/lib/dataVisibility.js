@@ -264,7 +264,9 @@ function createAlertGate(pool) {
           [bucket(key), intervalMs]);
         if (recent.rowCount) { await c.query('ROLLBACK'); return null; }
         const { rows } = await c.query(
-          `INSERT INTO form_quota (bucket, window_start, count, alerted_at) VALUES ($1, clock_timestamp(), 1, now())
+          // alerted_at stays NULL: the form abuse report reads non-null alerted_at as a
+          // tripped spam limit, and these rows are not one.
+          `INSERT INTO form_quota (bucket, window_start, count) VALUES ($1, clock_timestamp(), 1)
            RETURNING window_start::text AS at`, [bucket(key)]);
         await c.query('COMMIT');
         // As text: a JS Date keeps milliseconds, the column keeps microseconds, and a
