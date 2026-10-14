@@ -22,7 +22,7 @@ const { sendTelegram, sendTelegramStrict, notifyHotReply, notifyDailySummary } =
 const { runDueAgents } = require('../lib/agents/scheduler');
 const { createPgStore } = require('../lib/estimateStore');
 const { evaluateAbuse, formatAbuseReport } = require('../lib/estimateFlow');
-const { createPgDataStore, runAnomalyCheck } = require('../lib/dataVisibility');
+const { createPgDataStore, createAlertGate, runAnomalyCheck } = require('../lib/dataVisibility');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -879,11 +879,9 @@ router.post('/form-abuse-report', cronAuth, async (req, res) => {
  */
 router.post('/data-anomaly-check', cronAuth, async (req, res) => {
   try {
-    const quotaStore = createPgStore(pool);
     const result = await runAnomalyCheck({
       store: createPgDataStore(pool),
-      quota: (b, w, l) => quotaStore.consumeQuota(b, w, l),
-      release: (b, w) => quotaStore.releaseQuota(b, w),
+      gate: createAlertGate(pool),
       alert: sendTelegramStrict,
     });
     console.log('[data-health]', JSON.stringify(result));

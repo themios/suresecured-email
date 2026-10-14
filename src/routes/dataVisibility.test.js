@@ -55,7 +55,16 @@ async function quota(bucket, windowMs, limit) {
   return { allowed: n <= limit, count: n, firstDenial: n === limit + 1 };
 }
 async function audit(e) { if (state.auditFails) throw new Error('db down'); spy.audits.push({ ...e, at: state.now }); }
-async function release(bucket) { spy.released.push(bucket); quotaCounts.set(bucket, Math.max(0, (quotaCounts.get(bucket) || 0) - 1)); }
+// Same contract as createAlertGate: rolling interval from the last delivered alert.
+const sentAt = new Map();
+const gate = {
+  async claim(key, intervalMs) {
+    const last = sentAt.get(key);
+    if (last != null && last > state.now - intervalMs) return null;
+    sentAt.set(key, state.now); return { at: state.now };
+  },
+  async release(key, claim) { spy.released.push(key); if (sentAt.get(key) === claim.at) sentAt.delete(key); },
+};
 // Same contract as recordRevealIfAllowed: rolling 60 minutes counted from the audit trail.
 async function recordReveal({ userId, actorEmail, targetId, ip, limit }) {
   if (state.auditFails) throw new Error('db down');
@@ -83,7 +92,7 @@ test.after(() => server.close());
 function reset() {
   for (const k of Object.keys(spy)) spy[k].length = 0;
   Object.assign(state, { auditFails: false, schemaExtra: [], schemaDrop: [], failTable: null, spikeTable: null, dbDown: false, now: Date.now() });
-  quotaCounts.clear();
+  quotaCounts.clear(); sentAt.clear();
 }
 const get = (path, cookie, headers = {}) => fetch(base + path, { headers: { ...(cookie ? { cookie } : {}), ...headers }, redirect: 'manual' });
 const post = (path, cookie, headers = {}) => fetch(base + path, { method: 'POST', headers: { ...(cookie ? { cookie } : {}), ...headers }, redirect: 'manual' });
@@ -240,7 +249,7 @@ test('AC12: a count that fails shows Unavailable, never 0', async () => {
 
 test('AC9: a spike alerts once, with labels and counts only; a rerun within 6 hours is silent', async () => {
   reset(); state.spikeTable = 'platform_leads';
-  const deps = { store, quota, release, alert: async (t) => spy.alerts.push(t), log: { error() {} } };
+  const deps = { store, gate, alert: async (t) => spy.alerts.push(t), log: { error() {} } };
   const r1 = await dv.runAnomalyCheck(deps);
   assert.deepStrictEqual(r1.spikes, ['platform_leads']);
   assert.strictEqual(spy.alerts.length, 1);
@@ -251,9 +260,36 @@ test('AC9: a spike alerts once, with labels and counts only; a rerun within 6 ho
   assert.strictEqual(spy.alerts.length, 1, 'no repeat inside the window');
 });
 
+test('Codex P2: spike suppression is a rolling 6 hours from the last delivered alert', async () => {
+  reset(); state.spikeTable = 'platform_leads';
+  const deps = { store, gate, alert: async (t) => spy.alerts.push(t), log: { error() {} } };
+  await dv.runAnomalyCheck(deps);
+  state.now += 60 * 60_000;        // one hour later, across any clock boundary
+  await dv.runAnomalyCheck(deps);
+  state.now += 4 * 60 * 60_000;    // five hours after the alert
+  await dv.runAnomalyCheck(deps);
+  assert.strictEqual(spy.alerts.length, 1, 'still inside the 6 hours');
+  state.now += 61 * 60_000;        // just past six hours
+  await dv.runAnomalyCheck(deps);
+  assert.strictEqual(spy.alerts.length, 2);
+});
+
+test('Codex P1: data pages load nothing from another server and forbid script', async () => {
+  reset();
+  for (const p of PATHS) {
+    const res = await get(p, cookieFor(1));
+    const html = await res.text();
+    assert.ok(!/<script/i.test(html), `${p}: no script tag`);
+    assert.ok(!/(src|href)="(https?:)?\/\//i.test(html), `${p}: no third-party resource`);
+    const csp = res.headers.get('content-security-policy') || '';
+    assert.match(csp, /default-src 'none'/, p);
+    assert.ok(!/script-src/.test(csp), `${p}: no script source allowed`);
+  }
+});
+
 test('AC10: normal traffic sends nothing', async () => {
   reset();
-  const r = await dv.runAnomalyCheck({ store, quota, release, alert: async (t) => spy.alerts.push(t), log: { error() {} } });
+  const r = await dv.runAnomalyCheck({ store, gate, alert: async (t) => spy.alerts.push(t), log: { error() {} } });
   assert.deepStrictEqual(r.spikes, []);
   assert.strictEqual(spy.alerts.length, 0);
 });
@@ -268,7 +304,7 @@ test('AC9: spike rule needs both more than 50 an hour and more than 5x the 7-day
 
 test('AC11: an unregistered table and an unreadable count each alert; a failed delivery is reported', async () => {
   reset(); state.schemaExtra = ['mystery_table']; state.failTable = 'orders';
-  const r = await dv.runAnomalyCheck({ store, quota, release, alert: async () => { throw new Error('telegram 401'); }, log: { error() {} } });
+  const r = await dv.runAnomalyCheck({ store, gate, alert: async () => { throw new Error('telegram 401'); }, log: { error() {} } });
   assert.deepStrictEqual(r.unregistered, ['mystery_table']);
   assert.deepStrictEqual(r.unavailable, ['orders']);
   assert.strictEqual(r.alertErrors.length, 2, 'undelivered alerts are reported, not swallowed');
@@ -277,10 +313,10 @@ test('AC11: an unregistered table and an unreadable count each alert; a failed d
 test('Codex P1: a failed alert gives its slot back, so the next hourly run retries', async () => {
   reset(); state.spikeTable = 'platform_leads';
   let fail = true;
-  const deps = { store, quota, release, alert: async (t) => { if (fail) throw new Error('telegram timeout'); spy.alerts.push(t); }, log: { error() {} } };
+  const deps = { store, gate, alert: async (t) => { if (fail) throw new Error('telegram timeout'); spy.alerts.push(t); }, log: { error() {} } };
   const r1 = await dv.runAnomalyCheck(deps);
   assert.strictEqual(r1.alertErrors.length, 1);
-  assert.deepStrictEqual(spy.released, ['alert:data-spike:platform_leads']);
+  assert.deepStrictEqual(spy.released, ['data-spike:platform_leads']);
   fail = false;
   const r2 = await dv.runAnomalyCheck(deps);
   assert.deepStrictEqual(r2.alerted, ['data-spike:platform_leads'], 'retried and delivered on the next run');
@@ -289,7 +325,7 @@ test('Codex P1: a failed alert gives its slot back, so the next hourly run retri
 
 test('Codex P1: a registered table missing from the database alerts', async () => {
   reset(); state.schemaDrop = ['orders'];
-  const r = await dv.runAnomalyCheck({ store, quota, release, alert: async (t) => spy.alerts.push(t), log: { error() {} } });
+  const r = await dv.runAnomalyCheck({ store, gate, alert: async (t) => spy.alerts.push(t), log: { error() {} } });
   assert.deepStrictEqual(r.missing, ['orders']);
   assert.strictEqual(spy.alerts.length, 1);
   assert.match(spy.alerts[0], /expected tables are missing/);
@@ -297,7 +333,7 @@ test('Codex P1: a registered table missing from the database alerts', async () =
 
 test('AC11: when the database is down the check throws so the cron endpoint reports failure', async () => {
   reset(); state.dbDown = true;
-  await assert.rejects(dv.runAnomalyCheck({ store, quota, release, alert: async () => {}, log: { error() {} } }));
+  await assert.rejects(dv.runAnomalyCheck({ store, gate, alert: async () => {}, log: { error() {} } }));
 });
 
 test('filters accept only known values', () => {

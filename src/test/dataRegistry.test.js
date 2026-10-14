@@ -88,15 +88,19 @@ test('Codex P2: the rolling reveal limit holds under 40 parallel requests', opts
   assert.strictEqual((await dv.recordRevealIfAllowed(pool, { userId, actorEmail: 'x', targetId: 1, ip: null, limit: 30 })).allowed, true, 'entries older than 60 minutes no longer count');
 });
 
-test('Codex P1: releasing an alert slot lets the next attempt through', opts, async () => {
-  const { createPgStore } = require('../lib/estimateStore');
-  const q = createPgStore(pool);
-  const bucket = `alert:test:${Date.now()}`;
-  assert.strictEqual((await q.consumeQuota(bucket, 6 * 3600_000, 1)).allowed, true);
-  assert.strictEqual((await q.consumeQuota(bucket, 6 * 3600_000, 1)).allowed, false);
-  await q.releaseQuota(bucket, 6 * 3600_000);
-  await q.releaseQuota(bucket, 6 * 3600_000);
-  assert.strictEqual((await q.consumeQuota(bucket, 6 * 3600_000, 1)).allowed, true);
+test('Codex P1/P2: alert gate is a rolling interval, and a released claim lets the next attempt through', opts, async () => {
+  const gate = dv.createAlertGate(pool);
+  const key = `test:${Date.now()}`;
+  const first = await gate.claim(key, 6 * 3600_000);
+  assert.ok(first);
+  assert.strictEqual(await gate.claim(key, 6 * 3600_000), null, 'suppressed inside the interval');
+  await gate.release(key, first);
+  const again = await gate.claim(key, 6 * 3600_000);
+  assert.ok(again, 'released claim admits the next attempt');
+  await pool.query(`UPDATE form_quota SET window_start = now() - interval '6 hours 1 minute' WHERE bucket = $1`, [`alert-sent:${key}`]);
+  assert.ok(await gate.claim(key, 6 * 3600_000), 'due again once the interval has passed');
+  const parallel = await Promise.all(Array.from({ length: 10 }, () => gate.claim(`${key}:p`, 3600_000)));
+  assert.strictEqual(parallel.filter(Boolean).length, 1, 'ten parallel claims, one alert');
 });
 
 test('reads cannot write: the store refuses an unregistered table name', opts, async () => {

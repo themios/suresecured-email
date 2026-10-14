@@ -28,17 +28,6 @@ function createPgStore(pool) {
       return { allowed: false, count, firstDenial: flagged.rowCount === 1 };
     },
 
-    // Undo one consumeQuota in the current window. Used when the action the quota
-    // guarded (an alert) did not happen, so the next attempt is not suppressed.
-    async releaseQuota(bucket, windowMs) {
-      await pool.query(
-        `UPDATE form_quota SET count = GREATEST(count - 1, 0), alerted_at = NULL
-          WHERE bucket = $1
-            AND window_start = to_timestamp(floor(extract(epoch FROM now()) / $2::double precision) * $2::double precision)`,
-        [bucket, windowMs / 1000]
-      );
-    },
-
     async insertLead(f) {
       const { rows } = await pool.query(
         `INSERT INTO platform_leads

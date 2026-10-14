@@ -195,19 +195,19 @@ async function dataHealthSnapshot(store, log = console) {
 
 // ─── Hourly anomaly check ───────────────────────────────────────────────────
 // Alerts carry table labels and counts only: no record contents, no organization.
-async function runAnomalyCheck({ store, quota, release, alert, log = console }) {
+async function runAnomalyCheck({ store, gate, alert, log = console }) {
   const result = { spikes: [], unregistered: [], unavailable: [], missing: [], alerted: [], alertErrors: [] };
-  // The suppression window counts only alerts that were delivered. A failed delivery
-  // gives the slot back, so the next hourly run tries again instead of going quiet.
-  const send = async (key, windowMs, text) => {
-    const q = await quota(`alert:${key}`, windowMs, 1);
-    if (!q.allowed) return;
+  // Suppression is a rolling interval measured from the last DELIVERED alert. A failed
+  // delivery gives its claim back, so the next hourly run tries again.
+  const send = async (key, intervalMs, text) => {
+    const claim = await gate.claim(key, intervalMs);
+    if (!claim) return;
     try { await alert(text); result.alerted.push(key); }
     catch (e) {
       result.alertErrors.push(`${key}: ${e.message}`);
       log.error('[data-health] ALERT NOT DELIVERED:', key, e.message);
-      await release(`alert:${key}`, windowMs).catch(err =>
-        log.error('[data-health] could not release alert slot, next retry may be suppressed:', key, err.message));
+      await gate.release(key, claim).catch(err =>
+        log.error('[data-health] could not release alert claim, next retry may be suppressed:', key, err.message));
     }
   };
 
@@ -246,6 +246,44 @@ async function runAnomalyCheck({ store, quota, release, alert, log = console }) 
   return result;
 }
 
+// ─── Alert gate: rolling suppression interval ───────────────────────────────
+// One form_quota row per delivered alert, stamped with the time it was claimed.
+// "Due" means no row for this key inside the interval. Claim is atomic under an
+// advisory lock; release deletes the claim. Rows are pruned after 8 days, longer
+// than any interval used here (at most 24 hours).
+function createAlertGate(pool) {
+  const bucket = (key) => `alert-sent:${key}`;
+  return {
+    async claim(key, intervalMs) {
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [bucket(key)]);
+        const recent = await c.query(
+          `SELECT 1 FROM form_quota WHERE bucket = $1 AND window_start > now() - ($2::double precision * interval '1 millisecond')`,
+          [bucket(key), intervalMs]);
+        if (recent.rowCount) { await c.query('ROLLBACK'); return null; }
+        const { rows } = await c.query(
+          `INSERT INTO form_quota (bucket, window_start, count, alerted_at) VALUES ($1, clock_timestamp(), 1, now())
+           RETURNING window_start::text AS at`, [bucket(key)]);
+        await c.query('COMMIT');
+        // As text: a JS Date keeps milliseconds, the column keeps microseconds, and a
+        // rounded value would match nothing on release.
+        return { at: rows[0].at };
+      } catch (err) {
+        await c.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        c.release();
+      }
+    },
+    async release(key, claim) {
+      const r = await pool.query('DELETE FROM form_quota WHERE bucket = $1 AND window_start = $2::timestamptz', [bucket(key), claim.at]);
+      if (r.rowCount !== 1) throw new Error(`alert claim not found for ${key}`);
+    },
+  };
+}
+
 // ─── Reveal: rolling limit and audit in one step ────────────────────────────
 // The audit log is the counter: reveals by this operator in the last 60 minutes.
 // A per-operator advisory lock makes check-and-record atomic, so parallel requests
@@ -277,6 +315,6 @@ async function recordRevealIfAllowed(pool, { userId, actorEmail, targetId, ip, l
 const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 module.exports = {
-  LIMITS, createPgDataStore, dataHealthSnapshot, runAnomalyCheck, recordRevealIfAllowed, isSpike,
+  LIMITS, createPgDataStore, createAlertGate, dataHealthSnapshot, runAnomalyCheck, recordRevealIfAllowed, isSpike,
   readFilters, pageAllowed, maskEmail, maskPhone, looksLikeSpam,
 };
