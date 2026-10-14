@@ -8,6 +8,21 @@ on:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    # A real Postgres so database tests run in CI instead of skipping: the data registry
+    # check (every table registered) and the estimate store's atomic statements.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: sw_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/sw_test
+      ESTIMATE_TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/sw_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

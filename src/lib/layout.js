@@ -56,6 +56,11 @@ function sidebar(activePage, user) {
     { page: 'admin',     label: 'Admin',      href: '/admin',      icon: ICONS.admin },
     { page: 'settings',  label: 'Settings',   href: '/settings',   icon: ICONS.settings },
   ];
+  // Platform data pages exist only for the operator; everyone else gets 404 there,
+  // so the link is not shown to them either.
+  if (user?.role === 'operator') {
+    NAV.push({ page: 'data', label: 'Data health', href: '/admin/data/health', icon: ICONS.analytics });
+  }
 
   const userInitial = (user?.name || user?.email || 'A')[0].toUpperCase();
   const userName    = user?.name || user?.email || 'Admin';

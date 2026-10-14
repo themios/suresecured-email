@@ -16,6 +16,7 @@ const dashboardRouter = require('./routes/dashboard');
 const phonecallRouter = require('./routes/phonecall');
 const { router: analyticsRouter } = require('./routes/analytics');
 const adminRouter     = require('./routes/admin');
+const { defaultRouter: dataVisibilityRouter } = require('./routes/data-visibility');
 const portalRouter    = require('./routes/portal');
 const sequencesRouter = require('./routes/sequences');
 const leadsRouter     = require('./routes/leads');
@@ -92,7 +93,8 @@ app.use('/api/phone-call', phonecallRouter);
 // Analytics
 app.use('/analytics', analyticsRouter);
 
-// Admin
+// Admin. Operator-only data pages first; anyone else falls through to an ordinary 404.
+app.use('/admin/data', dataVisibilityRouter());
 app.use('/admin', adminRouter);
 
 // Salesperson portal
@@ -206,6 +208,8 @@ async function start() {
   cron.schedule('0 8 * * *', () => fireCron('seed-check'));
   // Public estimate form read-out + abuse flags (incident 2026-10-10) — 06:15 UTC.
   cron.schedule('15 6 * * *', () => fireCron('form-abuse-report'));
+  // Data health: alert on sudden growth in any table, or a table nobody can see — hourly.
+  cron.schedule('5 * * * *', () => fireCron('data-anomaly-check'));
 }
 
 // Only boot the server + scheduler when run directly. Tests require this module
