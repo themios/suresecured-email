@@ -21,7 +21,7 @@ const { setFirstTouchAttribution } = require('../lib/attribution');
 const { sendTelegram, sendTelegramStrict, notifyHotReply, notifyDailySummary } = require('../lib/telegram');
 const { runDueAgents } = require('../lib/agents/scheduler');
 const { createPgStore } = require('../lib/estimateStore');
-const { evaluateAbuse } = require('../lib/estimateFlow');
+const { evaluateAbuse, formatAbuseReport } = require('../lib/estimateFlow');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -853,7 +853,7 @@ router.post('/form-abuse-report', cronAuth, async (req, res) => {
     console.log('[form-abuse]', line, flags.length ? `FLAGS: ${flags.join('; ')}` : 'ok');
     let alertError = null;
     if (flags.length) {
-      try { await sendTelegramStrict(`<b>Estimate form, last 24h</b>\n${line}\n${flags.join('\n')}`); }
+      try { await sendTelegramStrict(formatAbuseReport(snap)); }
       catch (e) { alertError = e.message; console.error('[form-abuse] ALERT NOT DELIVERED:', e.message); }
     }
     // A flagged report whose alert did not arrive is a failed control: say so with 502.
