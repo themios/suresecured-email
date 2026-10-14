@@ -68,25 +68,31 @@ reverted, the test went red, the fix was restored).
 | final head | A process that died between claiming and sending an alert left it marked as sent for up to 24 hours | P2 | SILENT_FAILURE | Two-phase gate: claim expires after a 10 minute lease, delivered only after confirm |
 | final head | 46 counts ran one after another, so slow tables could delay the page and alerts by minutes | P2 | SILENT_FAILURE | 4 at a time under a 20 second budget, the rest Unavailable |
 | final head | A Reveal id above the integer range gave 503 instead of 404 | P3 | INPUT | Range bound before the read |
+| round 5 | The database test drops the schema of any non-Railway database it is pointed at | P1 | DESTRUCTIVE | Explicit opt-in, local host only, database name must end in `_test`, confirmed with the server before the drop |
+| round 5 | Manual or duplicate triggers repeat the "check could not run" alert while the database is down | P2 | SILENT_FAILURE (noise) | In-process once-an-hour fallback, cleared on failed delivery |
+| round 5 | Spike alerts sent one per table, serially, could hold the job for minutes when Telegram is slow | P2 | SILENT_FAILURE | One combined message, claims confirmed or released together |
+| round 5 | Phone values of four digits or fewer were shown whole in the masked list | P2 | PII | Short values hidden whole; same for email local parts under three characters |
 
 Review of `d3184af`: approval, no new findings. Review of the documentation head
 `6996635` (code identical) raised three further findings in unchanged code, fixed above. The thread
 "Alert when a registered table is missing" still displays because GitHub re-anchors the
 round 1 comment (created 07:26 on commit `6e75c94`). It was fixed in `35dc026`.
 
-Pattern worth noting: seven of twelve defects were SILENT_FAILURE in the monitor itself.
+Pattern worth noting: nine of sixteen defects were SILENT_FAILURE in the monitor itself.
+A second pattern: review did not converge on its own. Each pass of the same code found
+smaller defects. Five rounds ran before the owner decided the merge (hold H1).
 A detective control has its own silent failure modes and needs its own tests.
 
 ## 4. Test evidence
 
 | Evidence | Result |
 |---|---|
-| Route tests without a database (`src/routes/dataVisibility.test.js`) | 26 pass. Every acceptance criterion plus each finding. |
-| Real-database tests (`src/test/dataRegistry.test.js`) on an empty Postgres 16 built by `initDb` | 8 pass. 46 of 46 tables registered, 40 parallel reveals admit exactly 30, 10 parallel alert claims admit 1. |
+| Route tests without a database (`src/routes/dataVisibility.test.js`) | 28 pass. Every acceptance criterion plus each finding. |
+| Real-database tests (`src/test/dataRegistry.test.js`) on an empty Postgres 16 built by `initDb` | 8 pass. The test refuses to run without `ALLOW_DESTRUCTIVE_TEST_DB=1`, on a non-local host, or on a database not named `*_test` (each refusal observed). 46 of 46 tables registered, 40 parallel reveals admit exactly 30, 10 parallel alert claims admit 1. |
 | Previously skipped estimate store tests | 5 pass. They had never run in CI before this PR. |
 | Full suite, local with database | Pass, 0 failures, 0 skipped |
 | CI (GitHub Actions with Postgres service) | Pass on `d3184af`. Logs show AC13 and AC14 executed, not skipped. |
-| Mutation checks | 12, including id bound removed, snapshot made serial with no budget, and claim lease set to the full interval: operator gate widened, masking removed, registry entry removed, alert release removed, CDN script in reveal, CDN script in pages, interval check removed, `alerted_at` set, and the original routine-alert grouping (PR on form alerts). Each turned a test red. |
+| Mutation checks | 14, including short phones shown whole, failure-alert fallback removed, id bound removed, snapshot made serial with no budget, and claim lease set to the full interval: operator gate widened, masking removed, registry entry removed, alert release removed, CDN script in reveal, CDN script in pages, interval check removed, `alerted_at` set, and the original routine-alert grouping (PR on form alerts). Each turned a test red. |
 | Browser check, local copy | Both pages rendered at desktop and phone width. The spike was flagged, scam HTML shown as text, links not clickable, masking held. One reveal produced one audit row. A customer owner received the same "Cannot GET" response as a nonexistent path. |
 | Production | **Not yet verified.** See section 4b. |
 

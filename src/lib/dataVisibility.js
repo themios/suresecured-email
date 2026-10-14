@@ -32,15 +32,19 @@ function looksLikeSpam(row) {
 }
 const SPAM_SQL = `(verify_status <> 'verified' AND (business_name ~ '[Ѐ-ӿ]' OR coalesce(message, '') ~ '[Ѐ-ӿ]' OR business_name ~* 'https?://'))`;
 
+// A mask keeps a hint only when enough stays hidden: a short value is hidden whole.
+const MASK_MIN_EMAIL_LOCAL = 3;   // shorter local parts show no first letter
+const MASK_MIN_PHONE_DIGITS = 8;  // shorter numbers show no last digits
 function maskEmail(email) {
   const s = String(email || '');
   const at = s.lastIndexOf('@');
   if (at < 1) return s ? '•••' : '';
-  return `${s[0]}•••${s.slice(at)}`;
+  return at < MASK_MIN_EMAIL_LOCAL ? `•••${s.slice(at)}` : `${s[0]}•••${s.slice(at)}`;
 }
 function maskPhone(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
-  return digits ? `•••• ${digits.slice(-4)}` : '';
+  if (!digits) return '';
+  return digits.length < MASK_MIN_PHONE_DIGITS ? '••••' : `•••• ${digits.slice(-4)}`;
 }
 
 const ident = (name) => {
@@ -239,14 +243,37 @@ async function runAnomalyCheck({ store, gate, alert, log = console }) {
   for (const r of snap.rows) {
     if (r.status === 'unavailable') result.unavailable.push(r.name);
     if (r.status === 'missing') result.missing.push(r.name);
-    if (r.status !== 'spike') continue;
-    result.spikes.push(r.name);
-    const avg = (r.prior7d / (7 * 24)).toFixed(1);
-    await send(`data-spike:${r.name}`, LIMITS.ANOMALY_REPEAT_MS,
-      `<b>Data health: sudden growth in ${escHtml(r.label)}</b>\n` +
-      `${r.lastHour.toLocaleString('en-US')} new records in the last hour. The normal rate is about ${avg} an hour.\n` +
+    if (r.status === 'spike') result.spikes.push(r);
+  }
+  // All due spikes go out as ONE message, so a broad incident costs one delivery, not
+  // one per table. Each table keeps its own suppression claim.
+  const due = [];
+  for (const r of result.spikes) {
+    const claim = await gate.claim(`data-spike:${r.name}`, LIMITS.ANOMALY_REPEAT_MS);
+    if (claim) due.push({ r, claim });
+  }
+  result.spikes = result.spikes.map(r => r.name);
+  if (due.length) {
+    const lines = due.map(({ r }) =>
+      `${escHtml(r.label)}: ${r.lastHour.toLocaleString('en-US')} in the last hour (normal about ${(r.prior7d / (7 * 24)).toFixed(1)} an hour)`);
+    const text = `<b>Data health: sudden growth in ${due.length} table(s)</b>\n${lines.join('\n')}\n` +
       `This can be a bot, an import, or a fault that repeats an action.\n` +
-      `Action: open Admin, Data health, and check what arrived.`);
+      `Action: open Admin, Data health, and check what arrived.`;
+    try {
+      await alert(text);
+      for (const { r, claim } of due) {
+        result.alerted.push(`data-spike:${r.name}`);
+        await gate.confirm(`data-spike:${r.name}`, claim).catch(err =>
+          log.error('[data-health] delivered alert not confirmed, may repeat after the lease:', r.name, err.message));
+      }
+    } catch (e) {
+      result.alertErrors.push(`data-spike: ${e.message}`);
+      log.error('[data-health] ALERT NOT DELIVERED: data-spike', e.message);
+      for (const { r, claim } of due) {
+        await gate.release(`data-spike:${r.name}`, claim).catch(err =>
+          log.error('[data-health] could not release alert claim, retried after the lease:', r.name, err.message));
+      }
+    }
   }
   if (snap.unregistered.length) {
     result.unregistered = snap.unregistered;
@@ -319,6 +346,27 @@ function createAlertGate(pool) {
   };
 }
 
+// ─── "The check itself failed" alert ───────────────────────────────────────
+// Used when the database is down, so the shared alert gate cannot be used. The last
+// delivery time is kept in this process: repeated or manual triggers within the hour
+// stay quiet, and a failed delivery leaves the next attempt free to try.
+const CHECK_FAILURE_ALERT_EVERY_MS = HOUR;
+function createCheckFailureAlerter(alert, { now = () => Date.now(), log = console } = {}) {
+  let lastSent = -Infinity;
+  return async function alertCheckFailure() {
+    if (now() - lastSent < CHECK_FAILURE_ALERT_EVERY_MS) return 'suppressed';
+    lastSent = now();
+    try {
+      await alert('<b>Data health: the hourly check could not run</b>\nTable growth is not being watched until it works again.\nAction: check the server log for "[data-health] check failed".');
+      return 'sent';
+    } catch (e) {
+      lastSent = -Infinity;
+      log.error('[data-health] ALERT NOT DELIVERED (check failed):', e.message);
+      return 'failed';
+    }
+  };
+}
+
 // ─── Reveal: rolling limit and audit in one step ────────────────────────────
 // The audit log is the counter: reveals by this operator in the last 60 minutes.
 // A per-operator advisory lock makes check-and-record atomic, so parallel requests
@@ -350,6 +398,6 @@ async function recordRevealIfAllowed(pool, { userId, actorEmail, targetId, ip, l
 const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 module.exports = {
-  LIMITS, createPgDataStore, createAlertGate, dataHealthSnapshot, runAnomalyCheck, recordRevealIfAllowed, isSpike,
+  LIMITS, createPgDataStore, createAlertGate, createCheckFailureAlerter, dataHealthSnapshot, runAnomalyCheck, recordRevealIfAllowed, isSpike,
   readFilters, pageAllowed, maskEmail, maskPhone, looksLikeSpam,
 };

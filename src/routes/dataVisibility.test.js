@@ -41,7 +41,7 @@ const store = {
     spy.tableCalls.push(name);
     if (name === state.failTable) throw new Error('statement timeout');
     if (!hasCreatedAt) return { total: 3, last24h: null, last7d: null, lastHour: null, prior7d: null, newest: null };
-    if (name === state.spikeTable) return { total: 12000, last24h: 1900, last7d: 10700, lastHour: 120, prior7d: 168, newest: new Date() };
+    if (name === state.spikeTable || (state.spikeTables || []).includes(name)) return { total: 12000, last24h: 1900, last7d: 10700, lastHour: 120, prior7d: 168, newest: new Date() };
     return { total: 0, last24h: 0, last7d: 0, lastHour: 0, prior7d: 0, newest: null };
   },
   async listSubmissions(f) { spy.listCalls.push(f); return { total: LEADS.length, rows: LEADS }; },
@@ -95,7 +95,7 @@ test.after(() => server.close());
 
 function reset() {
   for (const k of Object.keys(spy)) spy[k].length = 0;
-  Object.assign(state, { auditFails: false, schemaExtra: [], schemaDrop: [], failTable: null, spikeTable: null, dbDown: false, now: Date.now() });
+  Object.assign(state, { spikeTables: [], auditFails: false, schemaExtra: [], schemaDrop: [], failTable: null, spikeTable: null, dbDown: false, now: Date.now() });
   quotaCounts.clear(); sentAt.clear();
 }
 const get = (path, cookie, headers = {}) => fetch(base + path, { headers: { ...(cookie ? { cookie } : {}), ...headers }, redirect: 'manual' });
@@ -160,6 +160,12 @@ test('AC5: emails and phones are masked, page size is 50, page 201 is refused', 
   assert.ok(!html.includes('555 123 4567'), 'full phone never on the list page');
   assert.ok(html.includes('v•••@gmail.com'));
   assert.ok(html.includes('•••• 4567'));
+  // Codex P2 (round 5): a short value is hidden whole, not shown as its own "last digits".
+  assert.strictEqual(dv.maskPhone('1234'), '••••');
+  assert.strictEqual(dv.maskPhone('ext 123456'), '••••');
+  assert.strictEqual(dv.maskPhone('+1 (555) 123-4567'), '•••• 4567');
+  assert.strictEqual(dv.maskEmail('ab@example.com'), '•••@example.com');
+  assert.strictEqual(dv.maskEmail('abc@example.com'), 'a•••@example.com');
   assert.strictEqual(dv.LIMITS.PAGE_SIZE, 50);
   const over = await get('/admin/data/form-submissions?page=201', cookieFor(1));
   assert.strictEqual(over.status, 400);
@@ -259,7 +265,7 @@ test('AC9: a spike alerts once, with labels and counts only; a rerun within 6 ho
   assert.deepStrictEqual(r1.spikes, ['platform_leads']);
   assert.strictEqual(spy.alerts.length, 1);
   assert.match(spy.alerts[0], /Website form submissions/);
-  assert.match(spy.alerts[0], /120 new records in the last hour/);
+  assert.match(spy.alerts[0], /: 120 in the last hour/);
   assert.ok(!/@|victim|Acme/.test(spy.alerts[0]), 'no record contents in an alert');
   await dv.runAnomalyCheck(deps);
   assert.strictEqual(spy.alerts.length, 1, 'no repeat inside the window');
@@ -315,6 +321,36 @@ test('Codex final P2: the health snapshot stays inside its time budget when tabl
   assert.ok(unavailable >= 30, `${unavailable} tables marked Unavailable, never shown as 0`);
   assert.strictEqual(snap.rows.length, Object.keys(REGISTRY).length, 'every table still has a row, in registry order');
   assert.strictEqual(snap.rows[0].name, Object.keys(REGISTRY)[0]);
+});
+
+test('Codex P2 (round 5): several spiking tables go out as one message; a failure releases every claim', async () => {
+  reset(); state.spikeTables = ['platform_leads', 'leads', 'orders'];
+  let fail = true, sends = 0;
+  const deps = { store, gate, alert: async (t) => { sends++; if (fail) throw new Error('telegram timeout'); spy.alerts.push(t); }, log: { error() {} } };
+  await dv.runAnomalyCheck(deps);
+  assert.strictEqual(sends, 1, 'one delivery attempt for three tables');
+  assert.deepStrictEqual(spy.released.sort(), ['data-spike:leads', 'data-spike:orders', 'data-spike:platform_leads']);
+  fail = false;
+  await dv.runAnomalyCheck(deps);
+  assert.strictEqual(spy.alerts.length, 1);
+  assert.match(spy.alerts[0], /sudden growth in 3 table/);
+  assert.match(spy.alerts[0], /Website form submissions/);
+  await dv.runAnomalyCheck(deps);
+  assert.strictEqual(spy.alerts.length, 1, 'all three confirmed, so all three are suppressed');
+});
+
+test('Codex P2 (round 5): "check could not run" alerts at most once an hour, and retries after a failed delivery', async () => {
+  let t = 0, sent = 0, fail = false;
+  const a = dv.createCheckFailureAlerter(async () => { if (fail) throw new Error('down'); sent++; }, { now: () => t, log: { error() {} } });
+  assert.strictEqual(await a(), 'sent');
+  t += 5 * 60_000;
+  assert.strictEqual(await a(), 'suppressed', 'a manual retry five minutes later stays quiet');
+  t += 56 * 60_000;
+  fail = true;
+  assert.strictEqual(await a(), 'failed');
+  fail = false;
+  assert.strictEqual(await a(), 'sent', 'a failed delivery does not start a quiet hour');
+  assert.strictEqual(sent, 2);
 });
 
 test('AC10: normal traffic sends nothing', async () => {

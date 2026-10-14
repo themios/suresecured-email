@@ -3,18 +3,32 @@
 // every table is in the data registry and that the Data health and form submission
 // queries run against the real schema.
 //
-// Uses TEST_DATABASE_URL only, never DATABASE_URL, and refuses a Railway host, so it
-// cannot touch production. Skips when the variable is unset. Run:
-//   TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/sw_test node --test src/test/dataRegistry.test.js
+// This test DROPS the whole public schema of the database it connects to. It runs
+// only when all of these hold, and otherwise skips or refuses:
+//   - TEST_DATABASE_URL is set (never DATABASE_URL)
+//   - ALLOW_DESTRUCTIVE_TEST_DB=1 is set explicitly
+//   - the URL host is a local address (localhost, 127.0.0.1, ::1)
+//   - the database the server reports (current_database()) ends in "_test"
+// Run:
+//   ALLOW_DESTRUCTIVE_TEST_DB=1 TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/sw_test node --test src/test/dataRegistry.test.js
 const test = require('node:test');
 const assert = require('node:assert');
 
 const url = process.env.TEST_DATABASE_URL;
-const unsafe = url && /railway|rlwy\.net/i.test(url);
-const opts = { skip: !url ? 'TEST_DATABASE_URL not set' : unsafe ? 'refusing a Railway database' : false };
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+function refusal() {
+  if (!url) return 'TEST_DATABASE_URL not set';
+  if (process.env.ALLOW_DESTRUCTIVE_TEST_DB !== '1') return 'ALLOW_DESTRUCTIVE_TEST_DB=1 not set (this test drops the schema)';
+  let u;
+  try { u = new URL(url); } catch { return 'TEST_DATABASE_URL is not a valid URL'; }
+  if (!LOCAL_HOSTS.has(u.hostname)) return `refusing non-local host ${u.hostname}`;
+  if (!/_test$/.test(u.pathname.replace(/^\//, ''))) return 'refusing a database whose name does not end in _test';
+  return false;
+}
+const opts = { skip: refusal() };
 
 let pool, initDb, dv, REGISTRY;
-if (url && !unsafe) {
+if (!opts.skip) {
   process.env.DATABASE_URL = url;       // db.js reads it at require time
   process.env.NODE_ENV = 'test';        // no TLS for the local test database
   ({ pool, initDb } = require('../db'));
@@ -25,6 +39,9 @@ test.after(() => pool && pool.end());
 
 test.before(async () => {
   if (opts.skip) return;
+  // The URL names a test database; confirm the server agrees before destroying anything.
+  const { rows } = await pool.query('SELECT current_database() AS db');
+  if (!/_test$/.test(rows[0].db)) throw new Error(`refusing to drop schema of database "${rows[0].db}"`);
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
   await initDb();
 });

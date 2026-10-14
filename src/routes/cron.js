@@ -22,7 +22,7 @@ const { sendTelegram, sendTelegramStrict, notifyHotReply, notifyDailySummary } =
 const { runDueAgents } = require('../lib/agents/scheduler');
 const { createPgStore } = require('../lib/estimateStore');
 const { evaluateAbuse, formatAbuseReport } = require('../lib/estimateFlow');
-const { createPgDataStore, createAlertGate, runAnomalyCheck } = require('../lib/dataVisibility');
+const { createPgDataStore, createAlertGate, runAnomalyCheck, createCheckFailureAlerter } = require('../lib/dataVisibility');
 
 function cronAuth(req, res, next) {
   const header = req.headers.authorization || '';
@@ -877,6 +877,7 @@ router.post('/form-abuse-report', cronAuth, async (req, res) => {
  * screen or check covers (spec 2026-10-14 data visibility). Alerts carry table
  * labels and counts only. A check that cannot run is reported, never silent.
  */
+const alertCheckFailure = createCheckFailureAlerter(sendTelegramStrict);
 router.post('/data-anomaly-check', cronAuth, async (req, res) => {
   try {
     const result = await runAnomalyCheck({
@@ -887,12 +888,12 @@ router.post('/data-anomaly-check', cronAuth, async (req, res) => {
     console.log('[data-health]', JSON.stringify(result));
     return res.status(result.alertErrors.length ? 502 : 200).json({ ok: !result.alertErrors.length, ...result });
   } catch (err) {
-    // The database itself may be down, so the de-duplication counter cannot be used.
-    // The schedule is hourly, which bounds this alert to once an hour.
+    // The database itself may be down, so the shared de-duplication counter cannot be
+    // used. Fallback: remember in this process when the last failure alert went out,
+    // so manual retries or duplicate triggers do not repeat it within the hour.
     console.error('[data-health] check failed:', err.message);
-    await sendTelegramStrict('<b>Data health: the hourly check could not run</b>\nTable growth is not being watched until it works again.\nAction: check the server log for "[data-health] check failed".')
-      .catch(e => console.error('[data-health] ALERT NOT DELIVERED (check failed):', e.message));
-    return res.status(500).json({ ok: false });
+    const sent = await alertCheckFailure();
+    return res.status(500).json({ ok: false, alert: sent });
   }
 });
 
