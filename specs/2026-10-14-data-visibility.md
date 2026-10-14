@@ -1,6 +1,8 @@
 # Spec: data visibility (Data health, form submissions, no hidden tables)
 
 Risk class: High (authorization, personal data, tenant isolation)
+Status: approved project-specific control under advisory mode (owner, 2026-10-14). This
+repository has not adopted SW Engineering enforcement.
 PR: to be opened
 Owner request (2026-10-14): "I think it's important to add a view of all of these 10000
 emails. Currently they are ghosts, and if I didn't ask you I would've never known. If I

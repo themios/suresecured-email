@@ -5,6 +5,26 @@ Spec: `specs/2026-10-14-data-visibility.md` (High class, H0 approved 2026-10-14)
 Mode: SW Engineering System used as advisory guidance only. Not adopted in this
 repository (no `engineering.yml`). No enforcement control was installed.
 
+Owner decisions, 2026-10-14 (conditional approval of PR 2):
+- The spec in `specs/` and the Postgres service in `.github/workflows/test.yml` are kept
+  as **approved project-specific controls under advisory mode**. They are SureSecured's
+  own controls, not adoption of SW Engineering enforcement. No `engineering.yml`, no
+  branch protection change, no new dependency, no change to the deployment process.
+- Merge and deploy approved, subject to: reconciling the reviewed commit with the PR
+  head, a controlled release, and production verification of the scheduled alert job,
+  real database counts and access behaviour (section 4b).
+- Operator role: one designated account, promoted under control and verified. Not
+  granted broadly.
+- Third-party scripts on the rest of the app (R5): separate, narrowly scoped security
+  workstream. Not part of this PR.
+- Gaps G1 to G6: candidates for SW Engineering's next control-review cycle, not
+  immediate requirements.
+
+Commit reconciliation: the code was reviewed at `d3184af`. Later commits on the branch
+change this document only. `git diff d3184af <head> -- src package.json
+package-lock.json .github migrations` is empty. CI passed on `ff71ab2`. The final head
+is re-reviewed before merge.
+
 ## 1. The originating defect
 
 | Field | Value |
@@ -64,7 +84,19 @@ A detective control has its own silent failure modes and needs its own tests.
 | CI (GitHub Actions with Postgres service) | Pass on `d3184af`. Logs show AC13 and AC14 executed, not skipped. |
 | Mutation checks | 9: operator gate widened, masking removed, registry entry removed, alert release removed, CDN script in reveal, CDN script in pages, interval check removed, `alerted_at` set, and the original routine-alert grouping (PR on form alerts). Each turned a test red. |
 | Browser check, local copy | Both pages rendered at desktop and phone width. The spike was flagged, scam HTML shown as text, links not clickable, masking held. One reveal produced one audit row. A customer owner received the same "Cannot GET" response as a nonexistent path. |
-| Production | **Not yet verified.** Not merged or deployed. See residual risk R1. |
+| Production | **Not yet verified.** See section 4b. |
+
+## 4b. Production verification (to complete after deploy)
+
+| Check | Pass condition | Result |
+|---|---|---|
+| P1 Deploy | Railway shows the merge commit deployed and SUCCESS | pending |
+| P2 Access, logged out | `/admin/data/health` and `/admin/data/form-submissions` return 404 | pending |
+| P3 Access, customer role | an owner, admin or salesperson login gets 404 | pending |
+| P4 Operator | exactly one active operator. Data health lists 46 tables, none Unavailable, no unregistered banner. | pending |
+| P5 Real counts | Website form submissions total within a few hours' inflow of the 2026-10-13 evidence (10,733 plus about 1,400 a day) | pending |
+| P6 Scheduled job | first `[data-health]` log line at minute 5 after deploy, with `ok: true` or an alert actually received | pending |
+| P7 Audit | operator views appear in `audit_log` as `data_health.view` and `form_submissions.view` | pending |
 
 ## 5. SW Engineering controls: applied and missing
 
@@ -93,6 +125,9 @@ Missing (gaps found by this work):
 | G4. No rule on alert semantics: suppression counts delivered alerts only, over a rolling interval | Four SILENT_FAILURE findings in the monitor | §8 silent failure, in spirit only |
 | G5. A skipped database test is indistinguishable from a passing one | 5 estimate store tests skipped in CI since 2026-10-10 | §6.4 requires a real database but nothing fails on a skip |
 | G6. No rule that a privileged role a feature depends on exists before release | Production has no operator account | §9 configuration before release, which names keys, not roles |
+
+Status of G1 to G6: accepted by the owner as candidates for the SW Engineering System's
+next control-review cycle. Not requirements for this project.
 
 ## 6. Residual risk
 
